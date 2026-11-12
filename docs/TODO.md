@@ -19,18 +19,19 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
   *Done when:* no `?` remains for anything tested, each with its design impact.
 - [ ] **0.6** Run `ccp-verify env` on the other surfaces available (PowerShell, Git Bash, VS Code).
   *Done when:* the environment matrix is updated.
-- [ ] **0.7** Settle the Step 1 decisions (below). *Done when:* written down here.
+- [x] **0.7** Settle the Step 1 decisions (below). *Done when:* written down here.
 
-**Gate:** facts note and decisions signed off.
+**Gate:** facts note and decisions signed off. (Only 0.6 is still open, and it does not block Step 1.)
 
-### Decisions needed before Step 1
+### Decisions for Step 1 (made)
 
-| Decision | Options | Recommendation | Chosen |
-| --- | --- | --- | --- |
-| Database migrations | Plain numbered SQL files with a small runner, or Alembic | Plain SQL | |
-| Capture client language | Port capture to Python, or keep bash | Python (Git via `subprocess`) | |
-| Retention defaults | Periods for raw transcripts and structured data | Local default for now | |
-| Extra redaction rules | Client-specific personal-data patterns | None yet | |
+| Decision | Chosen | Reason |
+| --- | --- | --- |
+| Database migrations | Plain numbered SQL files in `db/migrations/`, applied in order by a small tested runner | Readable in review; no extra dependency; the draft schema is already SQL |
+| Capture client language | Python; Git snapshots called through `subprocess` | Transcript parsing, redaction, queueing and sub-agent handling need real tests ([facts](verify/transcript-facts.md) 4-7, 17) |
+| Attachment entries (about 83% of bytes) | Store everything, de-duplicated by content hash, after redaction | Layer 1 stays complete; storage and upload shrink ([facts](verify/transcript-facts.md) 16) |
+| Retention | Keep everything for now; periods and a delete-session job in Step 5 | Real periods are not agreed yet |
+| Extra redaction rules | Standard secrets plus Aadhaar, PAN, phone, email only | No client-specific patterns yet; add as rules when known |
 
 ## Step 1: safe capture and ingestion
 
@@ -40,6 +41,9 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
 - [ ] **1.3** Real migration `001`: session, session_env, event, redaction_log, job.
   *Done when:* applies and rolls back cleanly in Docker.
 - [ ] **1.4** MinIO storage wrapper (create bucket, put/get chunk). *Done when:* round-trip test passes.
+- [ ] **1.4a** Attachment de-duplication: store each attachment body once under its content
+  hash (after redaction); the transcript line keeps a pointer. *Done when:* the same
+  attachment uploaded in two sessions is stored once and the transcript can be rebuilt exactly.
 - [ ] **1.5** Ingestion API (FastAPI): health, token auth, chunk upload, session upsert,
   index job queued. *Done when:* uploading the same chunk twice stores one copy.
 - [ ] **1.6** Idle-session closer. *Done when:* a session is marked closed after N idle minutes.
