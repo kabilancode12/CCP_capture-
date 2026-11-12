@@ -11,7 +11,8 @@ How to get a working local development environment. Commands are for PowerShell 
 | Docker Desktop | `docker info` | Must say "Server Version"; if not, start Docker Desktop |
 | Claude Code | `claude --version` | Needed only to produce real transcripts for Step 0 |
 
-Optional: `gitleaks` (secret scanning, used by pre-commit).
+Secret scanning with gitleaks runs through Docker (no separate install). Docker Desktop must be
+running when you commit.
 
 ## 2. Python environment
 
