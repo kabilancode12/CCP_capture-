@@ -11,6 +11,9 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
   results, conversation tree, compaction, sub-agents), with values masked.
 - `ccp-verify env`: description of the machine, surface, shell and account storage, with
   values hidden.
+- Database migrations (`ccp-db status|migrate|rollback`): numbered SQL files with checksums,
+  per-migration transactions and a lock; first schema `001_initial_schema` (session, session_env,
+  event, redaction_log, job). Uses the pure-Python `pg8000` driver.
 - Redaction (`ccp.redaction`): 17 rules for secrets and Indian personal data (Aadhaar with
   checksum, PAN, mobile, email); records rule and location, never the value; fails closed.
 - Settings module (`ccp.settings`): typed, validated configuration from environment variables

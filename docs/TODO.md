@@ -38,7 +38,7 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
 - [x] **1.1** Settings module (env-based config). *Done when:* one place reads config; tests cover defaults.
 - [x] **1.2** Redaction module: secret rules, Aadhaar, PAN, phone, email; records rule and
   location, never the value. *Done when:* planted fake values are always replaced.
-- [ ] **1.3** Real migration `001`: session, session_env, event, redaction_log, job.
+- [x] **1.3** Real migration `001`: session, session_env, event, redaction_log, job.
   *Done when:* applies and rolls back cleanly in Docker.
 - [ ] **1.4** MinIO storage wrapper (create bucket, put/get chunk). *Done when:* round-trip test passes.
 - [ ] **1.4a** Attachment de-duplication: store each attachment body once under its content

@@ -10,8 +10,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
 authors = [{ name = "Xenovex Technologies" }]
-# Runtime dependencies stay empty in Step 0: the verification tools use only the standard library.
-dependencies = []
+# pg8000 is a pure-Python PostgreSQL driver: no compiled library, so it also works on machines
+# where company policy blocks unsigned DLLs (psycopg's binary build is blocked there).
+dependencies = ["pg8000>=1.31,<2"]
 
 [project.optional-dependencies]
 dev = [
@@ -25,6 +26,8 @@ dev = [
 [project.scripts]
 # One command with sub-commands: `ccp-verify transcript ...` and `ccp-verify env`.
 ccp-verify = "ccp.verify.cli:main"
+# Schema migrations: `ccp-db status`, `ccp-db migrate`, `ccp-db rollback`.
+ccp-db = "ccp.db.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ccp"]
@@ -53,7 +56,15 @@ convention = "google"
 python_version = "3.11"
 strict = true
 files = ["src", "tests"]
+mypy_path = "src"
+explicit_package_bases = true
+
+# pg8000 ships no type information; its objects are treated as untyped.
+[[tool.mypy.overrides]]
+module = ["pg8000", "pg8000.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+markers = ["integration: needs the local PostgreSQL (docker compose up); skipped if unreachable"]

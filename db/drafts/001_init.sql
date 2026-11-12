@@ -1,6 +1,8 @@
 -- =====================================================================================
 -- DRAFT: initial schema for the Claude Capture Platform.   *** DO NOT APPLY YET ***
 --
+-- NOTE   : the Step 1 subset of this design is now the real migration
+--          db/migrations/001_initial_schema.sql. This file keeps the full plan for later steps.
 -- Status : draft for review. It becomes a real migration in Step 2, after the facts in
 --          docs/verify/transcript-facts.md are known.
 -- Target : PostgreSQL 16 with the pgvector extension.

@@ -186,6 +186,45 @@ class _Reader:
         self.errors.append(f"{name} must be true or false")
         return default
 
+    def raise_if_errors(self) -> None:
+        """Raise :class:`SettingsError` listing every problem found, if there were any."""
+        if self.errors:
+            raise SettingsError("Invalid settings:\n- " + "\n- ".join(self.errors))
+
+
+def _merge_env(env: Mapping[str, str] | None, env_file: Path | None) -> dict[str, str]:
+    """Combine the ``.env`` file and the environment; the environment takes precedence."""
+    merged: dict[str, str] = {}
+    if env_file is not None:
+        merged.update(read_env_file(env_file))
+    merged.update(os.environ if env is None else env)
+    return merged
+
+
+def _read_database(reader: _Reader) -> DatabaseSettings:
+    """Read the PostgreSQL group of settings."""
+    return DatabaseSettings(
+        host=reader.text("POSTGRES_HOST", "127.0.0.1"),
+        port=reader.integer("POSTGRES_PORT", 5432, 1, 65535),
+        name=reader.text("POSTGRES_DB"),
+        user=reader.text("POSTGRES_USER"),
+        password=reader.secret("POSTGRES_PASSWORD"),
+    )
+
+
+def load_database_settings(
+    env: Mapping[str, str] | None = None, env_file: Path | None = DEFAULT_ENV_FILE
+) -> DatabaseSettings:
+    """Build only the database settings.
+
+    Tools that need just the database (such as the migration runner) use this, so they do not
+    demand the storage and API variables. Arguments and errors are as in :func:`load_settings`.
+    """
+    reader = _Reader(_merge_env(env, env_file))
+    database = _read_database(reader)
+    reader.raise_if_errors()
+    return database
+
 
 def load_settings(
     env: Mapping[str, str] | None = None, env_file: Path | None = DEFAULT_ENV_FILE
@@ -205,22 +244,11 @@ def load_settings(
     Raises:
         SettingsError: If any variable is missing or invalid. The message lists all of them.
     """
-    merged: dict[str, str] = {}
-    if env_file is not None:
-        merged.update(read_env_file(env_file))
-    merged.update(os.environ if env is None else env)
-    reader = _Reader(merged)
-
+    reader = _Reader(_merge_env(env, env_file))
     settings = Settings(
-        database=DatabaseSettings(
-            host=reader.text("POSTGRES_HOST", "localhost"),
-            port=reader.integer("POSTGRES_PORT", 5432, 1, 65535),
-            name=reader.text("POSTGRES_DB"),
-            user=reader.text("POSTGRES_USER"),
-            password=reader.secret("POSTGRES_PASSWORD"),
-        ),
+        database=_read_database(reader),
         storage=StorageSettings(
-            endpoint=reader.text("MINIO_ENDPOINT", "localhost:9000"),
+            endpoint=reader.text("MINIO_ENDPOINT", "127.0.0.1:9000"),
             access_key=reader.text("MINIO_ACCESS_KEY"),
             secret_key=reader.secret("MINIO_SECRET_KEY", min_length=8),
             bucket=reader.text("MINIO_BUCKET", "ccp-raw"),
@@ -233,6 +261,5 @@ def load_settings(
             session_idle_minutes=reader.integer("CCP_SESSION_IDLE_MINUTES", 30, 1, 1440),
         ),
     )
-    if reader.errors:
-        raise SettingsError("Invalid settings:\n- " + "\n- ".join(reader.errors))
+    reader.raise_if_errors()
     return settings

@@ -6,6 +6,7 @@ from ccp.settings import (
     MIN_TOKEN_LENGTH,
     Secret,
     SettingsError,
+    load_database_settings,
     load_settings,
     read_env_file,
 )
@@ -30,9 +31,9 @@ def _load(**overrides: str) -> object:
 
 def test_defaults_are_applied_for_optional_variables() -> None:
     settings = load_settings(VALID_ENV, env_file=None)
-    assert settings.database.host == "localhost"
+    assert settings.database.host == "127.0.0.1"
     assert settings.database.port == 5432
-    assert settings.storage.endpoint == "localhost:9000"
+    assert settings.storage.endpoint == "127.0.0.1:9000"
     assert settings.storage.bucket == "ccp-raw"
     assert settings.storage.secure is False
     assert settings.api.port == 8000
@@ -144,3 +145,16 @@ def test_values_missing_from_the_environment_come_from_the_file(tmp_path: Path) 
     file = tmp_path / ".env"
     file.write_text("POSTGRES_PORT=7000\n", encoding="utf-8")
     assert load_settings(VALID_ENV, env_file=file).database.port == 7000
+
+
+def test_database_settings_can_be_loaded_alone() -> None:
+    env = {k: v for k, v in VALID_ENV.items() if k.startswith("POSTGRES_")}
+    database = load_database_settings(env, env_file=None)
+    assert (database.name, database.user, database.port) == ("ccp", "ccp", 5432)
+
+
+def test_database_settings_report_their_own_missing_variables_only() -> None:
+    with pytest.raises(SettingsError) as error:
+        load_database_settings({}, env_file=None)
+    assert "POSTGRES_DB is required" in str(error.value)
+    assert "MINIO" not in str(error.value)

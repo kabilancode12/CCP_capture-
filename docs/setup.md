@@ -78,7 +78,16 @@ docker compose --env-file .env -f infra/docker-compose.yml exec postgres psql -U
 
 Stop the services with `down`. Add `-v` to also delete all stored data.
 
-## 5. Verify the setup
+## 5. Create the database tables
+
+```powershell
+ccp-db migrate
+ccp-db status      # should show [x] for every migration
+```
+
+See [database.md](database.md) for rollback and for writing new migrations.
+
+## 6. Verify the setup
 
 ```powershell
 pytest              # all tests pass

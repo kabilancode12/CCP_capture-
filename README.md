@@ -50,6 +50,7 @@ pytest
 | Describe this machine and surface | `ccp-verify env [--out env.json]` |
 | Register the hook probe (scratch repos only) | `ccp-verify probe-settings` |
 | See which hooks fired | `ccp-verify probe-report` |
+| Apply the database schema | `ccp-db migrate` (see [docs/database.md](docs/database.md)) |
 | Run tests | `pytest` |
 | Lint and format check | `ruff check .` and `ruff format --check .` |
 | Type check | `mypy` |
@@ -67,17 +68,22 @@ ccp_V2/
 ├── src/ccp/                 Application code (installable package)
 │   ├── settings.py          Settings read from environment variables
 │   ├── redaction/           Removes secrets and personal data before upload
+│   ├── db/                  Database connection and migration runner
 │   └── verify/              Step 0 tools: transcript, environment and hook inspectors
 ├── tests/
 │   ├── unit/                Fast tests, one file per module
+│   ├── integration/         Tests that need the local PostgreSQL (skipped if it is not running)
 │   └── fixtures/            Hand-written synthetic data (never real transcripts)
 ├── infra/                   Docker Compose for local PostgreSQL and MinIO
-├── db/drafts/               Draft database schema (not applied until Step 2)
+├── db/
+│   ├── migrations/          Numbered SQL schema files, applied by `ccp-db`
+│   └── drafts/              Full planned schema (later steps)
 ├── docs/
 │   ├── architecture.md      Design and decisions
 │   ├── setup.md             Installation and first run
 │   ├── configuration.md     Every setting (environment variable) explained
 │   ├── redaction.md         What is redacted, guarantees and limits
+│   ├── database.md          Migrations: commands, writing and testing them
 │   ├── verify/              Test-session script and transcript-facts template
 │   └── reference/           Original proposal, handover, plan and diagrams
 ├── reference/poc/           The first proof of concept, kept unchanged for reference

@@ -15,7 +15,7 @@ error messages name the variable, not its value.
 
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
-| `POSTGRES_HOST` | no | `localhost` | Database host |
+| `POSTGRES_HOST` | no | `127.0.0.1` | Database host. Use `127.0.0.1`, not `localhost`: on Windows `localhost` tries IPv6 first and adds about 2 s to every connection |
 | `POSTGRES_PORT` | no | `5432` | Database port (1-65535) |
 | `POSTGRES_DB` | **yes** | | Database name |
 | `POSTGRES_USER` | **yes** | | Database user |
@@ -25,7 +25,7 @@ error messages name the variable, not its value.
 
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
-| `MINIO_ENDPOINT` | no | `localhost:9000` | `host:port`, without `http://` |
+| `MINIO_ENDPOINT` | no | `127.0.0.1:9000` | `host:port`, without `http://` |
 | `MINIO_ACCESS_KEY` | **yes** | | Access key the application uses |
 | `MINIO_SECRET_KEY` | **yes** (secret) | | Secret key, at least 8 characters |
 | `MINIO_BUCKET` | no | `ccp-raw` | Bucket for raw transcripts |
@@ -51,7 +51,7 @@ service account with access to one bucket instead of the root credentials.
 from ccp.settings import load_settings
 
 settings = load_settings()  # reads .env, then the environment; validates everything
-settings.database.host  # "localhost"
+settings.database.host  # "127.0.0.1"
 settings.database.password  # Secret(***)  - safe to log
 settings.database.password.reveal()  # the real value: use only where it is needed
 ```
