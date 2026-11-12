@@ -12,6 +12,7 @@ from typing import Protocol
 import pg8000.dbapi
 
 from ccp.db.connection import connect
+from ccp.environment import FIELD_NAMES, EnvironmentRecord
 from ccp.redaction.records import RedactionRecord
 from ccp.settings import DatabaseSettings
 
@@ -34,6 +35,21 @@ _UPSERT_REDACTION = """
     INSERT INTO redaction_log (session_id, rule_id, location, occurrences) VALUES (%s, %s, %s, %s)
     ON CONFLICT (session_id, rule_id, location) DO UPDATE SET occurrences = EXCLUDED.occurrences
 """
+
+# Insert or update the environment record. Every column is listed, with NULL for unknown ones; on
+# conflict a known value replaces the stored one and an unknown (NULL) value leaves it unchanged,
+# so partial updates merge. The column names come from the constant FIELD_NAMES, never from input.
+_UPSERT_ENVIRONMENT = (
+    "INSERT INTO session_env (session_id, "  # noqa: S608
+    + ", ".join(FIELD_NAMES)
+    + ") VALUES (%s"
+    + ", %s" * len(FIELD_NAMES)
+    + ") ON CONFLICT (session_id) DO UPDATE SET "
+    + ", ".join(f"{name} = COALESCE(EXCLUDED.{name}, session_env.{name})" for name in FIELD_NAMES)
+)
+
+# Make sure the session exists (session_env refers to it) without touching its activity.
+_ENSURE_SESSION = "INSERT INTO session (session_id) VALUES (%s) ON CONFLICT (session_id) DO NOTHING"
 
 # Close every open session that has been quiet for %s minutes, and queue one final index job for
 # each so nothing indexed earlier is stale. One statement, so it is atomic. A session that receives
@@ -73,6 +89,9 @@ class SessionRepository(Protocol):
 
     def record_redactions(self, session_id: str, records: Sequence[RedactionRecord]) -> None:
         """Store the client's redaction records. Safe to repeat: same result each time."""
+
+    def record_environment(self, session_id: str, record: EnvironmentRecord) -> None:
+        """Store or merge the session's environment record. Safe to repeat."""
 
     def ping(self) -> None:
         """Raise :class:`RepositoryError` if the database cannot be used."""
@@ -117,6 +136,27 @@ class PostgresRepository:
         except (pg8000.dbapi.Error, OSError) as error:
             connection.rollback()
             raise RepositoryError(f"saving redactions failed: {type(error).__name__}") from error
+        finally:
+            connection.close()
+
+    def record_environment(self, session_id: str, record: EnvironmentRecord) -> None:
+        """Store the environment record, merging it into any record already stored.
+
+        Fields that are known in ``record`` replace the stored values; fields that are unknown
+        leave them unchanged. The session row is created if needed. One transaction.
+        """
+        connection = self._open()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(_ENSURE_SESSION, (session_id,))
+            values = record.to_payload()
+            cursor.execute(
+                _UPSERT_ENVIRONMENT, (session_id, *(values.get(name) for name in FIELD_NAMES))
+            )
+            connection.commit()
+        except (pg8000.dbapi.Error, OSError) as error:
+            connection.rollback()
+            raise RepositoryError(f"saving environment failed: {type(error).__name__}") from error
         finally:
             connection.close()
 

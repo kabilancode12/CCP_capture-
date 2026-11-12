@@ -9,6 +9,7 @@ import pytest
 from ccp.capture.api import ApiRejectedError, ApiUnavailableError
 from ccp.capture.client import CaptureClient
 from ccp.capture.state import StateStore
+from ccp.environment import EnvironmentRecord
 from ccp.redaction.records import RedactionRecord
 from ccp.storage.attachments import MIN_EXTERNAL_BYTES
 
@@ -23,6 +24,7 @@ class FakeApi:
         self.chunks: dict[tuple[str, int], bytes] = {}  # (stream, offset) -> body
         self.attachments: dict[str, bytes] = {}
         self.redactions: list[RedactionRecord] = []
+        self.environments: list[EnvironmentRecord] = []
         self.fail_with: Exception | None = None
         self.fail_on: str | None = None  # a kind: "chunk", "attachment" or "redactions"
 
@@ -43,6 +45,11 @@ class FakeApi:
         new = digest not in self.attachments
         self.attachments[digest] = body
         return new
+
+    def put_environment(self, session_id: str, record: EnvironmentRecord) -> None:
+        self._maybe_fail("environment")
+        self.calls.append(("environment", str(len(record.to_payload()))))
+        self.environments.append(record)
 
     def post_redactions(self, session_id: str, records: Sequence[RedactionRecord]) -> None:
         self._maybe_fail("redactions")
@@ -411,3 +418,58 @@ def test_catch_up_skips_sessions_whose_transcript_is_gone(
     api.calls.clear()
     assert _client(api, state).catch_up() == {}
     assert api.calls == []
+
+
+# ---------------------------------------------------------------- the environment record
+
+
+def test_the_environment_is_sent_once_and_not_again_while_it_is_unchanged(
+    api: FakeApi, state: StateStore
+) -> None:
+    record = EnvironmentRecord(surface="terminal", os_name="Windows")
+    client = _client(api, state)
+
+    assert client.report_environment(SESSION, record) is None
+    assert client.report_environment(SESSION, record) is None  # nothing new to say
+    assert len(api.environments) == 1
+
+
+def test_a_changed_environment_is_sent_again(api: FakeApi, state: StateStore) -> None:
+    client = _client(api, state)
+    client.report_environment(SESSION, EnvironmentRecord(surface="terminal"))
+    client.report_environment(
+        SESSION, EnvironmentRecord(surface="terminal", claude_code_version="2.1.289")
+    )
+    assert len(api.environments) == 2
+
+
+def test_an_empty_environment_sends_nothing(api: FakeApi, state: StateStore) -> None:
+    assert _client(api, state).report_environment(SESSION, EnvironmentRecord()) is None
+    assert api.environments == []
+
+
+def test_a_failed_send_is_reported_and_retried_next_time(api: FakeApi, state: StateStore) -> None:
+    record = EnvironmentRecord(surface="terminal")
+    client = _client(api, state)
+
+    api.fail_with = ApiUnavailableError("down")
+    reason = client.report_environment(SESSION, record)
+    assert reason is not None and "unavailable" in reason
+    assert api.environments == []
+
+    api.fail_with = None  # the API is back: the same record is sent
+    assert client.report_environment(SESSION, record) is None
+    assert api.environments == [record]
+
+
+def test_a_refused_environment_is_reported_with_the_reason(api: FakeApi, state: StateStore) -> None:
+    api.fail_with = ApiRejectedError(422, "bad record")
+    reason = _client(api, state).report_environment(SESSION, EnvironmentRecord(surface="x"))
+    assert reason is not None and "422" in reason
+
+
+def test_the_failure_reason_never_contains_the_values(api: FakeApi, state: StateStore) -> None:
+    api.fail_with = ApiUnavailableError("down")
+    record = EnvironmentRecord(account_email="dev@example.com", hostname="laptop-1")
+    reason = _client(api, state).report_environment(SESSION, record)
+    assert "dev@example.com" not in str(reason) and "laptop-1" not in str(reason)

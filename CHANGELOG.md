@@ -25,6 +25,10 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
   results, conversation tree, compaction, sub-agents), with values masked.
 - `ccp-verify env`: description of the machine, surface, shell and account storage, with
   values hidden.
+- Environment record (`ccp-capture environment`, `PUT /v1/sessions/{id}/environment`): version,
+  surface, shells, OS, host and user, and the account are collected in two stages (process at
+  session start, transcript once it exists) and merged on the server. Personal data: see
+  docs/environment.md.
 - Capture client (`ccp-capture sync|catch-up`): reads new complete transcript lines, redacts,
   moves large attachments out, uploads chunks, attachments and redaction reports through the API,
   and saves its position only after success. Handles sub-agent files; per-stream locks; time

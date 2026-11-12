@@ -49,7 +49,7 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
 - [x] **1.6** Idle-session closer. *Done when:* a session is marked closed after N idle minutes.
 - [x] **1.7** Capture client: incremental upload by byte offset, offline queue, retry.
   *Done when:* killing the API mid-session loses nothing once it returns.
-- [ ] **1.8** Environment and account record at session start. *Done when:* `session_env` has real values.
+- [x] **1.8** Environment and account record at session start. *Done when:* `session_env` has real values.
 - [ ] **1.9** Hook handlers for the 5 hooks; SessionEnd as best-effort flush; private mode with
   logged toggles. *Done when:* private mode sends only the minimal record.
 - [ ] **1.10** Code snapshots ported from the old proof of concept. *Done when:* the old 27 checks pass.

@@ -14,6 +14,8 @@ repeat (the server answers "already stored"), so a failure halfway is harmless.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import time
 from collections.abc import Callable
@@ -24,6 +26,7 @@ from ccp.capture.api import ApiPort, ApiRejectedError, ApiUnavailableError
 from ccp.capture.pipeline import prepare_chunk
 from ccp.capture.reader import SourceLine, TranscriptError, read_complete_lines, split_into_chunks
 from ccp.capture.state import StateStore
+from ccp.environment import EnvironmentRecord
 from ccp.storage.keys import MAIN_STREAM, check_id, transcript_chunk_key
 
 logger = logging.getLogger("ccp.capture")
@@ -120,6 +123,37 @@ class CaptureClient:
             if path.is_file():
                 results[session_id] = self.sync_session(session_id, path)
         return results
+
+    def report_environment(self, session_id: str, record: EnvironmentRecord) -> str | None:
+        """Send the session's environment record, unless the server already has this exact record.
+
+        The record is sent only if it differs from what was last sent successfully (remembered as
+        a hash), so calling this at every hook costs nothing once the record is complete.
+
+        Args:
+            session_id: Claude Code's session id.
+            record: The known facts (see :mod:`ccp.capture.environment`).
+
+        Returns:
+            ``None`` on success (including "nothing to send"), otherwise a short reason that never
+            contains the record's values.
+        """
+        payload = record.to_payload()
+        if not payload:
+            return None
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        if self._state.get_marker(session_id, "environment") == digest:
+            return None  # already sent
+        try:
+            self._api.put_environment(session_id, record)
+        except ApiUnavailableError as error:
+            logger.warning("environment not sent: %s", error)
+            return "the API is unavailable; will retry on the next sync"
+        except ApiRejectedError as error:
+            logger.error("environment refused: %s", error)
+            return str(error)
+        self._state.set_marker(session_id, "environment", digest)
+        return None
 
     # ------------------------------------------------------------ one stream
 

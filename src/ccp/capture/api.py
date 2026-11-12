@@ -20,6 +20,7 @@ import urllib.request
 from collections.abc import Sequence
 from typing import Any, Protocol
 
+from ccp.environment import EnvironmentRecord
 from ccp.redaction.records import RedactionRecord
 from ccp.settings import Secret
 
@@ -56,6 +57,9 @@ class ApiPort(Protocol):
 
     def post_redactions(self, session_id: str, records: Sequence[RedactionRecord]) -> None:
         """Report where redaction rules fired."""
+
+    def put_environment(self, session_id: str, record: EnvironmentRecord) -> None:
+        """Store or merge the session's environment record."""
 
 
 class _NoRedirects(urllib.request.HTTPRedirectHandler):
@@ -107,6 +111,11 @@ class HttpApiClient:
         }
         body = json.dumps(payload).encode("utf-8")
         self._send("POST", f"/v1/sessions/{session_id}/redactions", body, "application/json")
+
+    def put_environment(self, session_id: str, record: EnvironmentRecord) -> None:
+        """Send the known fields of the environment record (``PUT .../environment``)."""
+        body = json.dumps(record.to_payload()).encode("utf-8")
+        self._send("PUT", f"/v1/sessions/{session_id}/environment", body, "application/json")
 
     def _send(self, method: str, path: str, body: bytes, content_type: str) -> dict[str, Any]:
         """Send a request and return the decoded JSON response.

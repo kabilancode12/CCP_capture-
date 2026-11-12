@@ -20,9 +20,15 @@ from starlette.applications import Starlette
 from ccp.capture.api import HttpApiClient
 from ccp.capture.cli import main as capture_main
 from ccp.capture.client import CaptureClient
+from ccp.capture.environment import (
+    HostInfo,
+    collect_process_environment,
+    collect_transcript_environment,
+)
 from ccp.capture.state import StateStore
 from ccp.db.connection import connect
 from ccp.db.migrations import discover_migrations, migrate
+from ccp.environment import EnvironmentRecord
 from ccp.ingest.app import IngestService
 from ccp.ingest.repository import PostgresRepository
 from ccp.settings import DatabaseSettings, Secret
@@ -324,3 +330,140 @@ def test_early_refusals_are_always_seen_as_refusals_never_as_network_errors(
         with pytest.raises(ApiRejectedError) as bad_id:
             HttpApiClient(api.url, Secret(TOKEN), 5.0).put_chunk("bad%20id", "main", 0, body)
         assert bad_id.value.status == 400
+
+
+# ---------------------------------------------------------------- the environment record
+
+
+def _environment_rows(database: DatabaseSettings) -> dict[str, Any]:
+    """The stored session_env row as a dictionary (empty if there is none)."""
+    connection = connect(database)
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT * FROM session_env")
+        rows = cursor.fetchall()
+        names = [column[0] for column in cursor.description]
+    finally:
+        connection.close()
+    return dict(zip(names, rows[0], strict=True)) if rows else {}
+
+
+def _fake_home(tmp_path: Path) -> Path:
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    account = {
+        "displayName": "Dev",
+        "emailAddress": "dev@example.com",
+        "organizationName": "Acme",
+        "organizationUuid": "00000000-0000-0000-0000-000000000001",
+    }
+    (home / ".claude.json").write_text(json.dumps({"oauthAccount": account}), encoding="utf-8")
+    return home
+
+
+HOST = HostInfo("Windows", "11 10.0.26200", "AMD64", "laptop-1", "dev")
+
+
+def test_the_environment_is_stored_in_two_stages_and_merged(
+    api: RunningApi, state_dir: Path, tmp_path: Path, database: DatabaseSettings
+) -> None:
+    client = _client(api, state_dir)
+    start = collect_process_environment(
+        {"CLAUDE_CODE_ENTRYPOINT": "cli", "MSYSTEM": "UCRT64"}, _fake_home(tmp_path), HOST
+    )
+
+    # Stage 1, at SessionStart: the transcript does not exist yet.
+    assert client.report_environment(SESSION, start) is None
+    first = _environment_rows(database)
+    assert first["entrypoint"] == "cli" and first["hostname"] == "laptop-1"
+    assert first["account_email"] == "dev@example.com" and first["auth_type"] == "subscription"
+    assert first["claude_code_version"] is None  # not known yet
+
+    # Stage 2, at the first Stop: the transcript says which version and shell.
+    transcript = tmp_path / "t.jsonl"
+    _write(
+        transcript,
+        {"type": "user", "version": "2.1.289"},
+        {
+            "type": "attachment",
+            "attachment": {
+                "type": "environment",
+                "snapshot": {"shell": "PowerShell (primary)", "osVersion": "Windows 11 Home"},
+            },
+        },
+    )
+    later = start.merged_with(collect_transcript_environment(transcript))
+    assert client.report_environment(SESSION, later) is None
+
+    second = _environment_rows(database)
+    assert (
+        second["claude_code_version"] == "2.1.289"
+        and second["tool_shell"] == "PowerShell (primary)"
+    )
+    assert second["os_version"] == "Windows 11 Home"  # the more precise transcript value won
+    assert second["hostname"] == "laptop-1" and second["entrypoint"] == "cli"  # earlier facts kept
+    assert _rows(database, "SELECT count(*) FROM session_env") == [(1,)]
+    assert _rows(database, "SELECT status FROM session") == [("open",)]
+
+
+def test_sending_the_same_environment_again_changes_nothing(
+    api: RunningApi, state_dir: Path, database: DatabaseSettings
+) -> None:
+    record = EnvironmentRecord(surface="terminal", os_name="Windows")
+    assert _client(api, state_dir).report_environment(SESSION, record) is None
+    before = _environment_rows(database)
+
+    # A fresh client with no memory sends it again: the stored record stays exactly the same.
+    fresh_state = state_dir.parent / "fresh-state"
+    assert _client(api, fresh_state).report_environment(SESSION, record) is None
+    assert _environment_rows(database) == before
+
+
+def test_a_partial_update_only_changes_the_fields_it_contains(
+    api: RunningApi, state_dir: Path, database: DatabaseSettings
+) -> None:
+    client = _client(api, state_dir)
+    client.report_environment(SESSION, EnvironmentRecord(surface="terminal", os_name="Windows"))
+    client.report_environment(SESSION, EnvironmentRecord(surface="vscode"))
+
+    row = _environment_rows(database)
+    assert (row["surface"], row["os_name"]) == ("vscode", "Windows")
+
+
+def test_a_malformed_environment_is_refused_and_nothing_is_stored(
+    api: RunningApi, database: DatabaseSettings
+) -> None:
+    import httpx
+
+    url = f"{api.url}/v1/sessions/{SESSION}/environment"
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+    assert httpx.put(url, json={"unknown_field": "x"}, headers=headers).status_code == 422
+    assert httpx.put(url, json={"surface": "a\nb"}, headers=headers).status_code == 422
+    assert _environment_rows(database) == {}
+    assert _rows(database, "SELECT count(*) FROM session") == [(0,)]
+
+
+def test_the_environment_command_records_where_the_session_runs(
+    api: RunningApi,
+    state_dir: Path,
+    tmp_path: Path,
+    database: DatabaseSettings,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        Path, "home", lambda: _fake_home(tmp_path)
+    )  # never read the real login file
+    monkeypatch.setenv("CCP_API_URL", api.url)
+    monkeypatch.setenv("CCP_INGEST_TOKEN", TOKEN)
+    monkeypatch.setenv("CCP_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "claude-vscode")
+
+    assert capture_main(["environment", "--session-id", SESSION]) == 0
+
+    assert f"{SESSION}: environment recorded" in capsys.readouterr().out
+    row = _environment_rows(database)
+    assert (row["entrypoint"], row["surface"]) == ("claude-vscode", "vscode")
+    assert row["account_email"] == "dev@example.com"
+
+    assert capture_main(["environment", "--session-id", SESSION]) == 0  # again: nothing to resend

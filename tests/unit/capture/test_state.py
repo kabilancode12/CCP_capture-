@@ -94,3 +94,16 @@ def test_a_stale_lock_from_a_crashed_process_is_taken_over(
 
     with state.lock("s1", "main", wait_seconds=0.1) as acquired:
         assert acquired is True
+
+
+def test_markers_are_remembered_per_session_and_name(state: StateStore) -> None:
+    assert state.get_marker("s1", "environment") is None
+    state.set_marker("s1", "environment", "abc")
+    state.set_marker("s1", "environment", "def")  # replaced
+    assert state.get_marker("s1", "environment") == "def"
+    assert state.get_marker("s2", "environment") is None
+
+
+def test_marker_names_cannot_escape_the_state_folder(state: StateStore) -> None:
+    with pytest.raises(ValueError):
+        state.set_marker("s1", "../../evil", "x")

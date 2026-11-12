@@ -81,6 +81,24 @@ content under a wrong name or overwrite another attachment: the same key always 
 
 Successful responses are `{"stored": true|false}`.
 
+### `PUT /v1/sessions/{session_id}/environment`
+
+Stores where a session ran: Claude Code version, surface, shells, operating system, user and host
+name, and the account ([environment.md](environment.md)). Send the bearer token and a JSON object
+with any of the known fields. Fields that are present replace the stored value; missing fields
+leave it unchanged, so the record can be sent in parts and repeated safely.
+
+| Status | Meaning |
+| --- | --- |
+| 200 | Stored or merged: `{"recorded": <number of fields in the request>}` |
+| 400 | Unsafe `session_id` |
+| 401 | Missing or wrong token |
+| 413 | Larger than `CCP_MAX_CHUNK_BYTES` |
+| 422 | Not JSON, empty, an unknown field, or a value that is not a short string without control characters |
+| 503 | Database temporarily unavailable: retry later |
+
+This is personal data (user name, host name, account e-mail): restrict access to it.
+
 ### `POST /v1/sessions/{session_id}/redactions`
 
 Reports where the client's redaction rules fired. Send the bearer token and

@@ -10,6 +10,7 @@ Layout::
     <state_dir>/<session_id>/<stream>.offset      the number (a plain integer)
     <state_dir>/<session_id>/<stream>.lock        exists while a sync of that stream runs
     <state_dir>/<session_id>/transcript_path      where the session transcript is (for catch-up)
+    <state_dir>/<session_id>/<name>.marker        a small remembered value (for example a hash)
 """
 
 from __future__ import annotations
@@ -56,6 +57,23 @@ class StateStore:
         path = folder / f"{check_id('stream', stream)}.offset"
         temporary = path.with_suffix(".offset.tmp")
         temporary.write_text(str(offset), encoding="utf-8")
+        os.replace(temporary, path)
+
+    def get_marker(self, session_id: str, name: str) -> str | None:
+        """Return a small remembered value (such as a hash), or ``None`` if there is none."""
+        path = self._session_dir(session_id) / f"{check_id('marker name', name)}.marker"
+        try:
+            return path.read_text(encoding="utf-8").strip() or None
+        except FileNotFoundError:
+            return None
+
+    def set_marker(self, session_id: str, name: str, value: str) -> None:
+        """Remember a small value for a session, atomically."""
+        folder = self._session_dir(session_id)
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{check_id('marker name', name)}.marker"
+        temporary = path.with_suffix(".marker.tmp")
+        temporary.write_text(value, encoding="utf-8")
         os.replace(temporary, path)
 
     def remember_transcript(self, session_id: str, transcript_path: Path) -> None:

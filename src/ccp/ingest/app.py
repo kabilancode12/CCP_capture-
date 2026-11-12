@@ -26,6 +26,13 @@ Endpoints:
     ``{"records": [{"rule_id", "location", "occurrences"}]}``. Safe to repeat. 200 with
     ``{"recorded": n}``; 400 bad id, 401, 413, 422 malformed report, 503 database down.
 
+``PUT /v1/sessions/{session_id}/environment``
+    Store where a session ran: Claude Code version, surface, shell, OS, host and user names, and
+    the account (see ``ccp.environment``). A JSON object with any of the known fields; fields that
+    are present replace the stored value, missing ones leave it unchanged, so the record can be
+    sent in parts and repeated safely. 200 with ``{"recorded": n}``; 400 bad id, 401, 413,
+    422 malformed, 503 database down. This is personal data: restrict access to it.
+
 ``PUT /v1/attachments/{digest}``
     Upload one attachment body (compact JSON) under its SHA-256 digest. Large, repeated
     attachment values are stored once, by content (see ``ccp.storage.attachments``); developers'
@@ -56,6 +63,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.types import Lifespan
 
+from ccp.environment import EnvironmentRecordError, parse_environment
 from ccp.ingest.attachments import AttachmentError, validate_attachment
 from ccp.ingest.chunks import ChunkError, validate_chunk
 from ccp.ingest.redactions import RedactionReportError, parse_report
@@ -129,6 +137,11 @@ class IngestService:
                     methods=["PUT"],
                 ),
                 Route("/v1/attachments/{digest}", self.put_attachment, methods=["PUT"]),
+                Route(
+                    "/v1/sessions/{session_id}/environment",
+                    self.put_environment,
+                    methods=["PUT"],
+                ),
                 Route(
                     "/v1/sessions/{session_id}/redactions",
                     self.post_redactions,
@@ -207,6 +220,36 @@ class IngestService:
             logger.warning("attachment %s not saved: %s", key, error)
             return _error(503, "storage temporarily unavailable")
         return JSONResponse({"stored": created}, status_code=201 if created else 200)
+
+    async def put_environment(self, request: Request) -> JSONResponse:
+        """Store or merge a session's environment record (see the module description)."""
+        if not self._is_authorised(request):
+            return await self._refuse(
+                request, 401, "missing or invalid token", {"WWW-Authenticate": "Bearer"}
+            )
+
+        session_id = request.path_params["session_id"]
+        try:
+            session_prefix(session_id)  # validates the id
+        except ValueError as error:
+            return await self._refuse(request, 400, str(error))
+
+        body = await self._read_body(request)
+        if isinstance(body, JSONResponse):
+            return body
+        try:
+            record = parse_environment(json.loads(body))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return _error(422, "environment is not valid JSON")
+        except EnvironmentRecordError as error:
+            return _error(422, str(error))
+
+        try:
+            await run_in_threadpool(self._repository.record_environment, session_id, record)
+        except RepositoryError as error:
+            logger.warning("environment for %s not saved: %s", session_id, error)
+            return _error(503, "database temporarily unavailable")
+        return JSONResponse({"recorded": len(record.to_payload())})
 
     async def post_redactions(self, request: Request) -> JSONResponse:
         """Record where the client's redaction rules fired (see the module description)."""

@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import pytest
 from starlette.testclient import TestClient
 
+from ccp.environment import EnvironmentRecord
 from ccp.ingest.app import IngestService
 from ccp.ingest.repository import RepositoryError
 from ccp.redaction.records import RedactionRecord
@@ -50,6 +51,7 @@ class FakeRepository:
     def __init__(self) -> None:
         self.recorded: list[str] = []
         self.redactions: list[tuple[str, list[RedactionRecord]]] = []
+        self.environments: list[tuple[str, EnvironmentRecord]] = []
         self.down = False
 
     def record_chunk(self, session_id: str) -> None:
@@ -61,6 +63,11 @@ class FakeRepository:
         if self.down:
             raise RepositoryError("down")
         self.redactions.append((session_id, list(records)))
+
+    def record_environment(self, session_id: str, record: EnvironmentRecord) -> None:
+        if self.down:
+            raise RepositoryError("down")
+        self.environments.append((session_id, record))
 
     def ping(self) -> None:
         if self.down:

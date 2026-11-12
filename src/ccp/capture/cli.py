@@ -2,6 +2,7 @@
 
     ccp-capture sync --session-id <id> <transcript.jsonl>   upload what is new for one session
     ccp-capture catch-up                                    upload what earlier sessions left behind
+    ccp-capture environment --session-id <id> [transcript]  record where the session runs
 
 Settings come from environment variables only (see docs/configuration.md); a ``.env`` file is
 deliberately not read. The Claude Code hooks (task 1.9) call these commands.
@@ -10,12 +11,14 @@ deliberately not read. The Claude Code hooks (task 1.9) call these commands.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from ccp.capture.api import HttpApiClient
 from ccp.capture.client import CaptureClient, StreamResult
+from ccp.capture.environment import collect_process_environment, collect_transcript_environment
 from ccp.capture.state import StateStore
 from ccp.settings import SettingsError, load_client_settings
 
@@ -28,6 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--session-id", required=True, help="Claude Code session id")
     sync.add_argument("transcript", type=Path, help="the session transcript (.jsonl)")
     commands.add_parser("catch-up", help="upload what earlier sessions left behind")
+    environment = commands.add_parser("environment", help="record where the session runs")
+    environment.add_argument("--session-id", required=True, help="Claude Code session id")
+    environment.add_argument(
+        "transcript", nargs="?", type=Path, help="the session transcript, once it exists"
+    )
     return parser
 
 
@@ -61,6 +69,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         chunk_bytes=settings.chunk_bytes,
         budget_seconds=settings.budget_seconds,
     )
+
+    if args.command == "environment":
+        record = collect_process_environment(os.environ, Path.home())
+        if args.transcript is not None:  # the transcript adds the version and the tool shell
+            record = record.merged_with(collect_transcript_environment(args.transcript))
+        problem = client.report_environment(args.session_id, record)
+        print(
+            f"{args.session_id}: environment "
+            + (f"not sent ({problem})" if problem else "recorded")
+        )
+        return 1 if problem else 0
 
     if args.command == "sync":
         sessions = {args.session_id: client.sync_session(args.session_id, args.transcript)}

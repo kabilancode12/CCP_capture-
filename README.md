@@ -52,6 +52,7 @@ pytest
 | See which hooks fired | `ccp-verify probe-report` |
 | Start the ingestion API | `ccp-ingest` (see [docs/ingestion-api.md](docs/ingestion-api.md)) |
 | Close idle sessions once | `ccp-ingest close-idle` |
+| Record where a session runs (developer machine) | `ccp-capture environment --session-id <id>` (see [docs/environment.md](docs/environment.md)) |
 | Upload a session (developer machine) | `ccp-capture sync --session-id <id> <transcript>` (see [docs/capture-client.md](docs/capture-client.md)) |
 | Apply the database schema | `ccp-db migrate` (see [docs/database.md](docs/database.md)) |
 | Run tests | `pytest` |
@@ -93,6 +94,7 @@ ccp_V2/
 │   ├── storage.md           Object storage, key layout, attachment de-duplication
 │   ├── ingestion-api.md     Endpoints, status codes and how an upload is handled
 │   ├── capture-client.md    The developer-machine client: how a sync works and its promises
+│   ├── environment.md       The environment record: fields, sources, privacy
 │   ├── verify/              Test-session script and transcript-facts template
 │   └── reference/           Original proposal, handover, plan and diagrams
 ├── reference/poc/           The first proof of concept, kept unchanged for reference

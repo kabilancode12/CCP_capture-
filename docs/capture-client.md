@@ -12,12 +12,16 @@ talks only to the API, using the standard library for HTTP.
 ```powershell
 ccp-capture sync --session-id <id> <path to the session transcript .jsonl>
 ccp-capture catch-up        # upload what earlier sessions left behind
+ccp-capture environment --session-id <id> [transcript]   # record where the session runs
 ```
 
 If the `ccp-capture` launcher is blocked on your machine, use `python -m ccp.capture` (or call
 `ccp.capture.cli.main`). Both print one line per session, for example
 `4a64fad3-...: 2 chunk(s), 3 attachment(s) uploaded`, and exit with 0 on success or 1 if anything
 failed. A failure is never fatal for Claude Code: the hook wrapper (task 1.9) always exits 0.
+
+The `environment` command collects the session's environment record (version, surface, shell,
+OS, account) and sends it; see [environment.md](environment.md).
 
 ## Settings
 
