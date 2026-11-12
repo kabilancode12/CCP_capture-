@@ -116,6 +116,9 @@ class ClientSettings:
     chunk_bytes: int  # target size of one uploaded chunk (source bytes)
     timeout_seconds: float  # per HTTP request
     budget_seconds: float  # total time one sync may take (hooks have a time limit)
+    snapshots_enabled: bool  # take code snapshots (hidden Git refs) of the working tree
+    snapshot_remote: str | None  # Git URL of the capture project for the repository
+    snapshot_remote_base: str | None  # or a group URL; the project is <base>/<repo>-capture.git
 
 
 @dataclass(frozen=True)
@@ -271,6 +274,13 @@ def load_client_settings(env: Mapping[str, str] | None = None) -> ClientSettings
     if not api_url.lower().startswith(("http://", "https://")):
         reader.errors.append("CCP_API_URL must start with http:// or https://")
     state_dir = reader.text("CCP_STATE_DIR", str(Path.home() / ".ccp" / "capture"))
+    snapshot_remote = reader.text("CCP_SNAPSHOT_REMOTE", "") or None
+    snapshot_remote_base = reader.text("CCP_SNAPSHOT_REMOTE_BASE", "") or None
+    # Snapshots write hidden refs into the developer's repository, so they are opt-in: they run
+    # when a capture project is configured, or when CCP_SNAPSHOTS=true asks for local-only refs.
+    snapshots_enabled = reader.boolean(
+        "CCP_SNAPSHOTS", default=bool(snapshot_remote or snapshot_remote_base)
+    )
     settings = ClientSettings(
         api_url=api_url,
         token=reader.secret("CCP_INGEST_TOKEN", min_length=MIN_TOKEN_LENGTH),
@@ -278,6 +288,9 @@ def load_client_settings(env: Mapping[str, str] | None = None) -> ClientSettings
         chunk_bytes=reader.integer("CCP_CLIENT_CHUNK_BYTES", 1024 * 1024, 1024, 8 * 1024 * 1024),
         timeout_seconds=float(reader.integer("CCP_CLIENT_TIMEOUT_SECONDS", 15, 1, 120)),
         budget_seconds=float(reader.integer("CCP_CLIENT_BUDGET_SECONDS", 20, 1, 600)),
+        snapshots_enabled=snapshots_enabled,
+        snapshot_remote=snapshot_remote,
+        snapshot_remote_base=snapshot_remote_base,
     )
     reader.raise_if_errors()
     return settings

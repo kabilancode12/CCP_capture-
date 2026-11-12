@@ -12,12 +12,12 @@ The capture client registers for six events and, for each, uploads what is new. 
 
 | Event | Action | Time limit given to Claude Code |
 | --- | --- | --- |
-| `SessionStart` | Record the environment; catch up on earlier sessions; sync this session if its transcript exists (resume, compact) | 30 s (uploads use at most 8 s) |
+| `SessionStart` | Record the environment; catch up on earlier sessions; sync this session if its transcript exists (resume, compact); baseline code snapshot and branch backup | 30 s (uploads use at most 8 s) |
 | `UserPromptSubmit` | Sync the session. Claude waits for this hook, so it gets the shortest upload budget (5 s) | 15 s |
-| `Stop` | Sync the session; complete the environment record once the transcript exists | 30 s (uploads use at most 20 s) |
+| `Stop` | Sync the session; complete the environment record; then take a [code snapshot](snapshots.md) if the working tree changed | 30 s (uploads use at most 15 s) |
 | `SubagentStop` | Sync the session, **except** for Claude's internal helpers (empty `agent_type`), which fire after almost every turn and have no transcript | 30 s |
 | `PreCompact` | Sync the session before it is compacted | 30 s |
-| `SessionEnd` | **Start a detached background upload and return at once.** Best effort only | 5 s |
+| `SessionEnd` | **Start a detached background flush and return at once**: it uploads what is left and takes the final code snapshot. Best effort only | 5 s |
 
 Why these choices come from what we observed (see [verify/transcript-facts.md](verify/transcript-facts.md)):
 

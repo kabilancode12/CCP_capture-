@@ -15,6 +15,10 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
 
 ### Fixed
 
+- Data sent to Git on Windows had `
+` turned into `
+` (broke branch backups, put carriage returns into
+  snapshot messages); it is now sent as bytes.
 - Every hook log line was written twice (the handler was attached to a logger and its parent).
 - The API answered 401/400 without reading the request body, which could reset the connection on
   Windows: the client saw a network error instead of the refusal. The body is now read first.
@@ -28,6 +32,11 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
   results, conversation tree, compaction, sub-agents), with values masked.
 - `ccp-verify env`: description of the machine, surface, shell and account storage, with
   values hidden.
+- Code snapshots (`ccp.capture.snapshots`, `ccp-capture snapshot|flush`): the working tree as hidden Git
+  commits after each response, built in a temporary index so the developer's repository is never
+  touched; files with secrets excluded (named in the commit message); pushed to a capture project with a
+  retry queue; opt-in. Ported the first project's checks (23 of 27 apply). Measured 2.4 s / 1.0 s on a
+  151-file repository.
 - Claude Code hooks (`ccp-capture hook`, `hook-settings`): SessionStart, UserPromptSubmit, Stop,
   SubagentStop, PreCompact and SessionEnd upload what is new. Always exit 0, print nothing, log no
   content, short upload budgets, internal-helper SubagentStop skipped, detached best-effort flush at

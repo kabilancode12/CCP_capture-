@@ -196,6 +196,7 @@ def test_client_settings_defaults() -> None:
         20.0,
     )
     assert str(settings.token) == "***"
+    assert (settings.snapshots_enabled, settings.snapshot_remote) == (False, None)  # opt-in
 
 
 def test_client_settings_from_the_environment() -> None:

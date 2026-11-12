@@ -4,7 +4,8 @@
 
 1. Work on a branch named `<type>/<short-description>`, for example `feat/redaction-module`.
 2. Keep changes small: one concern per commit and per review.
-3. Before committing, run the checks (or let pre-commit run them):
+3. Before committing, run the checks (or let pre-commit run them). `pytest -m "not slow"` is a quick run
+   (about a minute); run the full `pytest` before opening a review request:
 
    ```powershell
    ruff check . ; ruff format --check . ; mypy ; pytest

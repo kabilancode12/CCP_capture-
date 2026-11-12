@@ -17,6 +17,9 @@ ccp-capture catch-up        # upload what earlier sessions left behind
 ccp-capture environment --session-id <id> [transcript]   # record where the session runs
 ```
 
+`ccp-capture snapshot` takes a code snapshot now; `ccp-capture flush` is what the SessionEnd hook starts in the
+background (upload the rest, then snapshot). See [snapshots.md](snapshots.md).
+
 Claude Code calls `ccp-capture hook` for each event: see [hooks.md](hooks.md). `ccp-capture hook-settings`
 prints the settings that register the hooks.
 

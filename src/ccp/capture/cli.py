@@ -3,6 +3,8 @@
     ccp-capture sync --session-id <id> <transcript.jsonl>   upload what is new for one session
     ccp-capture catch-up                                    upload what earlier sessions left behind
     ccp-capture environment --session-id <id> [transcript]  record where the session runs
+    ccp-capture snapshot --session-id <id> [--cwd DIR]      take a code snapshot now
+    ccp-capture flush --session-id <id> [--cwd DIR] <file>  upload the rest, then snapshot
     ccp-capture hook                                        handle one Claude Code hook (stdin)
     ccp-capture hook-settings [--api-url URL]               print the hook registration settings
 
@@ -24,6 +26,7 @@ from ccp.capture.client import CaptureClient, StreamResult
 from ccp.capture.environment import collect_environment
 from ccp.capture.hook_runner import run_hook
 from ccp.capture.hook_settings import build_hook_settings, hook_command
+from ccp.capture.snapshots.service import snapshot_service_from
 from ccp.capture.state import StateStore
 from ccp.settings import SettingsError, load_client_settings
 
@@ -41,6 +44,14 @@ def build_parser() -> argparse.ArgumentParser:
     environment.add_argument(
         "transcript", nargs="?", type=Path, help="the session transcript, once it exists"
     )
+    flush = commands.add_parser("flush", help="upload what is left and take the final snapshot")
+    flush.add_argument("--session-id", required=True, help="Claude Code session id")
+    flush.add_argument("--cwd", type=Path, help="the directory Claude Code worked in")
+    flush.add_argument("transcript", type=Path, help="the session transcript (.jsonl)")
+    snapshot = commands.add_parser("snapshot", help="take a code snapshot of a repository now")
+    snapshot.add_argument("--session-id", required=True, help="Claude Code session id")
+    snapshot.add_argument("--cwd", type=Path, default=Path.cwd(), help="a folder in the repository")
+    snapshot.add_argument("--event", default="Manual", help="recorded in the snapshot message")
     commands.add_parser("hook", help="handle one Claude Code hook (payload on standard input)")
     hook_settings = commands.add_parser(
         "hook-settings", help="print the settings that register hooks"
@@ -81,12 +92,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SettingsError as error:
         print(error, file=sys.stderr)
         return 1
+    state = StateStore(settings.state_dir)
     client = CaptureClient(
         HttpApiClient(settings.api_url, settings.token, settings.timeout_seconds),
-        StateStore(settings.state_dir),
+        state,
         chunk_bytes=settings.chunk_bytes,
         budget_seconds=settings.budget_seconds,
     )
+    snapshots = snapshot_service_from(settings, state)
+
+    if args.command == "snapshot":
+        outcome = snapshots.snapshot(args.session_id, args.cwd, args.event)
+        print(f"{args.session_id}: " + (outcome or "snapshots are not enabled (see CCP_SNAPSHOTS)"))
+        return 0 if outcome is None or not outcome.startswith("failed") else 1
+
+    if args.command == "flush":  # started by the SessionEnd hook, in the background
+        results = client.sync_session(args.session_id, args.transcript)
+        line, flushed_ok = _summary(args.session_id, results)
+        note = snapshots.finish(args.session_id, args.cwd) if args.cwd is not None else None
+        print(line + (f"; code: {note}" if note else ""))
+        return 0 if flushed_ok else 1
 
     if args.command == "environment":
         record = collect_environment(os.environ, Path.home(), args.transcript)

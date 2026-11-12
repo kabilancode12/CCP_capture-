@@ -23,6 +23,7 @@ from ccp.capture.client import CaptureClient
 from ccp.capture.environment import collect_environment
 from ccp.capture.hooks import HookHandler, parse_payload
 from ccp.capture.process import spawn_detached
+from ccp.capture.snapshots.service import snapshot_service_from
 from ccp.capture.state import StateStore
 from ccp.settings import ClientSettings, SettingsError, load_client_settings
 
@@ -49,24 +50,19 @@ def build_handler(settings: ClientSettings, env: Mapping[str, str], home: Path) 
         budget_seconds=settings.budget_seconds,
     )
 
-    def start_flush(session_id: str, transcript: Path) -> None:
-        spawn_detached(
-            [
-                sys.executable,
-                "-m",
-                "ccp.capture",
-                "sync",
-                "--session-id",
-                session_id,
-                str(transcript),
-            ]
-        )
+    def start_flush(session_id: str, transcript: Path, cwd: Path | None) -> None:
+        # The detached process uploads what is left and takes the final code snapshot.
+        command = [sys.executable, "-m", "ccp.capture", "flush", "--session-id", session_id]
+        if cwd is not None:
+            command += ["--cwd", str(cwd)]
+        spawn_detached([*command, str(transcript)])
 
     return HookHandler(
         client,
         state,
         lambda transcript: collect_environment(env, home, transcript),
         start_flush,
+        snapshot_service_from(settings, state),
     )
 
 

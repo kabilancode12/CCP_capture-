@@ -63,7 +63,7 @@ HOOK_TIMEOUTS = {
 # How long each hook may spend uploading. Hooks that hold Claude up (start, prompt) get less.
 START_BUDGET_SECONDS = 8.0
 PROMPT_BUDGET_SECONDS = 5.0
-STOP_BUDGET_SECONDS = 20.0
+STOP_BUDGET_SECONDS = 15.0  # the code snapshot that follows the upload needs time too
 SUBAGENT_BUDGET_SECONDS = 15.0
 COMPACT_BUDGET_SECONDS = 10.0
 
@@ -80,6 +80,7 @@ class HookPayload:
         transcript: The session transcript, if the payload names a ``.jsonl`` file.
         agent_type: For SubagentStop: the agent type (empty for Claude's internal helpers).
         source: For SessionStart: ``startup``, ``resume``, ``clear`` or ``compact``.
+        cwd: The directory Claude Code works in (the repository to snapshot).
     """
 
     event: str
@@ -87,6 +88,7 @@ class HookPayload:
     transcript: Path | None
     agent_type: str | None
     source: str | None
+    cwd: Path | None = None
 
 
 def parse_payload(text: str) -> HookPayload | None:
@@ -109,13 +111,14 @@ def parse_payload(text: str) -> HookPayload | None:
     transcript = (
         Path(raw_path) if isinstance(raw_path, str) and raw_path.endswith(".jsonl") else None
     )
-    agent_type, source = data.get("agent_type"), data.get("source")
+    agent_type, source, cwd = data.get("agent_type"), data.get("source"), data.get("cwd")
     return HookPayload(
         event=event,
         session_id=session_id,
         transcript=transcript,
         agent_type=agent_type if isinstance(agent_type, str) else None,
         source=source if isinstance(source, str) else None,
+        cwd=Path(cwd) if isinstance(cwd, str) and cwd else None,
     )
 
 
@@ -134,6 +137,16 @@ class ClientPort(Protocol):
         """Send the environment record; return a reason if it could not be sent."""
 
 
+class SnapshotPort(Protocol):
+    """What the handler needs from the code-snapshot service (``None`` result = disabled)."""
+
+    def start(self, session_id: str, cwd: Path) -> str | None:
+        """At session start: retry queued pushes, baseline snapshot, branch backup."""
+
+    def snapshot(self, session_id: str, cwd: Path, event: str) -> str | None:
+        """After a response: snapshot the working tree if it changed, and push it."""
+
+
 class HookHandler:
     """Carries out the action for each hook event."""
 
@@ -142,7 +155,8 @@ class HookHandler:
         client: ClientPort,
         state: StateStore,
         collect_environment: Callable[[Path | None], EnvironmentRecord],
-        start_flush: Callable[[str, Path], None],
+        start_flush: Callable[[str, Path, Path | None], None],
+        snapshots: SnapshotPort | None = None,
     ) -> None:
         """Create the handler.
 
@@ -151,12 +165,15 @@ class HookHandler:
             state: The client's small local state (used to remember that the environment is done).
             collect_environment: Builds the environment record; given the transcript path once it
                 exists, or ``None`` before.
-            start_flush: Starts a detached upload of a session (used at SessionEnd).
+            start_flush: Starts a detached upload of a session (used at SessionEnd); given the
+                session id, the transcript and the working directory (for the final snapshot).
+            snapshots: Takes code snapshots; ``None`` means the feature is not wired in.
         """
         self._client = client
         self._state = state
         self._collect_environment = collect_environment
         self._start_flush = start_flush
+        self._snapshots = snapshots
 
     def handle(self, payload: HookPayload) -> str:
         """Do what the event calls for.
@@ -170,7 +187,7 @@ class HookHandler:
         if event == USER_PROMPT_SUBMIT:
             return self._sync(payload, PROMPT_BUDGET_SECONDS)
         if event == STOP:
-            return self._sync(payload, STOP_BUDGET_SECONDS)
+            return self._stop(payload)
         if event == PRE_COMPACT:
             return self._sync(payload, COMPACT_BUDGET_SECONDS)
         if event == SUBAGENT_STOP:
@@ -191,7 +208,20 @@ class HookHandler:
         parts.append(f"caught up {len(caught_up)} earlier session(s)")
         if self._transcript_exists(payload):  # a resumed or compacted session already has a file
             parts.append(self._sync(payload, START_BUDGET_SECONDS))
+        if self._snapshots is not None and payload.cwd is not None:
+            note = self._snapshots.start(payload.session_id, payload.cwd)
+            if note is not None:  # None means snapshots are switched off: say nothing
+                parts.append(f"code: {note}")
         return "; ".join(parts)
+
+    def _stop(self, payload: HookPayload) -> str:
+        """After a response: upload first (it matters most), then snapshot the code."""
+        summary = self._sync(payload, STOP_BUDGET_SECONDS)
+        if self._snapshots is not None and payload.cwd is not None:
+            note = self._snapshots.snapshot(payload.session_id, payload.cwd, STOP)
+            if note is not None:
+                summary += f"; code: {note}"
+        return summary
 
     def _sync(self, payload: HookPayload, budget_seconds: float) -> str:
         """Upload the session's new lines, then complete the environment record."""
@@ -206,7 +236,7 @@ class HookHandler:
         if not self._transcript_exists(payload) or payload.transcript is None:
             return "no transcript to flush"
         try:
-            self._start_flush(payload.session_id, payload.transcript)
+            self._start_flush(payload.session_id, payload.transcript, payload.cwd)
         except OSError as error:
             return f"flush could not be started ({type(error).__name__})"
         return "flush started in the background"

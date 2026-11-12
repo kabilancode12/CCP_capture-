@@ -44,6 +44,7 @@ class Machine:
             json.dumps({"oauthAccount": account}), encoding="utf-8"
         )
         self.api_url = api_url
+        self.extra_env: dict[str, str] = {}  # settings a test adds (for example snapshots)
 
     def env(self) -> dict[str, str]:
         clean = {k: v for k, v in os.environ.items() if not k.startswith(("CCP_", "CLAUDE_CODE_"))}
@@ -56,6 +57,7 @@ class Machine:
             "CCP_INGEST_TOKEN": API_TOKEN,
             "CCP_STATE_DIR": str(self.state),
             "CCP_CLIENT_TIMEOUT_SECONDS": "5",
+            **self.extra_env,
         }
 
     def hook(

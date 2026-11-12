@@ -54,7 +54,13 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
   Code captures a session through the hooks. (Private mode was split off: see 1.9b.)
 - [ ] **1.9b** Private mode with logged toggles. **On hold by decision.** *Done when:* private mode
   sends only the minimal record.
-- [ ] **1.10** Code snapshots ported from the old proof of concept. *Done when:* the old 27 checks pass.
+- [x] **1.10** Code snapshots ported from the old proof of concept. *Done when:* the old checks pass
+  (23 of the 27 apply and are ported one for one; 4 are superseded by design, see
+  [snapshots.md](snapshots.md)).
+- [ ] **1.10b** Fewer false positives in the snapshot secret scan (an entropy check on generic
+  assignments, a per-repository allowlist). 6 % of this repository's own files were excluded.
+  *Done when:* the false-positive rate on real repositories is acceptable without letting a hard-coded
+  password through.
 - [ ] **1.11** Docs: setup, run and hook registration for Windows. *Done when:* a new developer can follow them cold.
 - [ ] **1.12** Self-pilot for a week. *Done when:* zero lost sessions and no planted secret on the server.
 

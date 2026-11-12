@@ -55,13 +55,13 @@ def client() -> RecordingClient:
 
 
 @pytest.fixture
-def flushed() -> list[tuple[str, Path]]:
+def flushed() -> list[tuple[str, Path, Path | None]]:
     return []
 
 
 @pytest.fixture
 def handler(
-    client: RecordingClient, tmp_path: Path, flushed: list[tuple[str, Path]]
+    client: RecordingClient, tmp_path: Path, flushed: list[tuple[str, Path, Path | None]]
 ) -> HookHandler:
     def collect(transcript: Path | None) -> EnvironmentRecord:
         version = "2.1.289" if transcript is not None else None
@@ -71,7 +71,7 @@ def handler(
         client,
         StateStore(tmp_path / "state"),
         collect,
-        lambda session_id, transcript: flushed.append((session_id, transcript)),
+        lambda session_id, transcript, cwd: flushed.append((session_id, transcript, cwd)),
     )
 
 
@@ -212,10 +212,10 @@ def test_session_end_starts_a_background_flush_and_does_not_upload_itself(
     handler: HookHandler,
     client: RecordingClient,
     transcript: Path,
-    flushed: list[tuple[str, Path]],
+    flushed: list[tuple[str, Path, Path | None]],
 ) -> None:
     outcome = handler.handle(_payload(SESSION_END, transcript))
-    assert flushed == [(SESSION, transcript)]
+    assert flushed == [(SESSION, transcript, None)]  # this payload has no working directory
     assert client.synced == []  # SessionEnd has almost no time: nothing is waited for
     assert outcome == "flush started in the background"
 
@@ -223,7 +223,7 @@ def test_session_end_starts_a_background_flush_and_does_not_upload_itself(
 def test_session_end_survives_a_flush_that_cannot_be_started(
     client: RecordingClient, tmp_path: Path, transcript: Path
 ) -> None:
-    def fail(session_id: str, path: Path) -> None:
+    def fail(session_id: str, path: Path, cwd: Path | None) -> None:
         raise PermissionError("blocked")
 
     handler = HookHandler(client, StateStore(tmp_path / "s"), lambda t: EnvironmentRecord(), fail)
@@ -231,7 +231,7 @@ def test_session_end_survives_a_flush_that_cannot_be_started(
 
 
 def test_session_end_without_a_transcript_has_nothing_to_flush(
-    handler: HookHandler, flushed: list[tuple[str, Path]], tmp_path: Path
+    handler: HookHandler, flushed: list[tuple[str, Path, Path | None]], tmp_path: Path
 ) -> None:
     assert (
         handler.handle(_payload(SESSION_END, tmp_path / "none.jsonl")) == "no transcript to flush"

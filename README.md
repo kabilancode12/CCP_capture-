@@ -52,11 +52,12 @@ pytest
 | See which hooks fired | `ccp-verify probe-report` |
 | Start the ingestion API | `ccp-ingest` (see [docs/ingestion-api.md](docs/ingestion-api.md)) |
 | Close idle sessions once | `ccp-ingest close-idle` |
+| Take a code snapshot now (developer machine) | `ccp-capture snapshot --session-id <id>` (see [docs/snapshots.md](docs/snapshots.md)) |
 | Print the Claude Code hook settings | `ccp-capture hook-settings` (see [docs/hooks.md](docs/hooks.md)) |
 | Record where a session runs (developer machine) | `ccp-capture environment --session-id <id>` (see [docs/environment.md](docs/environment.md)) |
 | Upload a session (developer machine) | `ccp-capture sync --session-id <id> <transcript>` (see [docs/capture-client.md](docs/capture-client.md)) |
 | Apply the database schema | `ccp-db migrate` (see [docs/database.md](docs/database.md)) |
-| Run tests | `pytest` |
+| Run tests | `pytest` (all, about 4 minutes) or `pytest -m "not slow"` (about 1 minute; skips the Git-heavy snapshot tests) |
 | Lint and format check | `ruff check .` and `ruff format --check .` |
 | Type check | `mypy` |
 | Start / stop services | `docker compose --env-file .env -f infra/docker-compose.yml up -d` / `down` |
@@ -97,6 +98,7 @@ ccp_V2/
 │   ├── capture-client.md    The developer-machine client: how a sync works and its promises
 │   ├── environment.md       The environment record: fields, sources, privacy
 │   ├── hooks.md             Claude Code hooks: what each event does, setup, safety rules
+│   ├── snapshots.md         Code snapshots: hidden Git commits, safety, push queue, limits
 │   ├── verify/              Test-session script and transcript-facts template
 │   └── reference/           Original proposal, handover, plan and diagrams
 ├── reference/poc/           The first proof of concept, kept unchanged for reference

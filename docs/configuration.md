@@ -59,6 +59,9 @@ Read from **environment variables only**; a `.env` file is deliberately not read
 | `CCP_CLIENT_CHUNK_BYTES` | no | `1048576` | Target size of an uploaded chunk, in source bytes (1 KiB to 8 MiB) |
 | `CCP_CLIENT_TIMEOUT_SECONDS` | no | `15` | Time limit for each HTTP request (1-120) |
 | `CCP_CLIENT_BUDGET_SECONDS` | no | `20` | Total time one sync may take before it stops cleanly (1-600) |
+| `CCP_SNAPSHOT_REMOTE` | no | | Git URL of the capture project for the repository (see [snapshots.md](snapshots.md)) |
+| `CCP_SNAPSHOT_REMOTE_BASE` | no | | Or a group URL: the project is `<base>/<repository name>-capture.git` |
+| `CCP_SNAPSHOTS` | no | on if a remote is set, else off | `true` takes snapshots even without a remote (hidden refs stay in the local repository) |
 
 ## Using settings in code
 
