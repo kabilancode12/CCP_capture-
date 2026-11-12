@@ -184,7 +184,12 @@ def render_report(records: list[dict[str, Any]]) -> str:
             if name in record.get("values", {}):
                 values[event].add(f"{name}={record['values'][name]}")
 
-    lines = ["# Hook probe report", "", f"- Records: {len(records)}", ""]
+    entrypoints = sorted({str(r["entrypoint"]) for r in records if r.get("entrypoint")})
+    lines = ["# Hook probe report", "", f"- Records: {len(records)}"]
+    lines += [
+        f"- Entrypoints seen (CLAUDE_CODE_ENTRYPOINT): {', '.join(entrypoints) or 'none'}",
+        "",
+    ]
     lines += ["| event | count | enum values seen | payload keys |", "| --- | --- | --- | --- |"]
     for event in sorted(counts):
         seen = ", ".join(sorted(values[event])) or "-"

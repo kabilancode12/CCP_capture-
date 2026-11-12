@@ -72,7 +72,12 @@ but review it before sharing.
 
 ## Environment matrix
 
-Repeat steps 1, 2 and 6 and the `env` check in each environment. Mark what you tested.
+Repeat steps 1, 2 and 6 in each environment, with the probe registered. Mark what you tested.
+
+Read the surface from the **probe report** (the "Entrypoints seen" line) and the shell from the
+transcript's `environment` entry. Do not rely on running `ccp-verify env` by hand: the
+`CLAUDE_CODE_ENTRYPOINT` variable only exists inside processes Claude Code starts, so a manual
+run in your own terminal cannot see it.
 
 | Environment | Tested | Hooks fire? | Notes |
 | --- | --- | --- | --- |

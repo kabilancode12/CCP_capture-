@@ -17,7 +17,7 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
   *Done when:* the report covers thinking, edit results, tree, sub-agents and compaction.
 - [x] **0.5** Fill in [transcript-facts.md](verify/transcript-facts.md).
   *Done when:* no `?` remains for anything tested, each with its design impact.
-- [ ] **0.6** Run `ccp-verify env` on the other surfaces available (PowerShell, Git Bash, VS Code).
+- [x] **0.6** Run `ccp-verify env` on the other surfaces available (PowerShell, Git Bash, VS Code).
   *Done when:* the environment matrix is updated.
 - [x] **0.7** Settle the Step 1 decisions (below). *Done when:* written down here.
 

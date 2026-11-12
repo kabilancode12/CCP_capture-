@@ -89,6 +89,7 @@ def test_report_counts_events_and_lists_missing_ones() -> None:
         {"at": "t3", "event": "Stop", "keys": ["c"], "values": {}},
     ]
     report = hook_probe.render_report(records)
+    assert "Entrypoints seen (CLAUDE_CODE_ENTRYPOINT): none" in report
     assert "| Stop | 2 |" in report
     assert "source=startup" in report
     assert "Events that never fired:" in report
