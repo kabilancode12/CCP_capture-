@@ -6,11 +6,13 @@ its behaviour can be tested with a simple fake, and the real database code is te
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
 
 import pg8000.dbapi
 
 from ccp.db.connection import connect
+from ccp.redaction.records import RedactionRecord
 from ccp.settings import DatabaseSettings
 
 # Create the session if it is new; otherwise note the activity and (re)open it, so a late chunk
@@ -26,6 +28,12 @@ _QUEUE_INDEX_JOB = """
     ON CONFLICT (session_id) WHERE job_type = 'index_session' AND status = 'queued' DO NOTHING
 """
 
+
+# Record redaction hits; repeating the same report only sets the same counts again.
+_UPSERT_REDACTION = """
+    INSERT INTO redaction_log (session_id, rule_id, location, occurrences) VALUES (%s, %s, %s, %s)
+    ON CONFLICT (session_id, rule_id, location) DO UPDATE SET occurrences = EXCLUDED.occurrences
+"""
 
 # Close every open session that has been quiet for %s minutes, and queue one final index job for
 # each so nothing indexed earlier is stale. One statement, so it is atomic. A session that receives
@@ -63,6 +71,9 @@ class SessionRepository(Protocol):
         repeat: the result is the same each time.
         """
 
+    def record_redactions(self, session_id: str, records: Sequence[RedactionRecord]) -> None:
+        """Store the client's redaction records. Safe to repeat: same result each time."""
+
     def ping(self) -> None:
         """Raise :class:`RepositoryError` if the database cannot be used."""
 
@@ -85,6 +96,27 @@ class PostgresRepository:
         except (pg8000.dbapi.Error, OSError) as error:
             connection.rollback()
             raise RepositoryError(f"database write failed: {type(error).__name__}") from error
+        finally:
+            connection.close()
+
+    def record_redactions(self, session_id: str, records: Sequence[RedactionRecord]) -> None:
+        """Store redaction records for a session, in one transaction.
+
+        A record that already exists (same rule and location) only has its count set again, so
+        a retried report does not create duplicates.
+        """
+        connection = self._open()
+        try:
+            cursor = connection.cursor()
+            for record in records:
+                cursor.execute(
+                    _UPSERT_REDACTION,
+                    (session_id, record.rule_id, record.location, record.occurrences),
+                )
+            connection.commit()
+        except (pg8000.dbapi.Error, OSError) as error:
+            connection.rollback()
+            raise RepositoryError(f"saving redactions failed: {type(error).__name__}") from error
         finally:
             connection.close()
 

@@ -38,6 +38,8 @@ ccp-verify = "ccp.verify.cli:main"
 ccp-db = "ccp.db.cli:main"
 # Start the ingestion API.
 ccp-ingest = "ccp.ingest.server:main"
+# Upload transcripts from a developer machine.
+ccp-capture = "ccp.capture.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ccp"]

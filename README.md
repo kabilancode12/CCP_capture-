@@ -52,6 +52,7 @@ pytest
 | See which hooks fired | `ccp-verify probe-report` |
 | Start the ingestion API | `ccp-ingest` (see [docs/ingestion-api.md](docs/ingestion-api.md)) |
 | Close idle sessions once | `ccp-ingest close-idle` |
+| Upload a session (developer machine) | `ccp-capture sync --session-id <id> <transcript>` (see [docs/capture-client.md](docs/capture-client.md)) |
 | Apply the database schema | `ccp-db migrate` (see [docs/database.md](docs/database.md)) |
 | Run tests | `pytest` |
 | Lint and format check | `ruff check .` and `ruff format --check .` |
@@ -73,6 +74,7 @@ ccp_V2/
 │   ├── db/                  Database connection and migration runner
 │   ├── storage/             MinIO object store, key layout, attachment de-duplication
 │   ├── ingest/              Ingestion API (Starlette): receives transcript chunks
+│   ├── capture/             Capture client: runs on developer machines, uploads transcripts
 │   └── verify/              Step 0 tools: transcript, environment and hook inspectors
 ├── tests/
 │   ├── unit/                Fast tests, one file per module
@@ -90,6 +92,7 @@ ccp_V2/
 │   ├── database.md          Migrations: commands, writing and testing them
 │   ├── storage.md           Object storage, key layout, attachment de-duplication
 │   ├── ingestion-api.md     Endpoints, status codes and how an upload is handled
+│   ├── capture-client.md    The developer-machine client: how a sync works and its promises
 │   ├── verify/              Test-session script and transcript-facts template
 │   └── reference/           Original proposal, handover, plan and diagrams
 ├── reference/poc/           The first proof of concept, kept unchanged for reference

@@ -58,14 +58,15 @@ def test_a_new_chunk_is_stored_and_recorded(
     response = client.put(URL, content=LINE, headers=AUTH)
 
     assert response.status_code == 201
-    assert response.json() == {"stored": True, "next_offset": len(LINE)}
+    assert response.json() == {"stored": True}
     assert store.objects == {KEY: LINE}
     assert repository.recorded == [SESSION]
 
 
-def test_next_offset_follows_the_chunks_own_offset(client: TestClient) -> None:
+def test_the_offset_in_the_url_names_the_stored_chunk(client: TestClient, store: FakeStore) -> None:
     url = f"/v1/sessions/{SESSION}/streams/main/chunks/5000"
-    assert client.put(url, content=LINE, headers=AUTH).json()["next_offset"] == 5000 + len(LINE)
+    assert client.put(url, content=LINE, headers=AUTH).status_code == 201
+    assert list(store.objects) == [f"sessions/{SESSION}/main/000000005000.jsonl"]
 
 
 def test_a_sub_agent_chunk_goes_under_its_own_stream(client: TestClient, store: FakeStore) -> None:
@@ -81,7 +82,7 @@ def test_sending_the_same_chunk_twice_stores_one_copy(
     second = client.put(URL, content=LINE, headers=AUTH)  # a retry
 
     assert (first.status_code, second.status_code) == (201, 200)
-    assert second.json() == {"stored": False, "next_offset": len(LINE)}
+    assert second.json() == {"stored": False}
     assert store.put_calls == 1  # written once
     assert len(store.objects) == 1
     # The database step is repeated on purpose, so a crash between the two steps heals itself.

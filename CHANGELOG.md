@@ -4,6 +4,20 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
 
 ## [Unreleased]
 
+### Changed
+
+- The chunk upload response no longer contains `next_offset` (the uploaded text is redacted, so its
+  size is not the source position).
+- The redactor writes redacted lines in Claude Code's compact JSON format, so redacted attachment
+  lines can still be de-duplicated.
+
+### Fixed
+
+- The API answered 401/400 without reading the request body, which could reset the connection on
+  Windows: the client saw a network error instead of the refusal. The body is now read first.
+- A redaction location was built from the original dictionary key, so a key that was itself a secret
+  could be copied into the redaction log.
+
 ### Added
 
 - Project foundation: `src/` package layout, `pyproject.toml`, ruff, mypy, pytest, pre-commit.
@@ -11,6 +25,11 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
   results, conversation tree, compaction, sub-agents), with values masked.
 - `ccp-verify env`: description of the machine, surface, shell and account storage, with
   values hidden.
+- Capture client (`ccp-capture sync|catch-up`): reads new complete transcript lines, redacts,
+  moves large attachments out, uploads chunks, attachments and redaction reports through the API,
+  and saves its position only after success. Handles sub-agent files; per-stream locks; time
+  budget. Nothing lost when the API is down, nothing duplicated on retry.
+- `POST /v1/sessions/{id}/redactions` and migration 003 (idempotent `redaction_log`).
 - `PUT /v1/attachments/{digest}`: developers' machines upload de-duplicated attachment bodies
   through the API (the server verifies the SHA-256), so they need no storage credentials.
 - Idle-session closer: open sessions with no activity for `CCP_SESSION_IDLE_MINUTES` are closed

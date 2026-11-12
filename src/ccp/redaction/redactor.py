@@ -115,8 +115,10 @@ def redact_value(value: Any, path: str, rules: Sequence[Rule], found: list[tuple
     if isinstance(value, dict):
         result: dict[str, Any] = {}
         for key, item in value.items():
-            child_path = f"{path}.{key}" if path else key
             clean_key, fired = redact_string(key, rules)
+            # The path is built from the *cleaned* key: a key that is itself a secret must not
+            # end up in the redaction log through the location.
+            child_path = f"{path}.{clean_key}" if path else clean_key
             found.extend((rule_id, child_path) for rule_id in fired)
             result[clean_key] = redact_value(item, child_path, rules, found)
         return result
@@ -150,7 +152,10 @@ def redact_line(
         hits = [Hit(rule_id, line_number, path) for rule_id, path in found]
         if not hits:
             return LineResult(text=raw_line)  # untouched: keep the exact original bytes
-        return LineResult(text=json.dumps(cleaned, ensure_ascii=False), hits=hits)
+        # Compact, like Claude Code's own output: a redacted line stays in the same format, which
+        # lets the attachment de-duplication (it needs an exact round trip) still process it.
+        compact = json.dumps(cleaned, ensure_ascii=False, separators=(",", ":"))
+        return LineResult(text=compact, hits=hits)
     except Exception:  # noqa: BLE001  (deliberate: any failure must withhold the line)
         return LineResult(text=None, withheld=True)
 

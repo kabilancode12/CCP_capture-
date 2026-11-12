@@ -1,10 +1,13 @@
 """Fakes and fixtures for the ingestion API unit tests (no database or MinIO needed)."""
 
+from collections.abc import Sequence
+
 import pytest
 from starlette.testclient import TestClient
 
 from ccp.ingest.app import IngestService
 from ccp.ingest.repository import RepositoryError
+from ccp.redaction.records import RedactionRecord
 from ccp.settings import Secret
 from ccp.storage import StorageError
 
@@ -46,12 +49,18 @@ class FakeRepository:
 
     def __init__(self) -> None:
         self.recorded: list[str] = []
+        self.redactions: list[tuple[str, list[RedactionRecord]]] = []
         self.down = False
 
     def record_chunk(self, session_id: str) -> None:
         if self.down:
             raise RepositoryError("down")
         self.recorded.append(session_id)
+
+    def record_redactions(self, session_id: str, records: Sequence[RedactionRecord]) -> None:
+        if self.down:
+            raise RepositoryError("down")
+        self.redactions.append((session_id, list(records)))
 
     def ping(self) -> None:
         if self.down:

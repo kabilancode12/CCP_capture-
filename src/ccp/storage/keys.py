@@ -21,7 +21,7 @@ _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 MAIN_STREAM = "main"
 
 
-def _check_id(label: str, value: str) -> str:
+def check_id(label: str, value: str) -> str:
     """Return ``value`` if it is a safe identifier, else raise ``ValueError``."""
     if not _SAFE_ID.fullmatch(value) or ".." in value:
         raise ValueError(f"Invalid {label}: must be letters, digits, '.', '_' or '-'")
@@ -45,15 +45,15 @@ def transcript_chunk_key(session_id: str, stream: str, offset: int) -> str:
     """
     if offset < 0:
         raise ValueError("Invalid offset: must be 0 or more")
-    safe_session = _check_id("session id", session_id)
-    safe_stream = _check_id("stream", stream)
+    safe_session = check_id("session id", session_id)
+    safe_stream = check_id("stream", stream)
     # Zero-padded so that listing the keys in alphabetical order gives the chunks in order.
     return f"sessions/{safe_session}/{safe_stream}/{offset:012d}.jsonl"
 
 
 def session_prefix(session_id: str) -> str:
     """Return the key prefix under which everything of one session is stored."""
-    return f"sessions/{_check_id('session id', session_id)}/"
+    return f"sessions/{check_id('session id', session_id)}/"
 
 
 def attachment_key(digest: str) -> str:

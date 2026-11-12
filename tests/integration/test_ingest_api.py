@@ -230,7 +230,7 @@ def test_the_api_works_over_real_http(
     refused = httpx.put(url, content=LINE)  # no token
 
     assert (first.status_code, retry.status_code, refused.status_code) == (201, 200, 401)
-    assert first.json() == {"stored": True, "next_offset": len(LINE)}
+    assert first.json() == {"stored": True}
     assert len(object_store.list_keys("sessions/")) == 1
     assert _rows(database, "SELECT status FROM job") == [("queued",)]
 

@@ -44,6 +44,20 @@ def test_secrets_in_dictionary_keys_are_redacted(fakes: dict[str, str]) -> None:
     assert [h.rule_id for h in result.hits] == ["github-token"]
 
 
+def test_a_secret_key_never_appears_in_the_hit_location(fakes: dict[str, str]) -> None:
+    # A real bug: the location was built from the original key, so a key that is itself a secret
+    # would have been copied into the redaction log.
+    raw = _line(**{fakes["github-token"]: {"inner": fakes["email"]}})
+    result = redact_line(raw, 1)
+
+    assert fakes["github-token"] not in repr(result.hits)
+    assert fakes["email"] not in repr(result.hits)
+    assert sorted((h.rule_id, h.path) for h in result.hits) == [
+        ("email", "[REDACTED:github-token].inner"),
+        ("github-token", "[REDACTED:github-token]"),
+    ]
+
+
 def test_multiple_hits_in_one_line_are_all_reported(fakes: dict[str, str]) -> None:
     raw = _line(a=fakes["pan"], b=f"call {fakes['indian-mobile']}", c=fakes["jwt"])
     result = redact_line(raw, 3)
@@ -54,6 +68,12 @@ def test_non_json_line_is_cleaned_as_plain_text(fakes: dict[str, str]) -> None:
     result = redact_line(f"partial line {fakes['email']} {{", 9)  # a cut-off last line
     assert result.text == "partial line [REDACTED:email] {"
     assert [(h.rule_id, h.path) for h in result.hits] == [("email", "")]
+
+
+def test_a_redacted_line_is_written_in_claude_codes_compact_format(fakes: dict[str, str]) -> None:
+    # Needed so that redacted attachment lines can still be de-duplicated (exact round trip).
+    result = redact_line('{"a":1,"b":{"c":"' + fakes["email"] + '"}}', 1)
+    assert result.text == '{"a":1,"b":{"c":"[REDACTED:email]"}}'  # no spaces after , or :
 
 
 def test_unicode_text_is_preserved(fakes: dict[str, str]) -> None:

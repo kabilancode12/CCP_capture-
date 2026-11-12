@@ -104,6 +104,21 @@ class ApiSettings:
 
 
 @dataclass(frozen=True)
+class ClientSettings:
+    """Settings of the capture client, which runs on a developer's machine.
+
+    The client talks only to the ingestion API: it needs no database or storage credentials.
+    """
+
+    api_url: str  # base URL of the ingestion API, without a trailing slash
+    token: Secret  # the bearer token (the same value as the server's CCP_INGEST_TOKEN)
+    state_dir: Path  # where the client remembers how far each transcript has been uploaded
+    chunk_bytes: int  # target size of one uploaded chunk (source bytes)
+    timeout_seconds: float  # per HTTP request
+    budget_seconds: float  # total time one sync may take (hooks have a time limit)
+
+
+@dataclass(frozen=True)
 class Settings:
     """All application settings."""
 
@@ -236,6 +251,36 @@ def load_database_settings(
     database = _read_database(reader)
     reader.raise_if_errors()
     return database
+
+
+def load_client_settings(env: Mapping[str, str] | None = None) -> ClientSettings:
+    """Build the capture client's settings from environment variables only.
+
+    Unlike the server settings, **no ``.env`` file is read**. The client runs inside whatever
+    project the developer is working in, and that project could contain a ``.env`` file: reading
+    it would let an untrusted repository point the client (and its token) at another server.
+
+    Args:
+        env: Variables to read. Defaults to ``os.environ``.
+
+    Raises:
+        SettingsError: If a variable is missing or invalid; the message lists all of them.
+    """
+    reader = _Reader(dict(os.environ if env is None else env))
+    api_url = reader.text("CCP_API_URL", "http://127.0.0.1:8000").rstrip("/")
+    if not api_url.lower().startswith(("http://", "https://")):
+        reader.errors.append("CCP_API_URL must start with http:// or https://")
+    state_dir = reader.text("CCP_STATE_DIR", str(Path.home() / ".ccp" / "capture"))
+    settings = ClientSettings(
+        api_url=api_url,
+        token=reader.secret("CCP_INGEST_TOKEN", min_length=MIN_TOKEN_LENGTH),
+        state_dir=Path(state_dir),
+        chunk_bytes=reader.integer("CCP_CLIENT_CHUNK_BYTES", 1024 * 1024, 1024, 8 * 1024 * 1024),
+        timeout_seconds=float(reader.integer("CCP_CLIENT_TIMEOUT_SECONDS", 15, 1, 120)),
+        budget_seconds=float(reader.integer("CCP_CLIENT_BUDGET_SECONDS", 20, 1, 600)),
+    )
+    reader.raise_if_errors()
+    return settings
 
 
 def load_storage_settings(

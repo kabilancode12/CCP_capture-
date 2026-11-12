@@ -46,6 +46,20 @@ service account with access to one bucket instead of the root credentials.
 | `CCP_SESSION_IDLE_MINUTES` | no | `30` | Minutes without activity before a session is marked closed (1-1440); see [ingestion-api.md](ingestion-api.md#idle-sessions) |
 | `CCP_MAX_CHUNK_BYTES` | no | `8388608` | Largest transcript chunk the API accepts, in bytes (1 KiB to 64 MiB) |
 
+### Capture client
+
+Read from **environment variables only**; a `.env` file is deliberately not read (see
+[capture-client.md](capture-client.md)). Set them in Claude Code's settings `env` block.
+
+| Variable | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `CCP_API_URL` | no | `http://127.0.0.1:8000` | Base URL of the ingestion API (`http://` or `https://`) |
+| `CCP_INGEST_TOKEN` | **yes** (secret) | | The same token the server expects; at least 16 characters |
+| `CCP_STATE_DIR` | no | `~/.ccp/capture` | Where the client remembers how far each transcript was uploaded |
+| `CCP_CLIENT_CHUNK_BYTES` | no | `1048576` | Target size of an uploaded chunk, in source bytes (1 KiB to 8 MiB) |
+| `CCP_CLIENT_TIMEOUT_SECONDS` | no | `15` | Time limit for each HTTP request (1-120) |
+| `CCP_CLIENT_BUDGET_SECONDS` | no | `20` | Total time one sync may take before it stops cleanly (1-600) |
+
 ## Using settings in code
 
 ```python

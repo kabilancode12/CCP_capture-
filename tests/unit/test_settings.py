@@ -6,6 +6,7 @@ from ccp.settings import (
     MIN_TOKEN_LENGTH,
     Secret,
     SettingsError,
+    load_client_settings,
     load_database_settings,
     load_settings,
     load_storage_settings,
@@ -177,3 +178,57 @@ def test_storage_settings_report_their_own_missing_variables_only() -> None:
         load_storage_settings({}, env_file=None)
     assert "MINIO_ACCESS_KEY is required" in str(error.value)
     assert "POSTGRES" not in str(error.value)
+
+
+# ---------------------------------------------------------------- the capture client's settings
+
+
+CLIENT_ENV = {"CCP_INGEST_TOKEN": "t" * MIN_TOKEN_LENGTH}
+
+
+def test_client_settings_defaults() -> None:
+    settings = load_client_settings(CLIENT_ENV)
+    assert settings.api_url == "http://127.0.0.1:8000"
+    assert settings.state_dir == Path.home() / ".ccp" / "capture"
+    assert (settings.chunk_bytes, settings.timeout_seconds, settings.budget_seconds) == (
+        1024 * 1024,
+        15.0,
+        20.0,
+    )
+    assert str(settings.token) == "***"
+
+
+def test_client_settings_from_the_environment() -> None:
+    env = {
+        **CLIENT_ENV,
+        "CCP_API_URL": "https://ccp.example.com/",
+        "CCP_STATE_DIR": "/somewhere/else",
+        "CCP_CLIENT_CHUNK_BYTES": "4096",
+    }
+    settings = load_client_settings(env)
+    assert settings.api_url == "https://ccp.example.com"  # trailing slash removed
+    assert settings.state_dir == Path("/somewhere/else")
+    assert settings.chunk_bytes == 4096
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "expected"),
+    [
+        ("CCP_API_URL", "ftp://x", "CCP_API_URL must start with http"),
+        ("CCP_CLIENT_CHUNK_BYTES", "10", "CCP_CLIENT_CHUNK_BYTES must be between"),
+        ("CCP_CLIENT_TIMEOUT_SECONDS", "abc", "CCP_CLIENT_TIMEOUT_SECONDS must be a whole number"),
+        ("CCP_INGEST_TOKEN", "short", "CCP_INGEST_TOKEN must be at least 16"),
+    ],
+)
+def test_invalid_client_settings_are_rejected(name: str, value: str, expected: str) -> None:
+    with pytest.raises(SettingsError, match=expected):
+        load_client_settings({**CLIENT_ENV, name: value})
+
+
+def test_the_client_never_reads_an_env_file_from_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A repository's own .env must not be able to redirect the client or its token."""
+    (tmp_path / ".env").write_text("CCP_API_URL=https://evil.example\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert load_client_settings(CLIENT_ENV).api_url == "http://127.0.0.1:8000"

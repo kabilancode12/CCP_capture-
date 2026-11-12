@@ -47,7 +47,9 @@ The same URL always means the same chunk, so **uploads are idempotent**:
 | 422 | Not UTF-8, not complete JSON-object lines, or empty (the message names the line, never its content) |
 | 503 | Storage or database temporarily unavailable: retry later |
 
-Successful responses are `{"stored": true|false, "next_offset": <offset + chunk size>}`.
+Successful responses are `{"stored": true|false}`. The API does not return a "next offset": the
+uploaded text is redacted, so its size is not the size of the source bytes. The client keeps its own
+position in the source file ([capture-client.md](capture-client.md)).
 
 Example:
 
@@ -78,6 +80,22 @@ content under a wrong name or overwrite another attachment: the same key always 
 | 503 | Storage temporarily unavailable: retry later |
 
 Successful responses are `{"stored": true|false}`.
+
+### `POST /v1/sessions/{session_id}/redactions`
+
+Reports where the client's redaction rules fired. Send the bearer token and
+`{"records": [{"rule_id": "email", "location": "<chunk key>:<line>:<JSON path>", "occurrences": 2}]}`.
+It never carries the removed value. Repeating a report is safe: a record is identified by session,
+rule and location, and a repeat only sets the same count again.
+
+| Status | Meaning |
+| --- | --- |
+| 200 | Recorded: `{"recorded": <number of records>}` |
+| 400 | Unsafe `session_id` |
+| 401 | Missing or wrong token |
+| 413 | Larger than `CCP_MAX_CHUNK_BYTES` |
+| 422 | Not JSON, or a record is malformed (rule id not a short identifier, location empty or over 512 characters, bad count, more than 5000 records) |
+| 503 | Database temporarily unavailable: retry later |
 
 ## What a chunk upload does
 
@@ -125,6 +143,10 @@ loop.
   content for the same offset at the same instant is not supported.
 - **The server does not look at content.** Redaction happens on the developer's machine before
   upload; the server only checks the shape. Errors never echo content, tokens or internal detail.
+- **Early refusals read the request body first.** Answering 401 or 400 and closing the connection
+  while the body is unread makes the operating system reset the connection (seen on Windows), and
+  the client then sees a network error instead of the real status, so a permanent refusal looks like a
+  temporary outage. The body (within the size limit) is read and dropped before the refusal is sent.
 - **A new database connection per request** keeps the code simple. A connection pool can be added
   if load requires it.
 

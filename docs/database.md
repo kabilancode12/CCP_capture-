@@ -43,14 +43,14 @@ Rollback **deletes data** (it drops the tables); use it on a development databas
 | Applied versions are stored in `schema_migration` | The database knows its own version |
 | Line endings are ignored in the checksum | Windows and Linux checkouts agree |
 
-## Tables (migrations 001 and 002)
+## Tables (migrations 001 to 003)
 
 | Table | Holds |
 | --- | --- |
 | `session` | One row per Claude Code session |
 | `session_env` | Who ran it and where: version, surface, shell, OS, account |
 | `event` | Messages, tool calls and decisions, with a pointer to the raw transcript line (filled in Step 2) |
-| `redaction_log` | Rule and location of each redaction; never the redacted value |
+| `redaction_log` | Rule, location and count of each redaction; never the redacted value (unique per session, rule and location, so a repeated report is safe) |
 | `job` | Work queue for indexing and distillation (at most one queued index job per session) |
 
 The full planned design (all steps) is in [`db/drafts/001_init.sql`](../db/drafts/001_init.sql).
