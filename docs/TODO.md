@@ -46,7 +46,7 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
   attachment uploaded in two sessions is stored once and the transcript can be rebuilt exactly.
 - [x] **1.5** Ingestion API (FastAPI): health, token auth, chunk upload, session upsert,
   index job queued. *Done when:* uploading the same chunk twice stores one copy.
-- [ ] **1.6** Idle-session closer. *Done when:* a session is marked closed after N idle minutes.
+- [x] **1.6** Idle-session closer. *Done when:* a session is marked closed after N idle minutes.
 - [ ] **1.7** Capture client: incremental upload by byte offset, offline queue, retry.
   *Done when:* killing the API mid-session loses nothing once it returns.
 - [ ] **1.8** Environment and account record at session start. *Done when:* `session_env` has real values.

@@ -27,6 +27,28 @@ _QUEUE_INDEX_JOB = """
 """
 
 
+# Close every open session that has been quiet for %s minutes, and queue one final index job for
+# each so nothing indexed earlier is stale. One statement, so it is atomic. A session that receives
+# a chunk at the same moment is not closed: the row is re-checked under lock, and the upload's
+# `last_activity_at = now()` makes the condition false.
+_CLOSE_IDLE_SESSIONS = """
+    WITH closed AS (
+        UPDATE session
+           SET status = 'closed',
+               ended_at = COALESCE(ended_at, last_activity_at),
+               end_reason = COALESCE(end_reason, 'idle_timeout')
+         WHERE status = 'open'
+           AND last_activity_at < now() - make_interval(mins => %s)
+        RETURNING session_id
+    ), queued AS (
+        INSERT INTO job (job_type, session_id)
+        SELECT 'index_session', session_id FROM closed
+        ON CONFLICT (session_id) WHERE job_type = 'index_session' AND status = 'queued' DO NOTHING
+    )
+    SELECT session_id FROM closed ORDER BY session_id
+"""
+
+
 class RepositoryError(RuntimeError):
     """Raised when the database cannot be reached or a statement fails."""
 
@@ -63,6 +85,30 @@ class PostgresRepository:
         except (pg8000.dbapi.Error, OSError) as error:
             connection.rollback()
             raise RepositoryError(f"database write failed: {type(error).__name__}") from error
+        finally:
+            connection.close()
+
+    def close_idle_sessions(self, idle_minutes: int) -> list[str]:
+        """Close open sessions with no activity for ``idle_minutes``; queue a final index job.
+
+        Args:
+            idle_minutes: How long a session must be quiet before it is closed.
+
+        Returns:
+            The ids of the sessions closed by this call (empty if none were due).
+        """
+        connection = self._open()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(_CLOSE_IDLE_SESSIONS, (idle_minutes,))
+            closed = [str(row[0]) for row in cursor.fetchall()]
+            connection.commit()
+            return closed
+        except (pg8000.dbapi.Error, OSError) as error:
+            connection.rollback()
+            raise RepositoryError(
+                f"closing idle sessions failed: {type(error).__name__}"
+            ) from error
         finally:
             connection.close()
 

@@ -7,7 +7,8 @@ here. The code is in [`src/ccp/ingest/`](../src/ccp/ingest/).
 
 ```powershell
 ccp-db migrate        # the tables must exist first
-ccp-ingest            # or: python -m ccp.ingest
+ccp-ingest            # serve the API; also closes idle sessions in the background
+                      # (or: python -m ccp.ingest)
 ```
 
 It reads its settings from `.env` / the environment ([configuration.md](configuration.md)):
@@ -67,6 +68,31 @@ Step 3 runs on every upload, including retries. If the server stops between step
 client's retry finds the chunk already stored and completes the database step: the system heals
 itself without the client doing anything special.
 
+## Idle sessions
+
+A session is **open** while chunks keep arriving. If nothing arrives for
+`CCP_SESSION_IDLE_MINUTES` (default 30), it is marked **closed**: the SessionEnd hook may never have
+run, the laptop may have been closed, the network may have dropped for good. Closing a session:
+
+- sets `status = 'closed'`, `ended_at` to the time of its last activity, and `end_reason` to
+  `idle_timeout` (an end reason that is already known, such as `prompt_input_exit`, is kept);
+- queues one final index job, so nothing indexed earlier is stale (an already-queued job is not
+  duplicated);
+- is **undone by a late chunk**: the next upload reopens the session.
+
+The server does this itself in the background: once at start-up and then every minute (sooner
+for very short timeouts). To run it by hand or from a scheduler:
+
+```powershell
+ccp-ingest close-idle      # closes idle sessions once, prints how many, then exits
+```
+
+It is safe to run several times, or alongside the server: one atomic SQL statement does the work,
+and a session that receives a chunk at the same moment is **not** closed. The row is re-checked
+after the upload commits (tested with a real lock, see `test_idle_sessions.py`). A failure in the
+background loop (for example the database being down) is logged and retried; it does not stop the
+loop.
+
 ## Design choices
 
 - **Starlette, not FastAPI.** FastAPI depends on `pydantic-core`, a compiled library that company
@@ -83,6 +109,8 @@ itself without the client doing anything special.
 
 - `tests/unit/ingest/`: the API with in-memory fakes (no services needed): authentication,
   validation, idempotency, conflicts, size limits, and failure of each dependency.
+- `tests/unit/ingest/test_closer.py`: the timer loop (keeps running after errors, stops with the
+  server). `tests/integration/test_idle_sessions.py`: the closing SQL against real PostgreSQL.
 - `tests/integration/test_ingest_api.py`: the API against the real PostgreSQL and MinIO
   (throwaway database and bucket), including recovery after a database outage, and one test over
   a real network socket with uvicorn.

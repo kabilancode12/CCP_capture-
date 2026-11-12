@@ -43,7 +43,7 @@ service account with access to one bucket instead of the root credentials.
 | `CCP_API_HOST` | no | `127.0.0.1` | Address the API listens on |
 | `CCP_API_PORT` | no | `8000` | Port the API listens on (1-65535) |
 | `CCP_INGEST_TOKEN` | **yes** (secret) | | Token sent with every upload; at least 16 characters |
-| `CCP_SESSION_IDLE_MINUTES` | no | `30` | Minutes without activity before a session is marked closed (1-1440) |
+| `CCP_SESSION_IDLE_MINUTES` | no | `30` | Minutes without activity before a session is marked closed (1-1440); see [ingestion-api.md](ingestion-api.md#idle-sessions) |
 | `CCP_MAX_CHUNK_BYTES` | no | `8388608` | Largest transcript chunk the API accepts, in bytes (1 KiB to 64 MiB) |
 
 ## Using settings in code

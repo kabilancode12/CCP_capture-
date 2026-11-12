@@ -11,6 +11,9 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
   results, conversation tree, compaction, sub-agents), with values masked.
 - `ccp-verify env`: description of the machine, surface, shell and account storage, with
   values hidden.
+- Idle-session closer: open sessions with no activity for `CCP_SESSION_IDLE_MINUTES` are closed
+  (end reason `idle_timeout`) with a final index job; runs in the server and as `ccp-ingest
+  close-idle`; a late chunk reopens the session.
 - Ingestion API (`ccp-ingest`, Starlette + uvicorn): `GET /health` and an idempotent
   `PUT .../chunks/{offset}` with bearer-token auth, validation, size limit, conflict detection,
   session upsert and one queued index job per session. Migration 002 adds session activity.

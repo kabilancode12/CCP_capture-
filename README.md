@@ -51,6 +51,7 @@ pytest
 | Register the hook probe (scratch repos only) | `ccp-verify probe-settings` |
 | See which hooks fired | `ccp-verify probe-report` |
 | Start the ingestion API | `ccp-ingest` (see [docs/ingestion-api.md](docs/ingestion-api.md)) |
+| Close idle sessions once | `ccp-ingest close-idle` |
 | Apply the database schema | `ccp-db migrate` (see [docs/database.md](docs/database.md)) |
 | Run tests | `pytest` |
 | Lint and format check | `ruff check .` and `ruff format --check .` |

@@ -35,6 +35,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+from starlette.types import Lifespan
 
 from ccp.ingest.chunks import ChunkError, validate_chunk
 from ccp.ingest.repository import RepositoryError, SessionRepository
@@ -89,9 +90,15 @@ class IngestService:
         self._repository = repository
         self._max_chunk_bytes = max_chunk_bytes
 
-    def build_app(self) -> Starlette:
-        """Return the web application."""
+    def build_app(self, lifespan: Lifespan[Starlette] | None = None) -> Starlette:
+        """Return the web application.
+
+        Args:
+            lifespan: Optional start-up and shut-down hook (the server uses it to run the
+                idle-session closer in the background).
+        """
         return Starlette(
+            lifespan=lifespan,
             routes=[
                 Route("/health", self.health, methods=["GET"]),
                 Route(
@@ -99,7 +106,7 @@ class IngestService:
                     self.put_chunk,
                     methods=["PUT"],
                 ),
-            ]
+            ],
         )
 
     # ------------------------------------------------------------ handlers
