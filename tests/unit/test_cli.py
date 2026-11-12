@@ -23,6 +23,19 @@ def test_missing_path_returns_error_code(capsys: pytest.CaptureFixture[str]) -> 
     assert "Path not found" in capsys.readouterr().err
 
 
+def test_folder_without_transcripts_returns_error_code(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["transcript", str(tmp_path)]) == 2
+    assert "No .jsonl transcript files found" in capsys.readouterr().err
+
+
 def test_env_command_prints_json(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["env"]) == 0
     assert '"surface"' in capsys.readouterr().out
+
+
+def test_env_command_writes_a_file(tmp_path: Path) -> None:
+    out = tmp_path / "env.json"
+    assert main(["env", "--out", str(out)]) == 0
+    assert '"surface"' in out.read_text(encoding="utf-8")

@@ -30,8 +30,19 @@ def build_parser() -> argparse.ArgumentParser:
     transcript.add_argument("paths", nargs="+", type=Path, help="transcript files or folders")
     transcript.add_argument("--out", type=Path, help="write the Markdown report to this file")
 
-    commands.add_parser("env", help="describe the machine and surface (JSON)")
+    env = commands.add_parser("env", help="describe the machine and surface (JSON)")
+    # --out avoids shell redirection, which can write UTF-16 in Windows PowerShell 5.
+    env.add_argument("--out", type=Path, help="write the JSON report to this file")
     return parser
+
+
+def _emit(text: str, out: Path | None) -> None:
+    """Print the report, or write it to a file (UTF-8) when ``out`` is given."""
+    if out:
+        out.write_text(text, encoding="utf-8")
+        print(f"Wrote {out}")
+    else:
+        print(text)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -41,7 +52,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         argv: Arguments to parse; defaults to ``sys.argv[1:]``.
 
     Returns:
-        Process exit code (0 on success, 2 if an input path does not exist).
+        Process exit code: 0 on success, 2 if an input path does not exist or holds no
+        transcript files.
     """
     args = build_parser().parse_args(argv)
 
@@ -50,13 +62,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if missing:
             print(f"Path not found: {', '.join(missing)}", file=sys.stderr)
             return 2
-        report = render_markdown(inspect_files(args.paths))
-        if args.out:
-            args.out.write_text(report, encoding="utf-8")
-            print(f"Wrote {args.out}")
-        else:
-            print(report)
+        facts = inspect_files(args.paths)
+        if not facts.files:  # a folder without any .jsonl file would otherwise give an empty report
+            print("No .jsonl transcript files found.", file=sys.stderr)
+            return 2
+        _emit(render_markdown(facts), args.out)
     else:
         report_data = collect(os.environ, Path.home(), Path("/.dockerenv"))
-        print(json.dumps(report_data, indent=2))
+        _emit(json.dumps(report_data, indent=2), args.out)
     return 0

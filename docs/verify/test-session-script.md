@@ -20,7 +20,7 @@ transcript.
 
    (`calc.py` has a deliberate bug: `a - b`. `pip install pytest` if needed.)
 
-2. Run `ccp-verify env > env-before.json` and keep the file.
+2. Run `ccp-verify env --out env-before.json` and keep the file.
 3. Note the Claude Code version: `claude --version`.
 
 ## Steps
@@ -46,7 +46,7 @@ Get-ChildItem "$HOME\.claude\projects" -Recurse -Filter *.jsonl | Sort-Object La
 
 # Inspect it (include the folder to pick up any sub-agent files)
 ccp-verify transcript "<path to the folder or file>" --out transcript-report.md
-ccp-verify env > env-after.json
+ccp-verify env --out env-after.json
 ```
 
 Copy the findings into [transcript-facts.md](transcript-facts.md). Do **not** commit the

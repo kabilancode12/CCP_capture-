@@ -73,7 +73,9 @@ CREATE TABLE event (
     occurred_at     TIMESTAMPTZ,
     payload         JSONB NOT NULL,              -- the raw entry (redacted before upload)
     raw_object_key  TEXT NOT NULL,               -- MinIO object holding the transcript
-    raw_line_number INTEGER NOT NULL             -- line within that object
+    raw_line_number INTEGER NOT NULL,            -- line within that object
+    -- Makes re-indexing safe: the same transcript line can never produce two events.
+    UNIQUE (raw_object_key, raw_line_number)
 );
 CREATE INDEX event_session_idx ON event (session_id, occurred_at);
 
@@ -193,3 +195,5 @@ CREATE TABLE job (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     finished_at TIMESTAMPTZ
 );
+-- Workers poll for the oldest queued job (SELECT ... FOR UPDATE SKIP LOCKED).
+CREATE INDEX job_queue_idx ON job (status, created_at);

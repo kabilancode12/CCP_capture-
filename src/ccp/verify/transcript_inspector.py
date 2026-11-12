@@ -4,8 +4,8 @@ The indexer in later phases depends on facts about transcripts that are not docu
 (for example whether thinking text is written, or how a rewind appears). This module reads
 real transcripts and reports those facts as Markdown, so the design is based on evidence.
 
-Nothing here modifies a transcript, and no raw content is printed: values are masked with
-:mod:`ccp.verify.masking`.
+Nothing here modifies a transcript, and no raw content is printed: only entry types, key
+names, counts and masked shapes appear in the report (see :mod:`ccp.verify.masking`).
 
 Every rule below that guesses at Claude Code's format is marked ``[verify]``.
 """
@@ -198,8 +198,11 @@ def _record_block(
     elif block_type == "tool_result":
         tool_name = tool_names.get(str(block.get("tool_use_id", "")), "")
         # [verify] The structured patch is expected in the entry's `toolUseResult` field.
+        # It holds file content, so every string is hidden (max_visible=0): keys and types
+        # only. A short secret in an edited file must never appear in the report.
         if tool_name in EDIT_TOOLS and "toolUseResult" in entry:
-            facts.edit_result_shapes.setdefault(tool_name, shape_of(entry["toolUseResult"]))
+            shape = shape_of(entry["toolUseResult"], max_visible=0)
+            facts.edit_result_shapes.setdefault(tool_name, shape)
 
 
 # ---------------------------------------------------------------- report
