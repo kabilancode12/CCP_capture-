@@ -66,6 +66,7 @@ How to run the verification session and record the results: [docs/verify/](docs/
 ccp_V2/
 ├── src/ccp/                 Application code (installable package)
 │   ├── settings.py          Settings read from environment variables
+│   ├── redaction/           Removes secrets and personal data before upload
 │   └── verify/              Step 0 tools: transcript, environment and hook inspectors
 ├── tests/
 │   ├── unit/                Fast tests, one file per module
@@ -76,6 +77,7 @@ ccp_V2/
 │   ├── architecture.md      Design and decisions
 │   ├── setup.md             Installation and first run
 │   ├── configuration.md     Every setting (environment variable) explained
+│   ├── redaction.md         What is redacted, guarantees and limits
 │   ├── verify/              Test-session script and transcript-facts template
 │   └── reference/           Original proposal, handover, plan and diagrams
 ├── reference/poc/           The first proof of concept, kept unchanged for reference

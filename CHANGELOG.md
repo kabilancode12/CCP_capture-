@@ -11,6 +11,8 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
   results, conversation tree, compaction, sub-agents), with values masked.
 - `ccp-verify env`: description of the machine, surface, shell and account storage, with
   values hidden.
+- Redaction (`ccp.redaction`): 17 rules for secrets and Indian personal data (Aadhaar with
+  checksum, PAN, mobile, email); records rule and location, never the value; fails closed.
 - Settings module (`ccp.settings`): typed, validated configuration from environment variables
   and an optional `.env` file; reports all problems at once, never prints values, wraps secrets.
 - Hook probe (`ccp-verify hook-probe`, `probe-settings`, `probe-report`): records which Claude

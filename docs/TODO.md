@@ -36,7 +36,7 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
 ## Step 1: safe capture and ingestion
 
 - [x] **1.1** Settings module (env-based config). *Done when:* one place reads config; tests cover defaults.
-- [ ] **1.2** Redaction module: secret rules, Aadhaar, PAN, phone, email; records rule and
+- [x] **1.2** Redaction module: secret rules, Aadhaar, PAN, phone, email; records rule and
   location, never the value. *Done when:* planted fake values are always replaced.
 - [ ] **1.3** Real migration `001`: session, session_env, event, redaction_log, job.
   *Done when:* applies and rolls back cleanly in Docker.
