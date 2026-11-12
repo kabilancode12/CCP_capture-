@@ -1,17 +1,18 @@
 # Runs automatically on `git commit` once installed with `pre-commit install`.
+# Reference copies of the old project are kept unchanged, so no hook may touch them.
+exclude: ^(reference|docs/reference)/
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
-        exclude: ^reference/
       - id: check-yaml
       - id: check-toml
       - id: check-added-large-files
         args: ["--maxkb=500"]
-        exclude: \.(docx|drawio)$
-      - id: detect-private-key
+      # No detect-private-key hook: gitleaks below already has private-key rules, and this
+      # hook's launcher is blocked by company Application Control on some machines.
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.8.6
@@ -20,7 +21,13 @@ repos:
         args: ["--fix"]
       - id: ruff-format
 
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.21.2
+  # Secret scan of staged changes. Runs the official image through Docker because the
+  # source build needs a Go toolchain, which company policy blocks on some machines.
+  # Docker Desktop must be running when you commit.
+  - repo: local
     hooks:
       - id: gitleaks
+        name: gitleaks (secret scan, via Docker)
+        entry: zricethezav/gitleaks:v8.21.2 protect --staged --redact --no-banner -v
+        language: docker_image
+        pass_filenames: false

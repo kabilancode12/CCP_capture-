@@ -26,11 +26,17 @@ pip install -e ".[dev]"
 If PowerShell blocks the activate script, run
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
 
-Optional: enable the pre-commit checks so problems are caught before a commit:
+Enable the pre-commit checks so problems are caught before a commit:
 
 ```powershell
-pre-commit install
+python -m pre_commit install
+python -m pre_commit run --all-files    # optional: check everything now
 ```
+
+The checks are whitespace and file hygiene, ruff, and a gitleaks secret scan of staged changes.
+The old-project copies in `reference/` and `docs/reference/` are excluded and never modified.
+To scan the whole Git history for secrets:
+`docker run --rm -v "${PWD}:/repo" -w /repo zricethezav/gitleaks:v8.21.2 detect --source . --redact`.
 
 ## 3. Configuration
 
@@ -90,4 +96,5 @@ If your machine blocks the `.exe` launchers (see Troubleshooting), use the modul
 | `python3: Python was not found` | The Microsoft Store stub is on PATH; use `python`, or turn off the stub in Settings > Apps > Advanced app settings > App execution aliases |
 | Compose says a variable is not set | Run compose with `--env-file .env` from the repository root |
 | `pytest.exe` or `mypy.exe` "blocked by an Application Control policy" | Company policy blocks unsigned launchers. Run them as modules: `python -m pytest`, `python -m ruff check .`, `python -m ccp.verify env` |
+| pre-commit fails with "Application Control policy has blocked" while building a hook | Hooks that need a compiler or Go toolchain are blocked. This repository avoids them (gitleaks runs as a Docker image); do not add hooks that build from source |
 | `mypy` fails with "DLL load failed ... Application Control policy" | The prebuilt mypy contains a compiled file that is blocked. Install the pure-Python build: `pip install --force-reinstall --no-deps --no-binary mypy mypy` |

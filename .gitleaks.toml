@@ -1,0 +1,13 @@
+# Gitleaks settings: start from the default rule set and allow only known fake test values.
+title = "ccp gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake secrets planted on purpose by the old proof of concept's tests"
+# Keep this list as short as possible: one entry per file, never a whole folder.
+paths = [
+  '''reference/poc/test_poc\.sh''',                        # plants fake key "sk_live_0123..."
+  '''docs/reference/HANDOVER-claude-interaction-capture\.md''', # reproduces that test script
+]
