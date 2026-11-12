@@ -11,11 +11,11 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
 - [x] **0.2** Hook probe: logs which hooks fire and the keys of each payload, never content.
   *Done when:* it has tests and can be registered on all hooks including SessionEnd.
   (Live check: headless run on Windows fired SessionStart, UserPromptSubmit, Stop, SessionEnd.)
-- [ ] **0.3** Run the [scripted real session](verify/test-session-script.md) on Windows (you,
+- [x] **0.3** Run the [scripted real session](verify/test-session-script.md) on Windows (you,
   guided by Claude). *Done when:* a transcript and a hook log exist.
-- [ ] **0.4** Run `ccp-verify` on that transcript and fix inspector gaps.
+- [x] **0.4** Run `ccp-verify` on that transcript and fix inspector gaps.
   *Done when:* the report covers thinking, edit results, tree, sub-agents and compaction.
-- [ ] **0.5** Fill in [transcript-facts.md](verify/transcript-facts.md).
+- [x] **0.5** Fill in [transcript-facts.md](verify/transcript-facts.md).
   *Done when:* no `?` remains for anything tested, each with its design impact.
 - [ ] **0.6** Run `ccp-verify env` on the other surfaces available (PowerShell, Git Bash, VS Code).
   *Done when:* the environment matrix is updated.

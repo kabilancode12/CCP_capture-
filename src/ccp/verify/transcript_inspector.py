@@ -48,7 +48,12 @@ class TranscriptFacts:
         session_ids: Distinct session identifiers seen.
         entries_with_uuid: Entries carrying a ``uuid``.
         entries_with_parent: Entries carrying a ``parentUuid``.
-        children_per_parent: How many entries point at each ``parentUuid``.
+        prompt_children_per_parent: How many user *prompts* point at each ``parentUuid``.
+            Only prompts count: a tool call's result and the next assistant entry legitimately
+            share a parent, so counting all children would report false rewinds.
+        bytes_by_type: Size in bytes of the lines of each entry type.
+        denied_tool_calls: Tool results marked with ``toolDenialKind`` (permission denied).
+        subagent_files: Transcript files found in a ``subagents`` folder.
     """
 
     files: list[str] = field(default_factory=list)
@@ -68,12 +73,19 @@ class TranscriptFacts:
     session_ids: set[str] = field(default_factory=set)
     entries_with_uuid: int = 0
     entries_with_parent: int = 0
-    children_per_parent: Counter[str] = field(default_factory=Counter)
+    prompt_children_per_parent: Counter[str] = field(default_factory=Counter)
+    bytes_by_type: Counter[str] = field(default_factory=Counter)
+    denied_tool_calls: int = 0
+    subagent_files: int = 0
 
     @property
     def branch_points(self) -> int:
-        """Number of entries that have more than one child (a possible rewind or fork)."""
-        return sum(1 for count in self.children_per_parent.values() if count > 1)
+        """Number of entries followed by two or more user prompts (a rewind).
+
+        Observed on Claude Code 2.1.289: after a rewind, the old prompt stays in the file and
+        the new prompt becomes a second child of the same entry.
+        """
+        return sum(1 for count in self.prompt_children_per_parent.values() if count > 1)
 
 
 def find_transcripts(paths: list[Path]) -> list[Path]:
@@ -104,6 +116,8 @@ def inspect_files(paths: list[Path]) -> TranscriptFacts:
     facts = TranscriptFacts()
     for file_path in find_transcripts(paths):
         facts.files.append(str(file_path))
+        # Observed layout: <session-id>/subagents/agent-<agent-id>.jsonl
+        facts.subagent_files += file_path.parent.name == "subagents"
         # Maps a tool call id to its tool name, so a later result can be matched to its tool.
         tool_names: dict[str, str] = {}
         with file_path.open(encoding="utf-8", errors="replace") as handle:
@@ -127,7 +141,9 @@ def _record_line(facts: TranscriptFacts, raw_line: str, tool_names: dict[str, st
 
     entry_type = str(entry.get("type", "<missing>"))
     facts.entry_types[entry_type] += 1
+    facts.bytes_by_type[entry_type] += len(raw_line.strip().encode("utf-8"))
     facts.keys_by_type[entry_type].update(entry.keys())
+    facts.denied_tool_calls += "toolDenialKind" in entry
     _record_identity_and_tree(facts, entry)
     _record_compaction(facts, entry, entry_type)
 
@@ -146,7 +162,20 @@ def _record_identity_and_tree(facts: TranscriptFacts, entry: JsonObject) -> None
         facts.entries_with_uuid += 1
     if entry.get("parentUuid"):
         facts.entries_with_parent += 1
-        facts.children_per_parent[str(entry["parentUuid"])] += 1
+        if _is_user_prompt(entry):
+            facts.prompt_children_per_parent[str(entry["parentUuid"])] += 1
+
+
+def _is_user_prompt(entry: JsonObject) -> bool:
+    """Return True for a user entry that is a typed prompt, not a tool result."""
+    if entry.get("type") != "user" or "toolUseResult" in entry:
+        return False
+    message = entry.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    has_tool_result = isinstance(content, list) and any(
+        isinstance(block, dict) and block.get("type") == "tool_result" for block in content
+    )
+    return not has_tool_result
 
 
 def _record_compaction(facts: TranscriptFacts, entry: JsonObject, entry_type: str) -> None:
@@ -222,10 +251,10 @@ def render_markdown(facts: TranscriptFacts) -> str:
     lines += [f"- Invalid lines: {facts.invalid_lines}", f"- Session ids: {len(facts.session_ids)}"]
 
     lines += ["", "## Entry types and keys seen", ""]
-    lines += ["| type | count | keys |", "| --- | --- | --- |"]
+    lines += ["| type | count | bytes | keys |", "| --- | --- | --- | --- |"]
     for entry_type, count in facts.entry_types.most_common():
         keys = ", ".join(sorted(facts.keys_by_type[entry_type]))
-        lines.append(f"| {entry_type} | {count} | {keys} |")
+        lines.append(f"| {entry_type} | {count} | {facts.bytes_by_type[entry_type]} | {keys} |")
 
     lines += ["", "## Assistant messages", ""]
     lines += [f"- Total: {facts.assistant_messages}"]
@@ -248,10 +277,12 @@ def render_markdown(facts: TranscriptFacts) -> str:
     lines += ["", "## Conversation tree [verify]", ""]
     lines += [f"- Entries with uuid: {facts.entries_with_uuid}"]
     lines += [f"- Entries with parentUuid: {facts.entries_with_parent}"]
-    lines += [f"- Branch points (parent with more than one child): {facts.branch_points}"]
+    lines += [f"- Rewind points (an entry followed by 2+ user prompts): {facts.branch_points}"]
+    lines += [f"- Denied tool calls (toolDenialKind): {facts.denied_tool_calls}"]
 
     lines += ["", "## Sub-agents and compaction [verify]", ""]
     lines += [f"- Sidechain entries: {facts.sidechain_entries}"]
+    lines += [f"- Sub-agent transcript files: {facts.subagent_files}"]
     markers = dict(facts.compaction_markers) or "none"
     lines += [f"- Compaction markers: {markers}"]
     return "\n".join(lines) + "\n"

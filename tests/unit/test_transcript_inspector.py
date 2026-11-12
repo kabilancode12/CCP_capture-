@@ -80,10 +80,48 @@ def test_result_of_unknown_tool_is_ignored(tmp_path: Path) -> None:
     assert inspect_files([transcript]).edit_result_shapes == {}
 
 
-def test_branch_point_and_sidechain_detected() -> None:
+def test_sidechain_detected_and_shared_parent_of_non_prompts_is_not_a_rewind() -> None:
     facts = inspect_files([FIXTURE])
-    assert facts.branch_points == 1  # a2 and a3 share the parent u2
     assert facts.sidechain_entries == 1
+    assert facts.branch_points == 0  # a2 and a3 share parent u2, but neither is a prompt
+
+
+def test_two_user_prompts_with_the_same_parent_count_as_a_rewind(tmp_path: Path) -> None:
+    transcript = tmp_path / "t.jsonl"
+    lines = [
+        '{"type":"user","uuid":"p1","parentUuid":"s1","message":{"role":"user","content":"a"}}',
+        '{"type":"user","uuid":"p2","parentUuid":"s1","message":{"role":"user","content":"b"}}',
+    ]
+    transcript.write_text("\n".join(lines), encoding="utf-8")
+    assert inspect_files([transcript]).branch_points == 1
+
+
+def test_tool_result_is_not_counted_as_a_prompt(tmp_path: Path) -> None:
+    transcript = tmp_path / "t.jsonl"
+    lines = [
+        '{"type":"user","uuid":"p1","parentUuid":"a1","toolUseResult":{"x":1},'
+        '"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t"}]}}',
+        '{"type":"user","uuid":"p2","parentUuid":"a1","message":{"role":"user","content":"hi"}}',
+    ]
+    transcript.write_text("\n".join(lines), encoding="utf-8")
+    assert inspect_files([transcript]).branch_points == 0
+
+
+def test_denied_tool_call_and_sizes_are_counted(tmp_path: Path) -> None:
+    transcript = tmp_path / "t.jsonl"
+    line = '{"type":"user","toolDenialKind":"user","toolUseResult":"no"}'
+    transcript.write_text(line + "\n", encoding="utf-8")
+    facts = inspect_files([transcript])
+    assert facts.denied_tool_calls == 1
+    assert facts.bytes_by_type["user"] == len(line)
+
+
+def test_files_in_a_subagents_folder_are_counted(tmp_path: Path) -> None:
+    folder = tmp_path / "session" / "subagents"
+    folder.mkdir(parents=True)
+    (folder / "agent-1.jsonl").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "session" / "main.jsonl").write_text("{}\n", encoding="utf-8")
+    assert inspect_files([tmp_path]).subagent_files == 1
 
 
 def test_compaction_marker_detected() -> None:

@@ -15,6 +15,16 @@ def test_vscode_surface_from_term_program() -> None:
     assert detect_surface({"TERM_PROGRAM": "vscode"})["value"] == "vscode"
 
 
+def test_entrypoint_marks_the_vscode_extension() -> None:
+    result = detect_surface({"CLAUDE_CODE_ENTRYPOINT": "claude-vscode"})
+    assert result["value"] == "vscode"
+
+
+def test_entrypoint_cli_wins_over_ide_markers() -> None:
+    env = {"CLAUDE_CODE_ENTRYPOINT": "cli", "TERM_PROGRAM": "vscode"}
+    assert detect_surface(env)["value"] == "terminal"  # CLI started inside a VS Code terminal
+
+
 def test_jetbrains_surface() -> None:
     assert detect_surface({"TERMINAL_EMULATOR": "JetBrains-JediTerm"})["value"] == "jetbrains"
 

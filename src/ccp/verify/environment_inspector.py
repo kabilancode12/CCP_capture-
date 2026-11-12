@@ -35,7 +35,17 @@ def detect(value: str, evidence: str) -> dict[str, str]:
 
 
 def detect_surface(env: Mapping[str, str]) -> dict[str, str]:
-    """Guess where Claude Code runs: terminal, VS Code, JetBrains or the web ([verify])."""
+    """Guess where Claude Code runs: terminal, VS Code, JetBrains or the web ([verify]).
+
+    ``CLAUDE_CODE_ENTRYPOINT`` is the most reliable marker. Observed on Claude Code 2.1.289:
+    ``cli`` in a terminal and ``claude-vscode`` in the VS Code extension (the extension does
+    not set ``TERM_PROGRAM``). Other values are not yet known.
+    """
+    entrypoint = env.get("CLAUDE_CODE_ENTRYPOINT", "")
+    if entrypoint == "claude-vscode":
+        return detect("vscode", "CLAUDE_CODE_ENTRYPOINT=claude-vscode")
+    if entrypoint == "cli":
+        return detect("terminal", "CLAUDE_CODE_ENTRYPOINT=cli")
     if env.get("CLAUDE_CODE_REMOTE"):
         return detect("web-or-remote", "CLAUDE_CODE_REMOTE is set")
     if env.get("TERM_PROGRAM") == "vscode":
