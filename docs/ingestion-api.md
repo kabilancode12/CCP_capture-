@@ -56,7 +56,30 @@ curl.exe -X PUT -H "Authorization: Bearer $env:CCP_INGEST_TOKEN" --data-binary "
   http://127.0.0.1:8000/v1/sessions/4a64fad3-ca80-49bc-a42e-87f42b332b4b/streams/main/chunks/0
 ```
 
-## What an upload does
+### `PUT /v1/attachments/{digest}`
+
+Uploads one attachment body: the large, repeated value that the client moved out of a transcript
+line (see [storage.md](storage.md#attachment-de-duplication)). Send `Authorization: Bearer
+<token>` and the body (compact JSON, UTF-8). `digest` is the SHA-256 of the body, as 64 lowercase
+hex digits.
+
+Developers' machines send attachments **here**, not to MinIO, so they never hold storage
+credentials. The server checks that the body really hashes to `digest`, so a client cannot store
+content under a wrong name or overwrite another attachment: the same key always holds the same bytes.
+
+| Status | Meaning |
+| --- | --- |
+| 201 | Stored for the first time |
+| 200 | Already stored (the same content, uploaded before by this or another session): nothing written |
+| 400 | `digest` is not 64 lowercase hex digits |
+| 401 | Missing or wrong token |
+| 413 | Larger than `CCP_MAX_CHUNK_BYTES` |
+| 422 | Empty, not UTF-8, not JSON, or the body does not hash to `digest` |
+| 503 | Storage temporarily unavailable: retry later |
+
+Successful responses are `{"stored": true|false}`.
+
+## What a chunk upload does
 
 1. Check the token (compared in constant time) and the ids; check size and shape.
 2. Store the chunk under `sessions/<session_id>/<stream>/<offset>.jsonl` (see [storage.md](storage.md)).
@@ -111,6 +134,8 @@ loop.
   validation, idempotency, conflicts, size limits, and failure of each dependency.
 - `tests/unit/ingest/test_closer.py`: the timer loop (keeps running after errors, stops with the
   server). `tests/integration/test_idle_sessions.py`: the closing SQL against real PostgreSQL.
+- `tests/unit/ingest/test_attachment_upload.py`: the attachment endpoint (digest check, idempotency,
+  limits, outages).
 - `tests/integration/test_ingest_api.py`: the API against the real PostgreSQL and MinIO
   (throwaway database and bucket), including recovery after a database outage, and one test over
   a real network socket with uvicorn.

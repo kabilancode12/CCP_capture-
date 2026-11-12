@@ -51,6 +51,10 @@ result = externalise_line(
 original = restore_line(result.text, store)
 ```
 
+On a developer's machine the bodies are not written to MinIO directly: the capture client sends
+each one to the ingestion API (`PUT /v1/attachments/{digest}`, see
+[ingestion-api.md](ingestion-api.md)), so the machine needs no storage credentials.
+
 Guarantees and rules:
 
 - **Redact first, then externalise.** The stored objects and their hashes are of clean content.

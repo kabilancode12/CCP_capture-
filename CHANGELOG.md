@@ -11,6 +11,8 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
   results, conversation tree, compaction, sub-agents), with values masked.
 - `ccp-verify env`: description of the machine, surface, shell and account storage, with
   values hidden.
+- `PUT /v1/attachments/{digest}`: developers' machines upload de-duplicated attachment bodies
+  through the API (the server verifies the SHA-256), so they need no storage credentials.
 - Idle-session closer: open sessions with no activity for `CCP_SESSION_IDLE_MINUTES` are closed
   (end reason `idle_timeout`) with a final index job; runs in the server and as `ccp-ingest
   close-idle`; a late chunk reopens the session.

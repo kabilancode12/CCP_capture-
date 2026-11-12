@@ -1,5 +1,7 @@
 """The ingestion API against a real PostgreSQL and a real MinIO (see conftest.py)."""
 
+import hashlib
+import json
 import socket
 import threading
 import time
@@ -19,6 +21,7 @@ from ccp.ingest.app import IngestService
 from ccp.ingest.repository import PostgresRepository
 from ccp.settings import DatabaseSettings, Secret
 from ccp.storage import ObjectStore
+from ccp.storage.attachments import MIN_EXTERNAL_BYTES, externalise_line, restore_line
 
 pytestmark = pytest.mark.integration
 
@@ -230,3 +233,57 @@ def test_the_api_works_over_real_http(
     assert first.json() == {"stored": True, "next_offset": len(LINE)}
     assert len(object_store.list_keys("sessions/")) == 1
     assert _rows(database, "SELECT status FROM job") == [("queued",)]
+
+
+# ---------------------------------------------------------------- attachments end to end
+
+
+def test_attachments_uploaded_through_the_api_restore_the_original_line(
+    client: TestClient, object_store: ObjectStore
+) -> None:
+    """Pointer lines made on a 'client' restore from the server's store (the formats agree)."""
+    body = {"type": "skill_listing", "text": "x" * (MIN_EXTERNAL_BYTES * 2)}
+    original = json.dumps(
+        {"type": "attachment", "uuid": "u1", "sessionId": "s1", "attachment": body},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+    # The "client": externalise into a local dictionary; it never sees the object store.
+    local = _DictStore()
+    pointer_line = externalise_line(original, local).text
+    assert len(pointer_line) < len(original) / 5
+
+    # Upload every body to the API, as the client will.
+    for key, data in local.objects.items():
+        digest = key.rsplit("/", 1)[1]
+        assert (
+            client.put(f"/v1/attachments/{digest}", content=data, headers=AUTH).status_code == 201
+        )
+
+    # The "server side": the real object store can rebuild the original, byte for byte.
+    assert restore_line(pointer_line, object_store) == original
+    assert len(object_store.list_keys("attachments/")) == 1
+
+
+def test_a_second_upload_of_the_same_attachment_is_not_stored_again(
+    client: TestClient, object_store: ObjectStore
+) -> None:
+    data = json.dumps({"k": "v" * 50}, separators=(",", ":")).encode()
+    url = f"/v1/attachments/{hashlib.sha256(data).hexdigest()}"
+    assert client.put(url, content=data, headers=AUTH).status_code == 201
+    assert client.put(url, content=data, headers=AUTH).status_code == 200
+    assert len(object_store.list_keys("attachments/")) == 1
+
+
+class _DictStore:
+    """A local dictionary standing in for what a developer's machine has (no object store)."""
+
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+
+    def put_if_absent(self, key: str, data: bytes) -> bool:
+        return self.objects.setdefault(key, data) is data
+
+    def get(self, key: str) -> bytes:
+        return self.objects[key]

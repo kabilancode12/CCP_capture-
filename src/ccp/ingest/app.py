@@ -20,6 +20,18 @@ Endpoints:
 
     Every success returns ``{"stored": bool, "next_offset": int}``: where the next chunk starts.
 
+``PUT /v1/attachments/{digest}``
+    Upload one attachment body (compact JSON) under its SHA-256 digest. Large, repeated
+    attachment values are stored once, by content (see ``ccp.storage.attachments``); developers'
+    machines send them here, so they never need storage credentials. The server checks that the
+    body really hashes to ``digest``. Requires the bearer token.
+
+    * 201 stored for the first time; 200 already stored (nothing written).
+    * 400 bad digest, 401 bad token, 413 too large, 422 not JSON or digest mismatch,
+      503 storage down.
+
+    Every success returns ``{"stored": bool}``.
+
 The server assumes one uploader per session (a developer's machine). Two machines sending
 different chunks for the same offset at the same moment is not supported.
 """
@@ -37,15 +49,17 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.types import Lifespan
 
+from ccp.ingest.attachments import AttachmentError, validate_attachment
 from ccp.ingest.chunks import ChunkError, validate_chunk
 from ccp.ingest.repository import RepositoryError, SessionRepository
 from ccp.settings import Secret
 from ccp.storage import StorageError
-from ccp.storage.keys import transcript_chunk_key
+from ccp.storage.keys import attachment_key, transcript_chunk_key
 
 logger = logging.getLogger("ccp.ingest")
 
 CHUNK_CONTENT_TYPE = "application/x-ndjson"
+ATTACHMENT_CONTENT_TYPE = "application/json"
 
 
 class ChunkStore(Protocol):
@@ -106,6 +120,7 @@ class IngestService:
                     self.put_chunk,
                     methods=["PUT"],
                 ),
+                Route("/v1/attachments/{digest}", self.put_attachment, methods=["PUT"]),
             ],
         )
 
@@ -133,11 +148,9 @@ class IngestService:
         except ValueError as error:
             return _error(400, str(error))
 
-        if _declared_size(request) > self._max_chunk_bytes:  # refuse before reading the body
-            return _error(413, f"chunk is larger than {self._max_chunk_bytes} bytes")
-        body = await request.body()
-        if len(body) > self._max_chunk_bytes:
-            return _error(413, f"chunk is larger than {self._max_chunk_bytes} bytes")
+        body = await self._read_body(request)
+        if isinstance(body, JSONResponse):
+            return body
         try:
             validate_chunk(body)
         except ChunkError as error:
@@ -155,7 +168,45 @@ class IngestService:
             status_code=201 if created else 200,
         )
 
+    async def put_attachment(self, request: Request) -> JSONResponse:
+        """Store one attachment body under its digest (see the module description)."""
+        if not self._is_authorised(request):
+            return _error(401, "missing or invalid token", {"WWW-Authenticate": "Bearer"})
+
+        digest = request.path_params["digest"]
+        try:
+            key = attachment_key(digest)
+        except ValueError as error:
+            return _error(400, str(error))
+
+        body = await self._read_body(request)
+        if isinstance(body, JSONResponse):
+            return body
+        try:
+            validate_attachment(digest, body)
+        except AttachmentError as error:
+            return _error(422, str(error))
+
+        try:
+            created = await run_in_threadpool(self._save_attachment, key, body)
+        except StorageError as error:
+            logger.warning("attachment %s not saved: %s", key, error)
+            return _error(503, "storage temporarily unavailable")
+        return JSONResponse({"stored": created}, status_code=201 if created else 200)
+
     # ------------------------------------------------------------ helpers
+
+    async def _read_body(self, request: Request) -> bytes | JSONResponse:
+        """Read the request body, or return a 413 response if it is larger than the limit.
+
+        The announced Content-Length is checked first, so an oversized upload is refused before
+        it is read.
+        """
+        too_large = _error(413, f"body is larger than {self._max_chunk_bytes} bytes")
+        if _declared_size(request) > self._max_chunk_bytes:
+            return too_large
+        body = await request.body()
+        return too_large if len(body) > self._max_chunk_bytes else body
 
     def _is_authorised(self, request: Request) -> bool:
         """Check the bearer token in constant time (so timing does not reveal it)."""
@@ -181,6 +232,19 @@ class IngestService:
             return None
         self._repository.record_chunk(session_id)
         return created
+
+    def _save_attachment(self, key: str, body: bytes) -> bool:
+        """Store the body unless it is already there.
+
+        The key is the content's hash, so an object that already exists is identical.
+
+        Returns:
+            True if newly stored, False if it already existed.
+        """
+        if self._store.exists(key):
+            return False
+        self._store.put(key, body, ATTACHMENT_CONTENT_TYPE)
+        return True
 
     def _check_database(self) -> bool:
         try:
