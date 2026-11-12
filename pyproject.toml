@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ccp"
+version = "0.1.0"
+description = "Claude Capture Platform: capture Claude Code sessions, index them, build a knowledge base."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Xenovex Technologies" }]
+# Runtime dependencies stay empty in Step 0: the verification tools use only the standard library.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.8",
+    "mypy>=1.11",
+    "pre-commit>=3.8",
+]
+
+[project.scripts]
+# One command with sub-commands: `ccp-verify transcript ...` and `ccp-verify env`.
+ccp-verify = "ccp.verify.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ccp"]
+
+# ---------------------------------------------------------------- tooling
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["reference"]          # the old POC is kept as-is, for reading only
+
+[tool.ruff.lint]
+# E/F/W: pycodestyle + pyflakes, I: import order, B: bugbear, UP: modern syntax,
+# SIM: simplifications, D: docstrings (Google style), N: naming, S: security checks.
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "D", "N", "S"]
+ignore = ["D203", "D213"]               # conflicting docstring rules; we use D211 and D212
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D", "S101"]              # tests need no docstrings and may use assert
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
