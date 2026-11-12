@@ -1,0 +1,146 @@
+from pathlib import Path
+
+import pytest
+
+from ccp.settings import (
+    MIN_TOKEN_LENGTH,
+    Secret,
+    SettingsError,
+    load_settings,
+    read_env_file,
+)
+
+# A complete, valid set of required variables. Tests change one value at a time.
+VALID_ENV = {
+    "POSTGRES_DB": "ccp",
+    "POSTGRES_USER": "ccp",
+    "POSTGRES_PASSWORD": "pg-password-value",
+    "MINIO_ACCESS_KEY": "ccp-admin",
+    "MINIO_SECRET_KEY": "minio-secret-value",
+    "CCP_INGEST_TOKEN": "t" * MIN_TOKEN_LENGTH,
+}
+
+
+def _load(**overrides: str) -> object:
+    """Load settings from VALID_ENV plus overrides; an empty string removes a variable."""
+    env = {**VALID_ENV, **overrides}
+    env = {key: value for key, value in env.items() if value != ""}
+    return load_settings(env, env_file=None)
+
+
+def test_defaults_are_applied_for_optional_variables() -> None:
+    settings = load_settings(VALID_ENV, env_file=None)
+    assert settings.database.host == "localhost"
+    assert settings.database.port == 5432
+    assert settings.storage.endpoint == "localhost:9000"
+    assert settings.storage.bucket == "ccp-raw"
+    assert settings.storage.secure is False
+    assert settings.api.port == 8000
+    assert settings.api.session_idle_minutes == 30
+
+
+def test_values_from_the_environment_override_defaults() -> None:
+    env = {**VALID_ENV, "POSTGRES_PORT": "6543", "MINIO_SECURE": "yes", "CCP_API_PORT": "9000"}
+    settings = load_settings(env, env_file=None)
+    assert settings.database.port == 6543
+    assert settings.storage.secure is True
+    assert settings.api.port == 9000
+
+
+def test_all_missing_variables_are_reported_together() -> None:
+    with pytest.raises(SettingsError) as error:
+        load_settings({}, env_file=None)
+    message = str(error.value)
+    for name in ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "MINIO_ACCESS_KEY"):
+        assert f"{name} is required" in message
+    assert "CCP_INGEST_TOKEN is required" in message
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "expected"),
+    [
+        ("POSTGRES_PORT", "abc", "POSTGRES_PORT must be a whole number"),
+        ("POSTGRES_PORT", "70000", "POSTGRES_PORT must be between 1 and 65535"),
+        ("MINIO_SECURE", "maybe", "MINIO_SECURE must be true or false"),
+        ("CCP_SESSION_IDLE_MINUTES", "0", "CCP_SESSION_IDLE_MINUTES must be between 1 and 1440"),
+        ("CCP_INGEST_TOKEN", "short", "CCP_INGEST_TOKEN must be at least 16 characters long"),
+        ("MINIO_SECRET_KEY", "short", "MINIO_SECRET_KEY must be at least 8 characters long"),
+    ],
+)
+def test_invalid_values_are_rejected_with_a_clear_message(
+    name: str, value: str, expected: str
+) -> None:
+    with pytest.raises(SettingsError, match=expected):
+        _load(**{name: value})
+
+
+def test_error_messages_never_contain_leaked_texts() -> None:
+    leaked_text = "very-secret-but-too-short"
+    env = {**VALID_ENV, "POSTGRES_PORT": leaked_text, "CCP_INGEST_TOKEN": "tiny"}
+    with pytest.raises(SettingsError) as error:
+        load_settings(env, env_file=None)
+    assert leaked_text not in str(error.value)
+    assert "tiny" not in str(error.value)
+
+
+def test_secrets_are_masked_when_printed() -> None:
+    settings = load_settings(VALID_ENV, env_file=None)
+    assert "pg-password-value" not in repr(settings)
+    assert "minio-secret-value" not in repr(settings)
+    assert str(settings.database.password) == "***"
+    assert settings.database.password.reveal() == "pg-password-value"
+
+
+def test_secret_wrapper_masks_str_and_repr() -> None:
+    secret = Secret("abc123")
+    assert str(secret) == "***"
+    assert repr(secret) == "Secret(***)"
+    assert "abc123" not in f"{secret} {secret!r}"
+
+
+def test_settings_are_immutable() -> None:
+    settings = load_settings(VALID_ENV, env_file=None)
+    with pytest.raises(AttributeError):
+        settings.api.port = 1  # type: ignore[misc]
+
+
+def test_blank_values_count_as_missing() -> None:
+    with pytest.raises(SettingsError, match="POSTGRES_DB is required"):
+        load_settings({**VALID_ENV, "POSTGRES_DB": "   "}, env_file=None)
+
+
+# ---------------------------------------------------------------- .env file
+
+
+def test_env_file_is_parsed(tmp_path: Path) -> None:
+    file = tmp_path / ".env"
+    file.write_text(
+        "# comment\n\nA=1\nB = two\nC=\"quoted value\"\nD='single'\nnot a pair\nE=a=b\n",
+        encoding="utf-8",
+    )
+    assert read_env_file(file) == {
+        "A": "1",
+        "B": "two",
+        "C": "quoted value",
+        "D": "single",
+        "E": "a=b",
+    }
+
+
+def test_missing_env_file_gives_an_empty_result(tmp_path: Path) -> None:
+    assert read_env_file(tmp_path / "missing.env") == {}
+
+
+def test_real_environment_overrides_the_env_file(tmp_path: Path) -> None:
+    file = tmp_path / ".env"
+    file.write_text("POSTGRES_DB=from-file\nPOSTGRES_USER=from-file\n", encoding="utf-8")
+    env = {**VALID_ENV, "POSTGRES_DB": "from-environment"}
+    settings = load_settings(env, env_file=file)
+    assert settings.database.name == "from-environment"  # environment wins
+    assert settings.database.user == "ccp"  # also set in the environment
+
+
+def test_values_missing_from_the_environment_come_from_the_file(tmp_path: Path) -> None:
+    file = tmp_path / ".env"
+    file.write_text("POSTGRES_PORT=7000\n", encoding="utf-8")
+    assert load_settings(VALID_ENV, env_file=file).database.port == 7000

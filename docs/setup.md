@@ -45,7 +45,9 @@ To scan the whole Git history for secrets:
 Copy-Item .env.example .env
 ```
 
-Open `.env` and replace both `change-me-...` passwords. `.env` is git-ignored. Never commit it.
+Open `.env` and replace every `change-me-...` value (database and MinIO passwords, ingestion token).
+`.env` is git-ignored. Never commit it. Every variable is explained in [configuration.md](configuration.md).
+If you created `.env` earlier, compare it with `.env.example`: new variables were added.
 
 ## 4. Start the local services
 

@@ -11,6 +11,8 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
   results, conversation tree, compaction, sub-agents), with values masked.
 - `ccp-verify env`: description of the machine, surface, shell and account storage, with
   values hidden.
+- Settings module (`ccp.settings`): typed, validated configuration from environment variables
+  and an optional `.env` file; reports all problems at once, never prints values, wraps secrets.
 - Hook probe (`ccp-verify hook-probe`, `probe-settings`, `probe-report`): records which Claude
   Code hooks fire and their payload key names, never content; always exits 0.
 - Local Docker Compose stack: PostgreSQL 16 with pgvector, and MinIO (Chainguard build pinned

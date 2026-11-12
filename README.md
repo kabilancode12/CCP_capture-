@@ -65,7 +65,8 @@ How to run the verification session and record the results: [docs/verify/](docs/
 ```text
 ccp_V2/
 ├── src/ccp/                 Application code (installable package)
-│   └── verify/              Step 0 tools: transcript and environment inspectors
+│   ├── settings.py          Settings read from environment variables
+│   └── verify/              Step 0 tools: transcript, environment and hook inspectors
 ├── tests/
 │   ├── unit/                Fast tests, one file per module
 │   └── fixtures/            Hand-written synthetic data (never real transcripts)
@@ -74,6 +75,7 @@ ccp_V2/
 ├── docs/
 │   ├── architecture.md      Design and decisions
 │   ├── setup.md             Installation and first run
+│   ├── configuration.md     Every setting (environment variable) explained
 │   ├── verify/              Test-session script and transcript-facts template
 │   └── reference/           Original proposal, handover, plan and diagrams
 ├── reference/poc/           The first proof of concept, kept unchanged for reference
