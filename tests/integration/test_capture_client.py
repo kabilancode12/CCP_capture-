@@ -6,16 +6,10 @@ back.
 """
 
 import json
-import socket
-import threading
-import time
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
-import uvicorn
-from starlette.applications import Starlette
 
 from ccp.capture.api import HttpApiClient
 from ccp.capture.cli import main as capture_main
@@ -27,80 +21,17 @@ from ccp.capture.environment import (
 )
 from ccp.capture.state import StateStore
 from ccp.db.connection import connect
-from ccp.db.migrations import discover_migrations, migrate
 from ccp.environment import EnvironmentRecord
-from ccp.ingest.app import IngestService
-from ccp.ingest.repository import PostgresRepository
 from ccp.settings import DatabaseSettings, Secret
 from ccp.storage import ObjectStore
 from ccp.storage.attachments import MIN_EXTERNAL_BYTES, restore_line
 
+from .conftest import API_TOKEN, RunningApi
+
 pytestmark = pytest.mark.integration
 
-REAL_MIGRATIONS = Path(__file__).parents[2] / "db" / "migrations"
-TOKEN = "capture" + "-client-test-token"  # invented; built from pieces for the secret scanner
+TOKEN = API_TOKEN
 SESSION = "sess-capture-1"
-
-
-# ---------------------------------------------------------------- a server that can restart
-
-
-class RunningApi:
-    """The API served by uvicorn on a fixed local port; can be stopped and started again."""
-
-    def __init__(self, app: Starlette) -> None:
-        with socket.socket() as probe:
-            probe.bind(("127.0.0.1", 0))
-            self.port = probe.getsockname()[1]
-        self._app = app
-        self._server: uvicorn.Server | None = None
-        self._thread: threading.Thread | None = None
-
-    @property
-    def url(self) -> str:
-        return f"http://127.0.0.1:{self.port}"
-
-    def start(self) -> None:
-        config = uvicorn.Config(self._app, host="127.0.0.1", port=self.port, log_level="warning")
-        self._server = uvicorn.Server(config)
-        self._thread = threading.Thread(target=self._server.run, daemon=True)
-        self._thread.start()
-        deadline = time.monotonic() + 10
-        while not self._server.started and time.monotonic() < deadline:
-            time.sleep(0.02)
-        assert self._server.started, "server did not start"
-
-    def stop(self) -> None:
-        if self._server and self._thread:
-            self._server.should_exit = True
-            self._thread.join(timeout=5)
-            self._server = self._thread = None
-
-
-@pytest.fixture
-def database(temp_database: DatabaseSettings) -> DatabaseSettings:
-    connection = connect(temp_database)
-    try:
-        migrate(connection, discover_migrations(REAL_MIGRATIONS))
-    finally:
-        connection.close()
-    return temp_database
-
-
-@pytest.fixture
-def api(database: DatabaseSettings, object_store: ObjectStore) -> Iterator[RunningApi]:
-    service = IngestService(
-        token=Secret(TOKEN),
-        store=object_store,
-        repository=PostgresRepository(database),
-        max_chunk_bytes=8 * 1024 * 1024,
-    )
-    running = RunningApi(service.build_app())
-    running.start()
-    try:
-        yield running
-    finally:
-        running.stop()
 
 
 @pytest.fixture

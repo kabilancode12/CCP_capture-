@@ -4,8 +4,10 @@ The part of the platform that runs on a **developer's machine**: it reads Claude
 files and uploads them to the [ingestion API](ingestion-api.md). The code is in
 [`src/ccp/capture/`](../src/ccp/capture/). The Claude Code hooks that call it are added in task 1.9.
 
-It needs no database or storage credentials, and no packages beyond Python and this project: it
-talks only to the API, using the standard library for HTTP.
+It needs no database or storage credentials, and **no packages at all beyond this project**: it talks
+only to the API, using the standard library for HTTP. A test checks that importing it loads none of the
+server's packages (MinIO, the PostgreSQL driver, the web framework), so each hook starts in about
+0.15 s.
 
 ## Commands
 
@@ -14,6 +16,9 @@ ccp-capture sync --session-id <id> <path to the session transcript .jsonl>
 ccp-capture catch-up        # upload what earlier sessions left behind
 ccp-capture environment --session-id <id> [transcript]   # record where the session runs
 ```
+
+Claude Code calls `ccp-capture hook` for each event: see [hooks.md](hooks.md). `ccp-capture hook-settings`
+prints the settings that register the hooks.
 
 If the `ccp-capture` launcher is blocked on your machine, use `python -m ccp.capture` (or call
 `ccp.capture.cli.main`). Both print one line per session, for example

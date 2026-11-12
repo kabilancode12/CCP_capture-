@@ -50,8 +50,10 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
 - [x] **1.7** Capture client: incremental upload by byte offset, offline queue, retry.
   *Done when:* killing the API mid-session loses nothing once it returns.
 - [x] **1.8** Environment and account record at session start. *Done when:* `session_env` has real values.
-- [ ] **1.9** Hook handlers for the 5 hooks; SessionEnd as best-effort flush; private mode with
-  logged toggles. *Done when:* private mode sends only the minimal record.
+- [x] **1.9** Hook handlers for the hooks; SessionEnd as best-effort flush. *Done when:* real Claude
+  Code captures a session through the hooks. (Private mode was split off: see 1.9b.)
+- [ ] **1.9b** Private mode with logged toggles. **On hold by decision.** *Done when:* private mode
+  sends only the minimal record.
 - [ ] **1.10** Code snapshots ported from the old proof of concept. *Done when:* the old 27 checks pass.
 - [ ] **1.11** Docs: setup, run and hook registration for Windows. *Done when:* a new developer can follow them cold.
 - [ ] **1.12** Self-pilot for a week. *Done when:* zero lost sessions and no planted secret on the server.

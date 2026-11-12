@@ -1,7 +1,6 @@
 """The sync logic, tested with a fake API and real files in a temporary folder."""
 
 import json
-from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -10,71 +9,11 @@ from ccp.capture.api import ApiRejectedError, ApiUnavailableError
 from ccp.capture.client import CaptureClient
 from ccp.capture.state import StateStore
 from ccp.environment import EnvironmentRecord
-from ccp.redaction.records import RedactionRecord
 from ccp.storage.attachments import MIN_EXTERNAL_BYTES
 
+from .conftest import Clock, FakeApi
+
 SESSION = "sess-1"
-
-
-class FakeApi:
-    """Records every call, in order; can be told to fail."""
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str]] = []  # (kind, detail)
-        self.chunks: dict[tuple[str, int], bytes] = {}  # (stream, offset) -> body
-        self.attachments: dict[str, bytes] = {}
-        self.redactions: list[RedactionRecord] = []
-        self.environments: list[EnvironmentRecord] = []
-        self.fail_with: Exception | None = None
-        self.fail_on: str | None = None  # a kind: "chunk", "attachment" or "redactions"
-
-    def _maybe_fail(self, kind: str) -> None:
-        if self.fail_with is not None and self.fail_on in (None, kind):
-            raise self.fail_with
-
-    def put_chunk(self, session_id: str, stream: str, offset: int, body: bytes) -> bool:
-        self._maybe_fail("chunk")
-        self.calls.append(("chunk", f"{stream}@{offset}"))
-        new = (stream, offset) not in self.chunks
-        self.chunks[(stream, offset)] = body
-        return new
-
-    def put_attachment(self, digest: str, body: bytes) -> bool:
-        self._maybe_fail("attachment")
-        self.calls.append(("attachment", digest[:8]))
-        new = digest not in self.attachments
-        self.attachments[digest] = body
-        return new
-
-    def put_environment(self, session_id: str, record: EnvironmentRecord) -> None:
-        self._maybe_fail("environment")
-        self.calls.append(("environment", str(len(record.to_payload()))))
-        self.environments.append(record)
-
-    def post_redactions(self, session_id: str, records: Sequence[RedactionRecord]) -> None:
-        self._maybe_fail("redactions")
-        self.calls.append(("redactions", str(len(records))))
-        self.redactions.extend(records)
-
-
-class Clock:
-    """A clock that only moves when told to."""
-
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
-@pytest.fixture
-def api() -> FakeApi:
-    return FakeApi()
-
-
-@pytest.fixture
-def state(tmp_path: Path) -> StateStore:
-    return StateStore(tmp_path / "state")
 
 
 @pytest.fixture
@@ -473,3 +412,88 @@ def test_the_failure_reason_never_contains_the_values(api: FakeApi, state: State
     record = EnvironmentRecord(account_email="dev@example.com", hostname="laptop-1")
     reason = _client(api, state).report_environment(SESSION, record)
     assert "dev@example.com" not in str(reason) and "laptop-1" not in str(reason)
+
+
+# ---------------------------------------------------------------- built for hooks
+
+
+def test_a_stream_result_says_when_the_api_was_unavailable(
+    api: FakeApi, state: StateStore, transcript: Path
+) -> None:
+    _write(transcript, _entry(1))
+    api.fail_with = ApiUnavailableError("down")
+    (result,) = _client(api, state).sync_session(SESSION, transcript)
+    assert result.api_unavailable and result.error is not None
+
+    api.fail_with = ApiRejectedError(401, "bad token")  # a refusal is not "unavailable"
+    (refused,) = _client(api, state).sync_session(SESSION, transcript)
+    assert not refused.api_unavailable and refused.error is not None
+
+
+def test_sub_agent_streams_are_not_tried_once_the_api_is_known_to_be_down(
+    api: FakeApi, state: StateStore, transcript: Path
+) -> None:
+    _write(transcript, _entry(1))
+    folder = transcript.with_suffix("") / "subagents"
+    folder.mkdir(parents=True)
+    for name in ("agent-a", "agent-b"):
+        _write(folder / f"{name}.jsonl", {"type": "user", "uuid": name})
+    api.fail_with = ApiUnavailableError("down")
+
+    results = _client(api, state).sync_session(SESSION, transcript)
+
+    assert [r.stream for r in results] == ["main"]  # the others would only have failed slowly too
+
+
+def test_a_call_can_use_its_own_time_limit(
+    api: FakeApi, state: StateStore, transcript: Path
+) -> None:
+    _write(transcript, *[_entry(n) for n in range(1, 5)])
+    line_size = len(json.dumps(_entry(1), separators=(",", ":"))) + 1
+    clock = Clock()
+    client = _client(api, state, chunk_bytes=line_size, budget_seconds=1000.0, clock=clock)
+
+    original_put = api.put_chunk
+
+    def slow(session_id: str, stream: str, offset: int, body: bytes) -> bool:
+        clock.now += 6.0
+        return original_put(session_id, stream, offset, body)
+
+    api.put_chunk = slow  # type: ignore[method-assign]
+    (result,) = client.sync_session(
+        SESSION, transcript, budget_seconds=10.0
+    )  # not the 1000 default
+    assert result.chunks == 2 and not result.caught_up
+
+
+def test_catch_up_stops_at_the_first_unavailable_api(
+    api: FakeApi, state: StateStore, tmp_path: Path
+) -> None:
+    for name in ("s-a", "s-b", "s-c"):
+        path = tmp_path / name / f"{name}.jsonl"
+        _write(path, _entry(1))
+        state.remember_transcript(name, path)
+    api.fail_with = ApiUnavailableError("down")
+
+    results = _client(api, state).catch_up()
+
+    assert list(results) == ["s-a"]  # the other sessions were not tried
+
+
+def test_catch_up_shares_one_time_limit_across_sessions(
+    api: FakeApi, state: StateStore, tmp_path: Path
+) -> None:
+    clock = Clock()
+    for name in ("s-a", "s-b", "s-c"):
+        path = tmp_path / name / f"{name}.jsonl"
+        _write(path, _entry(1))
+        state.remember_transcript(name, path)
+    original_put = api.put_chunk
+
+    def slow(session_id: str, stream: str, offset: int, body: bytes) -> bool:
+        clock.now += 4.0  # each session's upload takes 4 s
+        return original_put(session_id, stream, offset, body)
+
+    api.put_chunk = slow  # type: ignore[method-assign]
+    results = _client(api, state, clock=clock).catch_up(budget_seconds=6.0)
+    assert list(results) == ["s-a", "s-b"]  # time ran out before the third session

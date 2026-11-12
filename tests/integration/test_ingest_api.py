@@ -16,7 +16,6 @@ import uvicorn
 from starlette.testclient import TestClient
 
 from ccp.db.connection import connect
-from ccp.db.migrations import discover_migrations, migrate
 from ccp.ingest.app import IngestService
 from ccp.ingest.repository import PostgresRepository
 from ccp.settings import DatabaseSettings, Secret
@@ -53,17 +52,6 @@ def _execute(database: DatabaseSettings, sql: str) -> None:
         connection.commit()
     finally:
         connection.close()
-
-
-@pytest.fixture
-def database(temp_database: DatabaseSettings) -> DatabaseSettings:
-    """The throwaway database with every migration applied."""
-    connection = connect(temp_database)
-    try:
-        migrate(connection, discover_migrations(REAL_MIGRATIONS))
-    finally:
-        connection.close()
-    return temp_database
 
 
 def _service(database: DatabaseSettings, store: ObjectStore) -> IngestService:

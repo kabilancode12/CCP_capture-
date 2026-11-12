@@ -16,6 +16,9 @@ running when you commit.
 
 ## 2. Python environment
 
+This section is for **development and for the server**. A developer machine that only uploads
+transcripts needs just `pip install .`, with no extra packages (see [hooks.md](hooks.md)).
+
 ```powershell
 cd <repository root>
 python -m venv .venv

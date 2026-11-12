@@ -15,6 +15,12 @@ It reads its settings from `.env` / the environment ([configuration.md](configur
 `CCP_API_HOST`, `CCP_API_PORT`, `CCP_INGEST_TOKEN`, `CCP_MAX_CHUNK_BYTES`, plus the database and
 MinIO settings. On start it connects to MinIO and creates the bucket if it is missing.
 
+The server **checks the database schema when it starts** and refuses to start if migrations are
+pending: `The database schema is behind this server (pending: 003_...). Run: ccp-db migrate`. Use
+`--migrations-dir` if the migration files are not in `db/migrations`, or `--skip-schema-check` to
+start anyway. If the migrations folder or the database is not reachable, the check is skipped with a
+warning and `/health` reports what is down.
+
 ## Endpoints
 
 ### `GET /health`

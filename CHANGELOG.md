@@ -6,6 +6,8 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
 
 ### Changed
 
+- Dependencies are split: the capture client needs no packages; the server's are in the `server`
+  extra. Importing the client no longer loads MinIO (import time 0.46 s to 0.15 s).
 - The chunk upload response no longer contains `next_offset` (the uploaded text is redacted, so its
   size is not the source position).
 - The redactor writes redacted lines in Claude Code's compact JSON format, so redacted attachment
@@ -13,6 +15,7 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
 
 ### Fixed
 
+- Every hook log line was written twice (the handler was attached to a logger and its parent).
 - The API answered 401/400 without reading the request body, which could reset the connection on
   Windows: the client saw a network error instead of the refusal. The body is now read first.
 - A redaction location was built from the original dictionary key, so a key that was itself a secret
@@ -25,6 +28,11 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
   results, conversation tree, compaction, sub-agents), with values masked.
 - `ccp-verify env`: description of the machine, surface, shell and account storage, with
   values hidden.
+- Claude Code hooks (`ccp-capture hook`, `hook-settings`): SessionStart, UserPromptSubmit, Stop,
+  SubagentStop, PreCompact and SessionEnd upload what is new. Always exit 0, print nothing, log no
+  content, short upload budgets, internal-helper SubagentStop skipped, detached best-effort flush at
+  SessionEnd, catch-up at SessionStart. Verified with real Claude Code. Private mode is deferred.
+- Server start-up schema check: refuses to start while migrations are pending.
 - Environment record (`ccp-capture environment`, `PUT /v1/sessions/{id}/environment`): version,
   surface, shells, OS, host and user, and the account are collected in two stages (process at
   session start, transcript once it exists) and merged on the server. Personal data: see

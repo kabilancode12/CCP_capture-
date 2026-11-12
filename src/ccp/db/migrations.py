@@ -237,6 +237,17 @@ def status(
     return [(m, m.version in applied) for m in migrations]
 
 
+def pending_migrations(
+    connection: pg8000.dbapi.Connection, migrations: Sequence[Migration]
+) -> list[Migration]:
+    """Return the migrations that have not been applied yet, in order.
+
+    Raises:
+        MigrationError: If the database and the files disagree about history (see ``status``).
+    """
+    return [migration for migration, applied in status(connection, migrations) if not applied]
+
+
 def _run(
     connection: pg8000.dbapi.Connection, migration: Migration, path: Path, *, record: bool
 ) -> None:

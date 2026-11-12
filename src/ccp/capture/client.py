@@ -46,6 +46,8 @@ class StreamResult:
         attachments: How many attachment bodies were sent.
         caught_up: True if everything complete in the file has been uploaded.
         error: Why the sync stopped early, or ``None``. It never contains transcript content.
+        api_unavailable: True if the stop was because the API could not be reached, so trying other
+            streams or sessions right now is pointless.
     """
 
     stream: str
@@ -53,6 +55,7 @@ class StreamResult:
     attachments: int = 0
     caught_up: bool = False
     error: str | None = None
+    api_unavailable: bool = False
 
 
 class CaptureClient:
@@ -89,39 +92,66 @@ class CaptureClient:
 
     # ------------------------------------------------------------ public
 
-    def sync_session(self, session_id: str, transcript_path: Path) -> list[StreamResult]:
+    def sync_session(
+        self,
+        session_id: str,
+        transcript_path: Path,
+        budget_seconds: float | None = None,
+    ) -> list[StreamResult]:
         """Upload everything new for a session: its transcript and its sub-agents' files.
 
         Args:
             session_id: Claude Code's session id.
             transcript_path: The session transcript (``<session>.jsonl``). Sub-agent files are
                 found next to it in ``<session>/subagents/``.
+            budget_seconds: Time limit for this call instead of the client's default (a hook that
+                holds up Claude Code, such as UserPromptSubmit, uses a short one).
 
         Returns:
-            One result per stream.
+            One result per stream that was tried. If the API is unavailable, the remaining
+            streams are not tried (they would fail the same way, and slowly).
         """
-        deadline = self._clock() + self._budget
+        deadline = self._clock() + (self._budget if budget_seconds is None else budget_seconds)
+        return self._sync_session_until(session_id, transcript_path, deadline)
+
+    def catch_up(self, budget_seconds: float | None = None) -> dict[str, list[StreamResult]]:
+        """Sync every session the client has seen whose transcript file still exists.
+
+        Used at session start to pick up what earlier sessions left behind (a session that ended
+        abruptly, an upload that failed). It shares one time limit across all sessions and stops
+        at the first "API unavailable".
+
+        Args:
+            budget_seconds: Time limit for the whole catch-up instead of the client's default.
+        """
+        deadline = self._clock() + (self._budget if budget_seconds is None else budget_seconds)
+        results: dict[str, list[StreamResult]] = {}
+        for session_id, path in self._state.known_sessions():
+            if self._clock() >= deadline:
+                break
+            if path.is_file():
+                results[session_id] = self._sync_session_until(session_id, path, deadline)
+                if any(r.api_unavailable for r in results[session_id]):
+                    break  # the API is down: the other sessions would fail the same way
+        return results
+
+    def _sync_session_until(
+        self, session_id: str, transcript_path: Path, deadline: float
+    ) -> list[StreamResult]:
+        """Sync a session's streams until ``deadline`` (see :meth:`sync_session`)."""
         self._state.remember_transcript(session_id, transcript_path)
         results = [self._sync_lines(session_id, MAIN_STREAM, transcript_path, deadline)]
 
         agents_folder = transcript_path.with_suffix("") / "subagents"
-        if agents_folder.is_dir():
+        if agents_folder.is_dir() and not results[0].api_unavailable:
             for path in sorted(agents_folder.glob("agent-*.jsonl")):
                 results.append(self._sync_lines(session_id, path.stem, path, deadline))
+                if results[-1].api_unavailable:
+                    return results
             for path in sorted(agents_folder.glob("agent-*.meta.json")):
                 results.append(self._sync_meta(session_id, path, deadline))
-        return results
-
-    def catch_up(self) -> dict[str, list[StreamResult]]:
-        """Sync every session the client has seen whose transcript file still exists.
-
-        Used at session start to pick up what earlier sessions left behind (a session that ended
-        abruptly, an upload that failed).
-        """
-        results: dict[str, list[StreamResult]] = {}
-        for session_id, path in self._state.known_sessions():
-            if path.is_file():
-                results[session_id] = self.sync_session(session_id, path)
+                if results[-1].api_unavailable:
+                    return results
         return results
 
     def report_environment(self, session_id: str, record: EnvironmentRecord) -> str | None:
@@ -240,6 +270,7 @@ class CaptureClient:
         except ApiUnavailableError as error:
             logger.warning("upload paused: %s", error)
             result.error = "the API is unavailable; will retry on the next sync"
+            result.api_unavailable = True
             return None
         except ApiRejectedError as error:
             logger.error("upload refused: %s", error)

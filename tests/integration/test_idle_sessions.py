@@ -8,7 +8,6 @@ from typing import Any
 import pytest
 
 from ccp.db.connection import connect
-from ccp.db.migrations import discover_migrations, migrate
 from ccp.ingest.repository import PostgresRepository
 from ccp.ingest.server import main
 from ccp.settings import DatabaseSettings
@@ -17,17 +16,6 @@ pytestmark = pytest.mark.integration
 
 REAL_MIGRATIONS = Path(__file__).parents[2] / "db" / "migrations"
 IDLE_MINUTES = 30
-
-
-@pytest.fixture
-def database(temp_database: DatabaseSettings) -> DatabaseSettings:
-    """The throwaway database with every migration applied."""
-    connection = connect(temp_database)
-    try:
-        migrate(connection, discover_migrations(REAL_MIGRATIONS))
-    finally:
-        connection.close()
-    return temp_database
 
 
 @pytest.fixture
@@ -204,3 +192,60 @@ def test_a_session_that_receives_a_chunk_at_the_same_moment_is_not_closed(
     assert result == [[]]  # nothing was closed
     assert _rows(database, "SELECT status FROM session") == [("open",)]
     assert _rows(database, "SELECT count(*) FROM job") == [(0,)]
+
+
+# ---------------------------------------------------------------- start-up schema check
+
+
+def test_the_server_starts_when_every_migration_is_applied(
+    database: DatabaseSettings,
+) -> None:
+    from ccp.ingest.server import schema_problem
+
+    assert schema_problem(database, REAL_MIGRATIONS) is None
+
+
+def test_the_server_refuses_to_start_when_migrations_are_pending(
+    temp_database: DatabaseSettings,
+) -> None:
+    """A real mistake: the server ran against a database that was missing migration 003."""
+    from ccp.db.migrations import discover_migrations, migrate
+    from ccp.ingest.server import schema_problem
+
+    migrations = discover_migrations(REAL_MIGRATIONS)
+    connection = connect(temp_database)
+    try:
+        migrate(connection, migrations, target=2)  # 003 and later are left out
+    finally:
+        connection.close()
+
+    problem = schema_problem(temp_database, REAL_MIGRATIONS)
+
+    assert problem is not None
+    assert "003_redaction_log_idempotent" in problem and "ccp-db migrate" in problem
+
+
+def test_an_empty_database_is_reported_as_behind(temp_database: DatabaseSettings) -> None:
+    from ccp.ingest.server import schema_problem
+
+    problem = schema_problem(temp_database, REAL_MIGRATIONS)
+    assert problem is not None and "001_initial_schema" in problem
+
+
+def test_the_check_is_skipped_when_there_is_no_migrations_folder(
+    temp_database: DatabaseSettings, tmp_path: Path
+) -> None:
+    from ccp.ingest.server import schema_problem
+
+    assert schema_problem(temp_database, tmp_path / "nope") is None
+
+
+def test_the_check_is_skipped_when_the_database_cannot_be_reached(
+    temp_database: DatabaseSettings,
+) -> None:
+    from dataclasses import replace
+
+    from ccp.ingest.server import schema_problem
+
+    unreachable = replace(temp_database, port=1)
+    assert schema_problem(unreachable, REAL_MIGRATIONS) is None  # /health will report it instead

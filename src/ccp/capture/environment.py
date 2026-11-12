@@ -158,6 +158,25 @@ def collect_transcript_environment(transcript: Path) -> EnvironmentRecord:
     )
 
 
+def collect_environment(
+    env: Mapping[str, str], home: Path, transcript: Path | None = None, host: HostInfo | None = None
+) -> EnvironmentRecord:
+    """Collect the whole environment record.
+
+    That is the process stage, plus the transcript stage if the transcript exists yet.
+
+    Args:
+        env: Environment variables of the hook process.
+        home: The user's home directory.
+        transcript: The session transcript, or ``None`` if it does not exist yet.
+        host: Facts about the machine; defaults to the machine this runs on.
+    """
+    record = collect_process_environment(env, home, host)
+    if transcript is not None:
+        record = record.merged_with(collect_transcript_environment(transcript))
+    return record
+
+
 def _environment_snapshot(entry: dict[str, Any]) -> dict[str, Any] | None:
     """Return the ``snapshot`` of an ``environment`` attachment entry, if this is one."""
     attachment = entry.get("attachment")

@@ -3,6 +3,8 @@
     ccp-capture sync --session-id <id> <transcript.jsonl>   upload what is new for one session
     ccp-capture catch-up                                    upload what earlier sessions left behind
     ccp-capture environment --session-id <id> [transcript]  record where the session runs
+    ccp-capture hook                                        handle one Claude Code hook (stdin)
+    ccp-capture hook-settings [--api-url URL]               print the hook registration settings
 
 Settings come from environment variables only (see docs/configuration.md); a ``.env`` file is
 deliberately not read. The Claude Code hooks (task 1.9) call these commands.
@@ -11,6 +13,7 @@ deliberately not read. The Claude Code hooks (task 1.9) call these commands.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from collections.abc import Sequence
@@ -18,7 +21,9 @@ from pathlib import Path
 
 from ccp.capture.api import HttpApiClient
 from ccp.capture.client import CaptureClient, StreamResult
-from ccp.capture.environment import collect_process_environment, collect_transcript_environment
+from ccp.capture.environment import collect_environment
+from ccp.capture.hook_runner import run_hook
+from ccp.capture.hook_settings import build_hook_settings, hook_command
 from ccp.capture.state import StateStore
 from ccp.settings import SettingsError, load_client_settings
 
@@ -35,6 +40,13 @@ def build_parser() -> argparse.ArgumentParser:
     environment.add_argument("--session-id", required=True, help="Claude Code session id")
     environment.add_argument(
         "transcript", nargs="?", type=Path, help="the session transcript, once it exists"
+    )
+    commands.add_parser("hook", help="handle one Claude Code hook (payload on standard input)")
+    hook_settings = commands.add_parser(
+        "hook-settings", help="print the settings that register hooks"
+    )
+    hook_settings.add_argument(
+        "--api-url", default="http://127.0.0.1:8000", help="ingestion API address for the env block"
     )
     return parser
 
@@ -58,6 +70,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         upload error occurred. The hook wrapper (task 1.9) decides what to do with a non-zero code.
     """
     args = build_parser().parse_args(argv)
+    if args.command == "hook":  # never fails, never prints: see ccp.capture.hook_runner
+        payload = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+        return run_hook(payload, os.environ, Path.home())
+    if args.command == "hook-settings":
+        print(json.dumps(build_hook_settings(hook_command(), args.api_url), indent=2))
+        return 0
     try:
         settings = load_client_settings()
     except SettingsError as error:
@@ -71,9 +89,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     if args.command == "environment":
-        record = collect_process_environment(os.environ, Path.home())
-        if args.transcript is not None:  # the transcript adds the version and the tool shell
-            record = record.merged_with(collect_transcript_environment(args.transcript))
+        record = collect_environment(os.environ, Path.home(), args.transcript)
         problem = client.report_environment(args.session_id, record)
         print(
             f"{args.session_id}: environment "
