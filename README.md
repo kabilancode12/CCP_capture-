@@ -47,7 +47,9 @@ pytest
 | Task | Command |
 | --- | --- |
 | Inventory a transcript | `ccp-verify transcript <file-or-folder> [--out report.md]` |
-| Describe this machine and surface | `ccp-verify env` |
+| Describe this machine and surface | `ccp-verify env [--out env.json]` |
+| Register the hook probe (scratch repos only) | `ccp-verify probe-settings` |
+| See which hooks fired | `ccp-verify probe-report` |
 | Run tests | `pytest` |
 | Lint and format check | `ruff check .` and `ruff format --check .` |
 | Type check | `mypy` |

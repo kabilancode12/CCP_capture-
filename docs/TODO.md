@@ -8,8 +8,9 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
 
 - [x] **0.1** Install pre-commit and secret scanning; run all hooks on the repo.
   *Done when:* hooks pass; a planted secret is blocked. (gitleaks runs through Docker.)
-- [ ] **0.2** Hook probe: logs which hooks fire and the keys of each payload, never content.
+- [x] **0.2** Hook probe: logs which hooks fire and the keys of each payload, never content.
   *Done when:* it has tests and can be registered on all hooks including SessionEnd.
+  (Live check: headless run on Windows fired SessionStart, UserPromptSubmit, Stop, SessionEnd.)
 - [ ] **0.3** Run the [scripted real session](verify/test-session-script.md) on Windows (you,
   guided by Claude). *Done when:* a transcript and a hook log exist.
 - [ ] **0.4** Run `ccp-verify` on that transcript and fix inspector gaps.

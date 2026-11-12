@@ -22,6 +22,17 @@ transcript.
 
 2. Run `ccp-verify env --out env-before.json` and keep the file.
 3. Note the Claude Code version: `claude --version`.
+4. Register the hook probe in the scratch repository only (so no other project is affected).
+   From the CCP repository, with its virtual environment active:
+
+   ```powershell
+   New-Item -ItemType Directory -Force C:\temp\ccp-verify-repo\.claude | Out-Null
+   ccp-verify probe-settings | Set-Content C:\temp\ccp-verify-repo\.claude\settings.local.json -Encoding utf8
+   ```
+
+   The probe logs which hooks fire (names, payload key names and a few enum values; no
+   content) to `~/.ccp/hook-probe.jsonl`. To use another file, set `CCP_PROBE_LOG` first.
+   If Claude Code reports a settings error, remove the event it names from `PROBE_EVENTS`.
 
 ## Steps
 
@@ -47,7 +58,13 @@ Get-ChildItem "$HOME\.claude\projects" -Recurse -Filter *.jsonl | Sort-Object La
 # Inspect it (include the folder to pick up any sub-agent files)
 ccp-verify transcript "<path to the folder or file>" --out transcript-report.md
 ccp-verify env --out env-after.json
+
+# Which hooks fired, in what order, with which payload keys
+ccp-verify probe-report
 ```
+
+Compare the report with the steps: did `PreCompact` fire at step 5, `SubagentStart` and
+`SubagentStop` at step 3, and `SessionEnd` at step 6? Events listed as "never fired" are facts too.
 
 Copy the findings into [transcript-facts.md](transcript-facts.md). Do **not** commit the
 transcript or the report if it contains anything private; the report shows structure only,
