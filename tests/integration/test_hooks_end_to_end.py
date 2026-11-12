@@ -191,9 +191,9 @@ def test_a_whole_session_is_captured_through_the_hooks(
     started = time.monotonic()
     _assert_quiet_success(machine.hook("SessionEnd", reason="prompt_input_exit"))
     assert time.monotonic() - started < 15  # it did not wait for the upload
-    assert _wait_until(
-        lambda: '"uuid":"a2"' in _stored(object_store)
-    ), "the background flush did not run"
+    assert _wait_until(lambda: '"uuid":"a2"' in _stored(object_store)), (
+        "the background flush did not run"
+    )
 
     # The log tells the story without any content or token.
     log = machine.log()
