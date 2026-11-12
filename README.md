@@ -69,6 +69,7 @@ ccp_V2/
 │   ├── settings.py          Settings read from environment variables
 │   ├── redaction/           Removes secrets and personal data before upload
 │   ├── db/                  Database connection and migration runner
+│   ├── storage/             MinIO object store, key layout, attachment de-duplication
 │   └── verify/              Step 0 tools: transcript, environment and hook inspectors
 ├── tests/
 │   ├── unit/                Fast tests, one file per module
@@ -84,6 +85,7 @@ ccp_V2/
 │   ├── configuration.md     Every setting (environment variable) explained
 │   ├── redaction.md         What is redacted, guarantees and limits
 │   ├── database.md          Migrations: commands, writing and testing them
+│   ├── storage.md           Object storage, key layout, attachment de-duplication
 │   ├── verify/              Test-session script and transcript-facts template
 │   └── reference/           Original proposal, handover, plan and diagrams
 ├── reference/poc/           The first proof of concept, kept unchanged for reference

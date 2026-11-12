@@ -12,7 +12,7 @@ license = { text = "Proprietary" }
 authors = [{ name = "Xenovex Technologies" }]
 # pg8000 is a pure-Python PostgreSQL driver: no compiled library, so it also works on machines
 # where company policy blocks unsigned DLLs (psycopg's binary build is blocked there).
-dependencies = ["pg8000>=1.31,<2"]
+dependencies = ["pg8000>=1.31,<2", "minio>=7.2,<8"]
 
 [project.optional-dependencies]
 dev = [

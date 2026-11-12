@@ -40,8 +40,8 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
   location, never the value. *Done when:* planted fake values are always replaced.
 - [x] **1.3** Real migration `001`: session, session_env, event, redaction_log, job.
   *Done when:* applies and rolls back cleanly in Docker.
-- [ ] **1.4** MinIO storage wrapper (create bucket, put/get chunk). *Done when:* round-trip test passes.
-- [ ] **1.4a** Attachment de-duplication: store each attachment body once under its content
+- [x] **1.4** MinIO storage wrapper (create bucket, put/get chunk). *Done when:* round-trip test passes.
+- [x] **1.4a** Attachment de-duplication: store each attachment body once under its content
   hash (after redaction); the transcript line keeps a pointer. *Done when:* the same
   attachment uploaded in two sessions is stored once and the transcript can be rebuilt exactly.
 - [ ] **1.5** Ingestion API (FastAPI): health, token auth, chunk upload, session upsert,

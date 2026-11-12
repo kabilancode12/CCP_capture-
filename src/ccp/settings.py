@@ -212,6 +212,17 @@ def _read_database(reader: _Reader) -> DatabaseSettings:
     )
 
 
+def _read_storage(reader: _Reader) -> StorageSettings:
+    """Read the MinIO group of settings."""
+    return StorageSettings(
+        endpoint=reader.text("MINIO_ENDPOINT", "127.0.0.1:9000"),
+        access_key=reader.text("MINIO_ACCESS_KEY"),
+        secret_key=reader.secret("MINIO_SECRET_KEY", min_length=8),
+        bucket=reader.text("MINIO_BUCKET", "ccp-raw"),
+        secure=reader.boolean("MINIO_SECURE", default=False),
+    )
+
+
 def load_database_settings(
     env: Mapping[str, str] | None = None, env_file: Path | None = DEFAULT_ENV_FILE
 ) -> DatabaseSettings:
@@ -224,6 +235,16 @@ def load_database_settings(
     database = _read_database(reader)
     reader.raise_if_errors()
     return database
+
+
+def load_storage_settings(
+    env: Mapping[str, str] | None = None, env_file: Path | None = DEFAULT_ENV_FILE
+) -> StorageSettings:
+    """Build only the storage (MinIO) settings. Arguments and errors as in :func:`load_settings`."""
+    reader = _Reader(_merge_env(env, env_file))
+    storage = _read_storage(reader)
+    reader.raise_if_errors()
+    return storage
 
 
 def load_settings(
@@ -247,13 +268,7 @@ def load_settings(
     reader = _Reader(_merge_env(env, env_file))
     settings = Settings(
         database=_read_database(reader),
-        storage=StorageSettings(
-            endpoint=reader.text("MINIO_ENDPOINT", "127.0.0.1:9000"),
-            access_key=reader.text("MINIO_ACCESS_KEY"),
-            secret_key=reader.secret("MINIO_SECRET_KEY", min_length=8),
-            bucket=reader.text("MINIO_BUCKET", "ccp-raw"),
-            secure=reader.boolean("MINIO_SECURE", default=False),
-        ),
+        storage=_read_storage(reader),
         api=ApiSettings(
             host=reader.text("CCP_API_HOST", "127.0.0.1"),
             port=reader.integer("CCP_API_PORT", 8000, 1, 65535),

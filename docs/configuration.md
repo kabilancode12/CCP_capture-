@@ -28,7 +28,7 @@ error messages name the variable, not its value.
 | `MINIO_ENDPOINT` | no | `127.0.0.1:9000` | `host:port`, without `http://` |
 | `MINIO_ACCESS_KEY` | **yes** | | Access key the application uses |
 | `MINIO_SECRET_KEY` | **yes** (secret) | | Secret key, at least 8 characters |
-| `MINIO_BUCKET` | no | `ccp-raw` | Bucket for raw transcripts |
+| `MINIO_BUCKET` | no | `ccp-raw` | Bucket for raw transcripts; created by the application on first use |
 | `MINIO_SECURE` | no | `false` | `true` to use HTTPS |
 
 Docker Compose also reads `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `MINIO_API_PORT` and

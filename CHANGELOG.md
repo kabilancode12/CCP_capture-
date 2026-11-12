@@ -11,6 +11,8 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
   results, conversation tree, compaction, sub-agents), with values masked.
 - `ccp-verify env`: description of the machine, surface, shell and account storage, with
   values hidden.
+- Object storage (`ccp.storage`): MinIO wrapper, validated key layout with idempotent chunk keys,
+  and attachment de-duplication by content hash with byte-exact restore. Uses the `minio` client.
 - Database migrations (`ccp-db status|migrate|rollback`): numbered SQL files with checksums,
   per-migration transactions and a lock; first schema `001_initial_schema` (session, session_env,
   event, redaction_log, job). Uses the pure-Python `pg8000` driver.

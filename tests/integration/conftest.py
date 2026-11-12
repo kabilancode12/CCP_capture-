@@ -1,8 +1,8 @@
-"""Fixtures for tests that need the local PostgreSQL (``docker compose up -d``).
+"""Fixtures for tests that need the local PostgreSQL and MinIO (``docker compose up -d``).
 
-Each test gets its own throwaway database, created before and dropped after, so tests never
-touch the real ``ccp`` database and never interfere with each other. If PostgreSQL cannot be
-reached, the tests are skipped, not failed.
+Each test gets its own throwaway database or bucket, created before and removed after, so tests
+never touch the real ``ccp`` database or ``ccp-raw`` bucket and never interfere with each other.
+If a service cannot be reached, the tests that need it are skipped, not failed.
 """
 
 import uuid
@@ -12,9 +12,17 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from minio import Minio
 
 from ccp.db.connection import connect
-from ccp.settings import DatabaseSettings, SettingsError, load_database_settings
+from ccp.settings import (
+    DatabaseSettings,
+    SettingsError,
+    StorageSettings,
+    load_database_settings,
+    load_storage_settings,
+)
+from ccp.storage import ObjectStore, StorageError, connect_store
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
 
@@ -46,3 +54,36 @@ def db_connection(admin_settings: DatabaseSettings) -> Iterator[Any]:
         connection.close()
         admin.cursor().execute(f'DROP DATABASE "{name}" WITH (FORCE)')
         admin.close()
+
+
+@pytest.fixture(scope="session")
+def storage_settings() -> StorageSettings:
+    """Storage settings from `.env`; skips the test if they are missing or unreachable."""
+    try:
+        settings = load_storage_settings(env_file=REPOSITORY_ROOT / ".env")
+        # exists() answers False for a missing bucket or key, and raises only if MinIO is down.
+        connect_store(settings, create_bucket=False).exists("connectivity-check")
+    except SettingsError as error:
+        pytest.skip(f"storage settings not available: {error}")
+    except StorageError as error:
+        pytest.skip(f"MinIO not reachable (is Docker running?): {error}")
+    return settings
+
+
+@pytest.fixture
+def object_store(storage_settings: StorageSettings) -> Iterator[ObjectStore]:
+    """An object store on a fresh, empty, throwaway bucket."""
+    bucket = f"ccp-test-{uuid.uuid4().hex[:10]}"
+    store = connect_store(replace(storage_settings, bucket=bucket))
+    try:
+        yield store
+    finally:
+        raw = Minio(
+            storage_settings.endpoint,
+            access_key=storage_settings.access_key,
+            secret_key=storage_settings.secret_key.reveal(),
+            secure=storage_settings.secure,
+        )
+        for key in store.list_keys(""):
+            raw.remove_object(bucket, key)
+        raw.remove_bucket(bucket)

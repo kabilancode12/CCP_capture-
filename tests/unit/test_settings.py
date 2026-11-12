@@ -8,6 +8,7 @@ from ccp.settings import (
     SettingsError,
     load_database_settings,
     load_settings,
+    load_storage_settings,
     read_env_file,
 )
 
@@ -158,3 +159,20 @@ def test_database_settings_report_their_own_missing_variables_only() -> None:
         load_database_settings({}, env_file=None)
     assert "POSTGRES_DB is required" in str(error.value)
     assert "MINIO" not in str(error.value)
+
+
+def test_storage_settings_can_be_loaded_alone() -> None:
+    env = {k: v for k, v in VALID_ENV.items() if k.startswith("MINIO_")}
+    storage = load_storage_settings(env, env_file=None)
+    assert (storage.bucket, storage.endpoint, storage.secure) == (
+        "ccp-raw",
+        "127.0.0.1:9000",
+        False,
+    )
+
+
+def test_storage_settings_report_their_own_missing_variables_only() -> None:
+    with pytest.raises(SettingsError) as error:
+        load_storage_settings({}, env_file=None)
+    assert "MINIO_ACCESS_KEY is required" in str(error.value)
+    assert "POSTGRES" not in str(error.value)
