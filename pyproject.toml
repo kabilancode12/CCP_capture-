@@ -12,7 +12,14 @@ license = { text = "Proprietary" }
 authors = [{ name = "Xenovex Technologies" }]
 # pg8000 is a pure-Python PostgreSQL driver: no compiled library, so it also works on machines
 # where company policy blocks unsigned DLLs (psycopg's binary build is blocked there).
-dependencies = ["pg8000>=1.31,<2", "minio>=7.2,<8"]
+dependencies = [
+    "pg8000>=1.31,<2",
+    "minio>=7.2,<8",
+    # The API uses Starlette directly: FastAPI's pydantic-core is a compiled library that
+    # company policy blocks. Both packages below are pure Python.
+    "starlette>=1.10,<2",
+    "uvicorn>=0.54,<1",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -21,6 +28,7 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.11",
     "pre-commit>=3.8",
+    "httpx>=0.28,<1",  # used by Starlette's TestClient
 ]
 
 [project.scripts]
@@ -28,6 +36,8 @@ dev = [
 ccp-verify = "ccp.verify.cli:main"
 # Schema migrations: `ccp-db status`, `ccp-db migrate`, `ccp-db rollback`.
 ccp-db = "ccp.db.cli:main"
+# Start the ingestion API.
+ccp-ingest = "ccp.ingest.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ccp"]
@@ -68,3 +78,6 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = ["integration: needs the local PostgreSQL (docker compose up); skipped if unreachable"]
+# Starlette's TestClient prints a notice recommending a different HTTP package ("httpx2"). It has
+# not been vetted, so we keep httpx and silence only this message.
+filterwarnings = ["ignore:Using .httpx. with .starlette.testclient.:Warning"]

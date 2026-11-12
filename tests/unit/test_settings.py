@@ -39,6 +39,7 @@ def test_defaults_are_applied_for_optional_variables() -> None:
     assert settings.storage.secure is False
     assert settings.api.port == 8000
     assert settings.api.session_idle_minutes == 30
+    assert settings.api.max_chunk_bytes == 8 * 1024 * 1024
 
 
 def test_values_from_the_environment_override_defaults() -> None:

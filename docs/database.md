@@ -43,7 +43,7 @@ Rollback **deletes data** (it drops the tables); use it on a development databas
 | Applied versions are stored in `schema_migration` | The database knows its own version |
 | Line endings are ignored in the checksum | Windows and Linux checkouts agree |
 
-## Tables (migration 001)
+## Tables (migrations 001 and 002)
 
 | Table | Holds |
 | --- | --- |
@@ -51,7 +51,7 @@ Rollback **deletes data** (it drops the tables); use it on a development databas
 | `session_env` | Who ran it and where: version, surface, shell, OS, account |
 | `event` | Messages, tool calls and decisions, with a pointer to the raw transcript line (filled in Step 2) |
 | `redaction_log` | Rule and location of each redaction; never the redacted value |
-| `job` | Work queue for indexing and distillation |
+| `job` | Work queue for indexing and distillation (at most one queued index job per session) |
 
 The full planned design (all steps) is in [`db/drafts/001_init.sql`](../db/drafts/001_init.sql).
 

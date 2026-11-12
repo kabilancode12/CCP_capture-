@@ -100,6 +100,7 @@ class ApiSettings:
     port: int
     ingest_token: Secret  # developers' machines send this token with every upload
     session_idle_minutes: int  # a session with no activity this long is marked closed
+    max_chunk_bytes: int  # largest chunk the API accepts
 
 
 @dataclass(frozen=True)
@@ -274,6 +275,9 @@ def load_settings(
             port=reader.integer("CCP_API_PORT", 8000, 1, 65535),
             ingest_token=reader.secret("CCP_INGEST_TOKEN", min_length=MIN_TOKEN_LENGTH),
             session_idle_minutes=reader.integer("CCP_SESSION_IDLE_MINUTES", 30, 1, 1440),
+            max_chunk_bytes=reader.integer(
+                "CCP_MAX_CHUNK_BYTES", 8 * 1024 * 1024, 1024, 64 * 1024 * 1024
+            ),
         ),
     )
     reader.raise_if_errors()

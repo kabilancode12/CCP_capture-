@@ -44,7 +44,7 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
 - [x] **1.4a** Attachment de-duplication: store each attachment body once under its content
   hash (after redaction); the transcript line keeps a pointer. *Done when:* the same
   attachment uploaded in two sessions is stored once and the transcript can be rebuilt exactly.
-- [ ] **1.5** Ingestion API (FastAPI): health, token auth, chunk upload, session upsert,
+- [x] **1.5** Ingestion API (FastAPI): health, token auth, chunk upload, session upsert,
   index job queued. *Done when:* uploading the same chunk twice stores one copy.
 - [ ] **1.6** Idle-session closer. *Done when:* a session is marked closed after N idle minutes.
 - [ ] **1.7** Capture client: incremental upload by byte offset, offline queue, retry.

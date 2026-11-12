@@ -44,11 +44,11 @@ def test_real_schema_applies_creates_the_tables_and_rolls_back_cleanly(db_connec
     migrations = discover_migrations(REAL_MIGRATIONS)
 
     applied = migrate(db_connection, migrations)
-    assert [m.label for m in applied] == ["001_initial_schema"]
+    assert [m.label for m in applied] == [m.label for m in migrations]  # every migration, in order
     assert _tables(db_connection) >= STEP_1_TABLES
 
-    undone = rollback(db_connection, migrations)
-    assert [m.label for m in undone] == ["001_initial_schema"]
+    undone = rollback(db_connection, migrations, steps=len(migrations))
+    assert [m.label for m in undone] == [m.label for m in reversed(migrations)]  # newest first
     assert _tables(db_connection) == {"schema_migration"}  # only the tracking table remains
 
     migrate(db_connection, migrations)  # and it can be applied again

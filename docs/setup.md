@@ -87,7 +87,16 @@ ccp-db status      # should show [x] for every migration
 
 See [database.md](database.md) for rollback and for writing new migrations.
 
-## 6. Verify the setup
+## 6. Start the ingestion API (optional)
+
+```powershell
+ccp-ingest        # listens on http://127.0.0.1:8000 by default
+curl.exe http://127.0.0.1:8000/health
+```
+
+See [ingestion-api.md](ingestion-api.md).
+
+## 7. Verify the setup
 
 ```powershell
 pytest              # all tests pass

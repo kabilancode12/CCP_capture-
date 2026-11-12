@@ -41,19 +41,27 @@ def admin_settings() -> DatabaseSettings:
 
 
 @pytest.fixture
-def db_connection(admin_settings: DatabaseSettings) -> Iterator[Any]:
-    """A connection to a fresh, empty, throwaway database."""
+def temp_database(admin_settings: DatabaseSettings) -> Iterator[DatabaseSettings]:
+    """Settings for a fresh, empty, throwaway database (dropped after the test)."""
     name = f"ccp_test_{uuid.uuid4().hex[:10]}"
     admin = connect(admin_settings)
     admin.autocommit = True  # CREATE DATABASE cannot run inside a transaction
     admin.cursor().execute(f'CREATE DATABASE "{name}"')
-    connection = connect(replace(admin_settings, name=name))
+    try:
+        yield replace(admin_settings, name=name)
+    finally:
+        admin.cursor().execute(f'DROP DATABASE "{name}" WITH (FORCE)')
+        admin.close()
+
+
+@pytest.fixture
+def db_connection(temp_database: DatabaseSettings) -> Iterator[Any]:
+    """A connection to the throwaway database."""
+    connection = connect(temp_database)
     try:
         yield connection
     finally:
         connection.close()
-        admin.cursor().execute(f'DROP DATABASE "{name}" WITH (FORCE)')
-        admin.close()
 
 
 @pytest.fixture(scope="session")

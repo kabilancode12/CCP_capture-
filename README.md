@@ -50,6 +50,7 @@ pytest
 | Describe this machine and surface | `ccp-verify env [--out env.json]` |
 | Register the hook probe (scratch repos only) | `ccp-verify probe-settings` |
 | See which hooks fired | `ccp-verify probe-report` |
+| Start the ingestion API | `ccp-ingest` (see [docs/ingestion-api.md](docs/ingestion-api.md)) |
 | Apply the database schema | `ccp-db migrate` (see [docs/database.md](docs/database.md)) |
 | Run tests | `pytest` |
 | Lint and format check | `ruff check .` and `ruff format --check .` |
@@ -70,6 +71,7 @@ ccp_V2/
 │   ├── redaction/           Removes secrets and personal data before upload
 │   ├── db/                  Database connection and migration runner
 │   ├── storage/             MinIO object store, key layout, attachment de-duplication
+│   ├── ingest/              Ingestion API (Starlette): receives transcript chunks
 │   └── verify/              Step 0 tools: transcript, environment and hook inspectors
 ├── tests/
 │   ├── unit/                Fast tests, one file per module
@@ -86,6 +88,7 @@ ccp_V2/
 │   ├── redaction.md         What is redacted, guarantees and limits
 │   ├── database.md          Migrations: commands, writing and testing them
 │   ├── storage.md           Object storage, key layout, attachment de-duplication
+│   ├── ingestion-api.md     Endpoints, status codes and how an upload is handled
 │   ├── verify/              Test-session script and transcript-facts template
 │   └── reference/           Original proposal, handover, plan and diagrams
 ├── reference/poc/           The first proof of concept, kept unchanged for reference
