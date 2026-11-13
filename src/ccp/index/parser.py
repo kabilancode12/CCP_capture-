@@ -64,6 +64,7 @@ class ParsedEntry:
     occurred_at: datetime | None
     payload: dict[str, Any]  # the entry itself (already redacted before upload)
     thinking: tuple[ThinkingBlock, ...] = ()
+    tool_use_ids: tuple[str, ...] = ()  # ids of the tool calls in this entry
 
 
 def parse_line(line: str) -> ParsedEntry:
@@ -88,7 +89,7 @@ def parse_line(line: str) -> ParsedEntry:
     kind = entry.get("type")
     kind = kind if isinstance(kind, str) and kind else "unknown"
     in_sub_agent = entry.get("isSidechain") is True
-    blocks = _content_blocks(entry)
+    blocks = content_blocks(entry)
 
     if kind == "user":
         event_type, actor = _classify_user(entry, blocks, in_sub_agent)
@@ -109,11 +110,12 @@ def parse_line(line: str) -> ParsedEntry:
         occurred_at=_parse_time(entry.get("timestamp")),
         payload=_without_null_characters(entry),
         thinking=_thinking_blocks(blocks) if kind == "assistant" else (),
+        tool_use_ids=_tool_use_ids(blocks) if kind == "assistant" else (),
     )
 
 
-def _content_blocks(entry: dict[str, Any]) -> list[dict[str, Any]]:
-    """The message's content blocks; a plain string or a missing message gives an empty list."""
+def content_blocks(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """The content blocks of an entry's message; plain text or no message gives an empty list."""
     message = entry.get("message")
     content = message.get("content") if isinstance(message, dict) else None
     if not isinstance(content, list):
@@ -157,6 +159,15 @@ def _thinking_blocks(blocks: list[dict[str, Any]]) -> tuple[ThinkingBlock, ...]:
         elif block_type == "redacted_thinking":
             found.append(ThinkingBlock(index, None, True))
     return tuple(found)
+
+
+def _tool_use_ids(blocks: list[dict[str, Any]]) -> tuple[str, ...]:
+    """The ids of the tool calls in an assistant message."""
+    return tuple(
+        block["id"]
+        for block in blocks
+        if block.get("type") == "tool_use" and isinstance(block.get("id"), str) and block["id"]
+    )
 
 
 def _text_or_none(value: object) -> str | None:

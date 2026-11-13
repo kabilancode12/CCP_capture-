@@ -14,8 +14,9 @@ import pg8000.dbapi
 
 from ccp.db.connection import connect
 from ccp.index.agents import AgentMeta
+from ccp.index.filechanges import extract_file_change
 from ccp.index.parser import ParsedEntry
-from ccp.index.tree import TreeNode, abandoned_event_ids
+from ccp.index.tree import TreeNode, abandoned_event_ids, nearest_prompts
 from ccp.settings import DatabaseSettings
 
 # A job that failed is tried again this many times in all, then left as 'failed'.
@@ -55,8 +56,8 @@ _INDEXED_KEYS = "SELECT DISTINCT raw_object_key FROM event WHERE session_id = %s
 # still returned, so re-indexing is safe and the thinking rows can be attached.
 _INSERT_EVENT = """
     INSERT INTO event (session_id, entry_uuid, parent_uuid, event_type, actor, occurred_at,
-                       payload, raw_object_key, raw_line_number)
-    VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
+                       payload, raw_object_key, raw_line_number, tool_use_ids)
+    VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
     ON CONFLICT (raw_object_key, raw_line_number)
     DO UPDATE SET session_id = EXCLUDED.session_id
     RETURNING event_id
@@ -239,9 +240,7 @@ _REFRESH_AGENT_RUNS = """
           LEFT JOIN LATERAL (
               SELECT e.event_id, e.payload FROM event e
                WHERE e.session_id = r.session_id AND r.tool_use_id IS NOT NULL
-                 AND e.payload @> jsonb_build_object('message', jsonb_build_object('content',
-                         jsonb_build_array(jsonb_build_object(
-                             'type', 'tool_use', 'id', r.tool_use_id))))
+                 AND e.tool_use_ids @> ARRAY[r.tool_use_id]
                ORDER BY e.raw_object_key, e.raw_line_number LIMIT 1) l ON TRUE
           LEFT JOIN LATERAL (
               SELECT min(e.occurred_at) AS started, max(e.occurred_at) AS ended, count(*) AS total
@@ -250,6 +249,60 @@ _REFRESH_AGENT_RUNS = """
                  AND split_part(e.raw_object_key, '/', 3) = 'agent-' || r.agent_id) s ON TRUE
          WHERE r.session_id = %s) d
      WHERE a.session_id = %s AND a.agent_id = d.agent_id
+"""
+
+
+# The edit results not yet turned into file_change rows. The big fields that the indexer does not
+# need (the whole old file, the old and new text) are cut out in the database, so they are not
+# sent over the connection. A result counts if it names a file and holds a patch list.
+_NEW_FILE_RESULTS = """
+    SELECT e.event_id,
+           e.payload #- '{toolUseResult,originalFile}' #- '{toolUseResult,oldString}'
+                      #- '{toolUseResult,newString}'
+      FROM event e
+     WHERE e.session_id = %s
+       AND jsonb_typeof(e.payload #> '{toolUseResult,filePath}') = 'string'
+       AND jsonb_typeof(e.payload #> '{toolUseResult,structuredPatch}') = 'array'
+       AND NOT EXISTS (SELECT 1 FROM file_change f WHERE f.event_id = e.event_id)
+     ORDER BY e.event_id
+"""
+
+_INSERT_FILE_CHANGE = """
+    INSERT INTO file_change (session_id, event_id, tool_use_id, path, absolute_path, change_type,
+                             user_modified, lines_added, lines_removed, hunks)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+    ON CONFLICT (event_id) DO NOTHING
+"""
+
+# The call behind each change (the event holding the tool_use with that id) and its tool name.
+_LINK_FILE_CHANGE_CALLS = """
+    UPDATE file_change f SET call_event_id = c.event_id, tool = c.tool
+      FROM (
+        SELECT g.file_change_id, l.event_id,
+               jsonb_path_query_first(
+                   l.payload,
+                   '$.message.content[*] ? (@.type == "tool_use" && @.id == $id).name',
+                   jsonb_build_object('id', g.tool_use_id)) #>> '{}' AS tool
+          FROM file_change g
+          JOIN LATERAL (
+              SELECT e.event_id, e.payload FROM event e
+               WHERE e.session_id = g.session_id
+                 AND e.tool_use_ids @> ARRAY[g.tool_use_id]
+               ORDER BY e.raw_object_key, e.raw_line_number LIMIT 1) l ON TRUE
+         WHERE g.session_id = %s AND g.tool_use_id IS NOT NULL) c
+     WHERE f.file_change_id = c.file_change_id
+       AND (f.call_event_id IS DISTINCT FROM c.event_id OR f.tool IS DISTINCT FROM c.tool)
+"""
+
+_FILE_CHANGE_EVENTS = "SELECT file_change_id, event_id FROM file_change WHERE session_id = %s"
+_AGENT_LAUNCHES = (
+    "SELECT agent_id, launch_event_id FROM agent_run "
+    "WHERE session_id = %s AND launch_event_id IS NOT NULL"
+)
+_SET_PROMPTS = """
+    UPDATE file_change f SET prompt_event_id = v.prompt_id
+      FROM unnest(%s::bigint[], %s::bigint[]) AS v(change_id, prompt_id)
+     WHERE f.file_change_id = v.change_id AND f.prompt_event_id IS DISTINCT FROM v.prompt_id
 """
 
 
@@ -353,6 +406,7 @@ class IndexRepository:
                         json.dumps(entry.payload, ensure_ascii=False),
                         object_key,
                         line_number,
+                        list(entry.tool_use_ids),
                     ),
                 )
                 row = cursor.fetchone()
@@ -374,9 +428,9 @@ class IndexRepository:
         """Recompute everything that is derived from a session's events, in one transaction.
 
         That is: which events are on abandoned branches, the compaction rows, the session's
-        start time and branch, its model usage and cost, and its sub-agent runs. It reads all of
-        the session's events, so the result is the same however many chunks were indexed in
-        which order, and repeating it changes nothing.
+        start time and branch, its model usage and cost, its sub-agent runs and its file changes.
+        It reads the session's events, so the result is the same however many chunks were indexed
+        in which order, and repeating it changes nothing.
         """
         connection = self._open()
         try:
@@ -403,6 +457,7 @@ class IndexRepository:
             cursor.execute(_REFRESH_MODEL_COSTS, (session_id, session_id))
             cursor.execute(_ENSURE_AGENT_RUNS, (session_id,))
             cursor.execute(_REFRESH_AGENT_RUNS, (session_id, session_id))
+            self._refresh_file_changes(cursor, session_id, nodes)
             connection.commit()
         except (pg8000.dbapi.Error, OSError) as error:
             connection.rollback()
@@ -411,6 +466,45 @@ class IndexRepository:
             ) from error
         finally:
             connection.close()
+
+    @staticmethod
+    def _refresh_file_changes(
+        cursor: pg8000.dbapi.Cursor, session_id: str, nodes: Sequence[TreeNode]
+    ) -> None:
+        """Turn new edit results into ``file_change`` rows, then link calls and prompts.
+
+        Part of :meth:`refresh_session`, in its transaction. Results that already have a row are
+        not read again, so a long session does not cost more at every job.
+        """
+        cursor.execute(_NEW_FILE_RESULTS, (session_id,))
+        for event_id, entry in cursor.fetchall():
+            change = extract_file_change(entry)
+            if change is None:  # cannot happen: the query uses the same test
+                continue
+            cursor.execute(
+                _INSERT_FILE_CHANGE,
+                (
+                    session_id,
+                    event_id,
+                    change.tool_use_id,
+                    change.path,
+                    change.absolute_path,
+                    change.change_type,
+                    change.user_modified,
+                    change.lines_added,
+                    change.lines_removed,
+                    json.dumps(change.hunks),
+                ),
+            )
+        cursor.execute(_LINK_FILE_CHANGE_CALLS, (session_id,))
+
+        cursor.execute(_FILE_CHANGE_EVENTS, (session_id,))
+        changes = {int(row[0]): int(row[1]) for row in cursor.fetchall()}
+        cursor.execute(_AGENT_LAUNCHES, (session_id,))
+        launches = {str(row[0]): int(row[1]) for row in cursor.fetchall()}
+        prompts = nearest_prompts(nodes, changes.values(), launches)
+        ids = list(changes)
+        cursor.execute(_SET_PROMPTS, (ids, [prompts[changes[i]] for i in ids]))
 
     def save_agent_meta(self, session_id: str, agent_id: str, meta: AgentMeta) -> None:
         """Store a sub-agent's description (creating its run if needed). Safe to repeat."""

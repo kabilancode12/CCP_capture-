@@ -86,7 +86,7 @@ with the pilot (1.12) and works on the sessions the pilot captures.
   gaps are to be explained in 2.8, see [indexer.md](indexer.md).)
 - [x] **2.4** Sub-agents: `agent_run` rows linked to the call that launched them, from the sub-agent
   streams. *Done when:* each sub-agent's instructions, result and events are reachable from the parent.
-- [ ] **2.5** File changes: `file_change` rows from Edit and Write results (hunks, who, which event
+- [x] **2.5** File changes: `file_change` rows from Edit and Write results (hunks, who, which event
   explains it). *Done when:* the history of one file lists every AI edit in order.
 - [ ] **2.6** Test runs: recognise test commands and their pass or fail. *Done when:* common runners
   (pytest, npm test, dotnet test) are recognised on test data and unknown commands are ignored.

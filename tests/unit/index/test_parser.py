@@ -171,3 +171,20 @@ def test_the_synthetic_session_reads_line_by_line() -> None:
         "compact_boundary",
         "<unreadable>",
     ]
+
+
+def test_the_ids_of_tool_calls_are_collected_from_assistant_entries() -> None:
+    parsed = _message(
+        {"type": "text"},
+        {"type": "tool_use", "id": "toolu_1"},
+        {"type": "tool_use", "id": "toolu_2"},
+        {"type": "tool_use", "id": ""},
+        {"type": "tool_use"},
+        type="assistant",
+    )
+    assert parsed.tool_use_ids == ("toolu_1", "toolu_2")
+
+
+def test_tool_results_do_not_count_as_tool_calls() -> None:
+    parsed = _message({"type": "tool_result", "tool_use_id": "toolu_1", "id": "x"}, type="user")
+    assert parsed.tool_use_ids == ()

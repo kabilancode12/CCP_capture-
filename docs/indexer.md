@@ -101,6 +101,36 @@ descriptions are read again at every job (they are tiny and stored by an upsert)
 
 Checked on two real sessions with a sub-agent (`Explore`): each run found its launching call and its prompt.
 
+## File changes
+
+Every successful Edit or Write result becomes a row in `file_change`: the file, the changed **line ranges**
+(`hunks`, the transcript's `structuredPatch`; fact 11), lines added and removed, and whether the developer
+changed the AI's proposal before accepting it (`user_modified`). No snapshot is needed to know which lines an AI
+edit touched. A result counts by its shape (a file path plus a patch list), not by tool name. A new file has no
+patch, so the whole content is recorded as one hunk. The code is [`filechanges.py`](../src/ccp/index/filechanges.py).
+
+| Column | Meaning |
+| --- | --- |
+| `path` | Relative to the session's folder when the file is inside it (the same on every machine, `/` separators), otherwise absolute |
+| `absolute_path` | As Claude Code reported it. Contains the user name: restricted |
+| `event_id`, `call_event_id` | The result entry, and the AI's tool call that made it |
+| `tool` | `Edit`, `Write`, ... (from the call) |
+| `prompt_event_id` | The developer's prompt behind the change: the nearest prompt up the tree. For a sub-agent's edit the walk jumps to the call that launched the agent and goes on |
+| `change_type` | `added` or `modified` (a deletion cannot be seen in these tools) |
+| `actor_class` | Always `ai_edit` for now |
+
+The history of one file: `SELECT ... FROM file_change f JOIN event e USING (event_id) WHERE f.path = '...'
+ORDER BY e.raw_object_key, e.raw_line_number`; join `e.is_abandoned` to leave out rewound work.
+
+**Not covered:** files changed by a shell command (a `Bash` or `PowerShell` call, `ai_command` in the schema)
+and changes a person makes outside Claude Code. Those need the code snapshots (Step 3).
+
+Results already turned into rows are not read again, so a long session costs no more at each job. Sessions
+indexed before this feature are caught up at their next job.
+
+Checked on three real sessions: 34, 126 and 317 edit results gave exactly 34, 126 and 317 rows, each linked
+to its call, tool and prompt. Indexing the largest (5,097 events) took 18 s the first time and 0.9 s when repeated.
+
 ## Model usage and cost
 
 - `model_usage`: one row per model **response** (API message), with model, input, output, thinking, cache-read
@@ -135,9 +165,11 @@ table as restricted when access roles are set up (Step 5).
 
 - A job whose worker crashed stays `running`; it is not picked up again automatically. Queue a new job by
   uploading again, or reset it by hand. (Recovery is planned with the Step 5 hardening.)
-- One event is inserted per statement: fine for sessions of thousands of lines, to be batched if indexing
-  becomes slow.
+- One event is inserted per statement: about 18 s for a session of 5,000 lines. To be batched if that becomes a
+  problem.
+- `event.tool_use_ids` (migration 009, indexed) is what makes "which event holds this tool call" fast; it is
+  filled when an event is indexed.
 - The rewind rule was checked on this machine's own transcripts (one rewind, found), not yet on a variety of
   real sessions; the pilot data is the real test (task 2.8). Whether `last-prompt`'s `leafUuid` agrees with it
   is not yet checked.
-- File changes and test runs follow in tasks 2.5 and 2.6 of [TODO.md](TODO.md).
+- Test runs follow in task 2.6 of [TODO.md](TODO.md).

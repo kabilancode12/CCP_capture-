@@ -14,6 +14,8 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
   the transcript's `cost-state` (migration 006, task 2.3).
 - Indexer: sub-agent runs (`agent_run`, migration 007, task 2.4). A sub-agent's description file is no longer
   stored as an event.
+- Indexer: file changes from Edit and Write results, with line ranges and the call and prompt behind
+  each (`file_change`, migration 008), and an indexed `event.tool_use_ids` (migration 009) (task 2.5).
 
 ### Changed
 

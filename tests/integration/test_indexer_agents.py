@@ -216,3 +216,33 @@ def test_old_description_rows_are_removed_from_the_events_by_the_migration(
         assert [row[0] for row in cursor.fetchall()] == ["agent-a1", "main"]
     finally:
         connection.close()
+
+
+def test_the_tool_call_ids_of_existing_events_are_filled_in_by_the_migration(
+    temp_database: DatabaseSettings,
+) -> None:
+    connection = connect(temp_database)
+    try:
+        migrations = discover_migrations(MIGRATIONS)
+        migrate(connection, migrations, target=8)
+        cursor = connection.cursor()
+        cursor.execute("INSERT INTO session (session_id) VALUES ('s1')")
+        payloads = {
+            1: {"message": {"content": [{"type": "tool_use", "id": "toolu_1"}, {"type": "text"}]}},
+            2: {"message": {"content": "plain text"}},
+            3: {"type": "cost-state"},
+        }
+        for line, payload in payloads.items():
+            cursor.execute(
+                "INSERT INTO event (session_id, event_type, actor, payload, raw_object_key, "
+                "raw_line_number) VALUES ('s1', 'x', 'system', %s::jsonb, 'sessions/s1/main/0', %s)",
+                (json.dumps(payload), line),
+            )
+        connection.commit()
+
+        migrate(connection, migrations)
+
+        cursor.execute("SELECT tool_use_ids FROM event ORDER BY raw_line_number")
+        assert [row[0] for row in cursor.fetchall()] == [["toolu_1"], [], []]
+    finally:
+        connection.close()
