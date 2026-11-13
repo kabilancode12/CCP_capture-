@@ -66,10 +66,36 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
 
 **Gate:** 1.12 passes.
 
+## Step 2: indexer (MinIO to PostgreSQL)
+
+The index is **rebuildable**: everything in it comes from the stored transcripts, so it can be dropped and
+rebuilt at any time. It runs on the server only; developer machines are not touched. Starts in parallel
+with the pilot (1.12) and works on the sessions the pilot captures.
+
+- [ ] **2.1** Indexer core: a worker takes an `index_session` job, reads the session's stored chunks in
+  order and writes one `event` row per transcript line (type, actor, uuid, parent, time, payload, source
+  object and line). *Done when:* indexing a session twice gives identical rows, and a session still
+  being uploaded can be indexed again later without duplicates.
+- [ ] **2.2** Conversation tree and session facts: abandoned (rewound) branches, compaction records,
+  `started_at`, `ended_at`, branch and repository filled on `session`. *Done when:* the verified facts in
+  [transcript-facts.md](verify/transcript-facts.md) (rewind, compaction, resume) hold on test data.
+- [ ] **2.3** Model usage: model, tokens and cost per response, from a versioned price table.
+  *Done when:* totals per session match the numbers in the transcript.
+- [ ] **2.4** Sub-agents: `agent_run` rows linked to the call that launched them, from the sub-agent
+  streams. *Done when:* each sub-agent's instructions, result and events are reachable from the parent.
+- [ ] **2.5** File changes: `file_change` rows from Edit and Write results (hunks, who, which event
+  explains it). *Done when:* the history of one file lists every AI edit in order.
+- [ ] **2.6** Test runs: recognise test commands and their pass or fail. *Done when:* common runners
+  (pytest, npm test, dotnet test) are recognised on test data and unknown commands are ignored.
+- [ ] **2.7** The six saved SQL questions as views or documented queries, and the docs for the indexer.
+  *Done when:* each question has a test with known answers.
+- [ ] **2.8** Rebuild and real-data check. *Done when:* dropping the index and rebuilding from MinIO gives
+  identical rows, on the sessions captured during the pilot.
+
+**Gate:** 2.8 passes.
+
 ## Later steps (summary)
 
-- **Step 2:** indexer from MinIO to PostgreSQL: conversation tree, actors, model usage,
-  sub-agents, file changes, test runs, compaction; the six saved SQL questions.
 - **Step 3:** dashboards, file history, "why did this line change", commit linking (demo 1).
 - **Step 4:** distillation, pgvector search, MCP server, review step (demo 2).
 - **Step 5:** move to a server, add developers, access roles, retention jobs.
