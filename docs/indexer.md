@@ -14,10 +14,40 @@ Apply the migrations first (`ccp-db migrate`; the indexer refuses to start on an
 | --- | --- |
 | Index continuously (wait for new jobs) | `ccp-index run` |
 | Index what is queued, then exit | `ccp-index run --once` |
+| Delete the index of sessions and queue a rebuild | `ccp-index rebuild --session ID` or `--all` |
+| Rebuild now and prove the result is identical | `ccp-index rebuild --all --check` |
 
 Settings are the `POSTGRES_*` and `MINIO_*` variables ([configuration.md](configuration.md)). If the launcher
 is blocked on your machine, use `python -m ccp.index run`. `--poll-seconds N` sets how long it waits when the
 queue is empty (default 5).
+
+## Rebuilding, and proving it works
+
+The index is only worth having if it can be rebuilt from the stored transcripts. `ccp-index rebuild` deletes the
+index of the chosen sessions (`--session ID`, repeatable, or `--all`). Without `--check` it queues a job per
+session, for a running `ccp-index run` to build again. With **`--check`** it builds again right away and
+compares the result with what was there before, table by table (exit code 1 if anything differs):
+
+```text
+$ ccp-index rebuild --all --check
+cab7846a-...: identical (212 events)
+...
+12 of 12 session(s) identical
+```
+
+The comparison is a **fingerprint** per table: a hash of the session's rows written without the database's own
+ids (an event is identified by the object and line it came from), so two builds of the same transcript have
+the same fingerprint. A difference names the tables, for example `DIFFERENT in file_change, test_run`; after the
+check the index is the rebuilt one, so a difference is also repaired. The code is
+[`rebuild.py`](../src/ccp/index/rebuild.py).
+
+Rebuilt: events, thinking, model usage and cost, compactions, sub-agent runs, file changes, test runs, and the
+session's start time and branch. **Never touched:** the session row itself, the environment record and the
+redaction log, which come from the capture client and not from the transcript. A rebuild leaves one `done` job
+behind for each session it checked (the job is queued first, so that a crash half way is finished by a worker).
+
+Checked on five real sessions from this machine, with their sub-agents (7,228 events in all): every rebuild
+was identical. Running it on the sessions captured during the pilot is the last step of [pilot.md](pilot.md).
 
 ## How a session is indexed
 

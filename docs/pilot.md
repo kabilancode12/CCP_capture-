@@ -53,8 +53,21 @@ python -c "from collections import Counter; from ccp.settings import load_storag
 To look for the planted values themselves, replace the last part with a test such as `'Zq8-pilot' in text`.
 Attachments (`attachments/`) are stored byte for byte after redaction and are covered by adding that prefix.
 
+## Index check (end of the week)
+
+The indexer builds data from the stored transcripts ([indexer.md](indexer.md)). Make sure it has run, then prove
+that it can be rebuilt:
+
+```powershell
+ccp-index run --once                   # index everything that was captured
+ccp-index rebuild --all --check        # delete, rebuild and compare: every session must be "identical"
+```
+
+Then read the six questions on the pilot data ([queries.md](queries.md)) and check that the answers match what
+you remember: the cost of a session, the history of a file you know, the sub-agents you launched.
+
 ## Record the result
 
 Add a section to the end of this page: dates, sessions run versus sessions stored, scan output, anything that
 surprised you (slow hooks, false positives such as redacted text that was not secret). Each finding becomes a
-task in [TODO.md](TODO.md). Then tick 1.12.
+task in [TODO.md](TODO.md). Then tick 1.12 and 2.8.

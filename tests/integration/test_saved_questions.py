@@ -7,139 +7,29 @@ and asks something else, which launches a sub-agent. Every expected value below 
 that story.
 """
 
-import json
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from tests.integration.story import (
+    SESSION,
+    index_story,
+    make_call,
+    make_edit,
+    make_failed,
+    make_prompt,
+    make_result,
+)
 
 from ccp.db.connection import connect
-from ccp.index.repository import IndexRepository
-from ccp.index.worker import process_next_job
-from ccp.ingest.repository import PostgresRepository
 from ccp.settings import DatabaseSettings
 from ccp.storage import ObjectStore
-from ccp.storage.keys import transcript_chunk_key
 
 pytestmark = pytest.mark.integration
-
-SESSION = "sess-story"
-
-
-def _at(minute: int) -> str:
-    return f"2026-07-01T10:{minute:02d}:00.000Z"
 
 
 def _time(minute: int) -> datetime:
     return datetime(2026, 7, 1, 10, minute, tzinfo=UTC)
-
-
-def _prompt(uuid: str, parent: str | None, minute: int, text: str) -> dict[str, Any]:
-    return {
-        "type": "user",
-        "uuid": uuid,
-        "parentUuid": parent,
-        "timestamp": _at(minute),
-        "cwd": "/work/app",
-        "message": {"content": text},
-    }
-
-
-def _call(
-    uuid: str, parent: str, minute: int, tool: str, call_id: str, **tool_input: Any
-) -> dict[str, Any]:
-    block = {"type": "tool_use", "id": call_id, "name": tool, "input": tool_input}
-    return {
-        "type": "assistant",
-        "uuid": uuid,
-        "parentUuid": parent,
-        "timestamp": _at(minute),
-        "message": {"content": [block]},
-    }
-
-
-def _result(uuid: str, parent: str, minute: int, call_id: str, **extra: Any) -> dict[str, Any]:
-    entry: dict[str, Any] = {
-        "type": "user",
-        "uuid": uuid,
-        "parentUuid": parent,
-        "timestamp": _at(minute),
-        "cwd": "/work/app",
-        "message": {"content": [{"type": "tool_result", "tool_use_id": call_id, "content": "ok"}]},
-    }
-    entry.update(extra)
-    return entry
-
-
-def _edit(uuid: str, parent: str, minute: int, call_id: str) -> dict[str, Any]:
-    patch = [
-        {"oldStart": 3, "oldLines": 1, "newStart": 3, "newLines": 2, "lines": ["-a", "+b", "+c"]}
-    ]
-    return _result(
-        uuid, parent, minute, call_id,
-        toolUseResult={"filePath": "/work/app/src/a.py", "structuredPatch": patch, "userModified": False},
-    )  # fmt: skip
-
-
-def _failed(
-    uuid: str, parent: str, minute: int, call_id: str, text: str, **extra: Any
-) -> dict[str, Any]:
-    entry = _result(uuid, parent, minute, call_id, toolUseResult=text, **extra)
-    entry["message"]["content"][0].update(is_error=True, content=text)
-    return entry
-
-
-STORY: list[dict[str, Any]] = [
-    _prompt("p1", None, 0, "Fix the bug in a.py"),
-    _call("a1", "p1", 1, "Edit", "e1"),
-    _edit("r1", "a1", 2, "e1"),
-    _call("a2", "r1", 3, "Bash", "t1", command="pytest -q"),
-    _failed("r2", "a2", 4, "t1", "Exit code 1\n2 failed"),
-    _call("a3", "r2", 5, "Edit", "e2"),
-    _edit("r3", "a3", 6, "e2"),
-    _call("a4", "r3", 7, "Bash", "t2", command="pytest -q"),
-    _result("r4", "a4", 8, "t2", toolUseResult={"stdout": "ok", "interrupted": False}),
-    _call("a5", "r4", 9, "Bash", "d1", command="rm -rf build"),
-    _failed("r5", "a5", 10, "d1", "The user rejected this", toolDenialKind="user-rejected"),
-    {  # compaction: the boundary has no parent, only a logical one
-        "type": "system", "subtype": "compact_boundary", "uuid": "b1", "parentUuid": None,
-        "logicalParentUuid": "r5", "timestamp": _at(11),
-        "compactMetadata": {"trigger": "auto", "preTokens": 9000, "postTokens": 1200},
-    },
-    {**_prompt("s1", "b1", 11, "SUMMARY"), "isCompactSummary": True},
-    _prompt("p2", "s1", 12, "Add a feature"),  # rewound: replaced by p3 below
-    _prompt("p3", "s1", 14, "Explore the code instead"),
-    _call("a6", "p3", 15, "Agent", "ag1", prompt="Explore the code", description="Look around"),
-    {
-        "type": "cost-state", "sessionId": SESSION, "totalCostUSD": 1.5, "hasUnknownModelCost": False,
-        "modelUsage": {
-            "model-a": {"inputTokens": 100, "outputTokens": 50, "costUSD": 1.4},
-            "helper-model": {"inputTokens": 900, "outputTokens": 10, "costUSD": 0.1},
-        },
-    },
-]  # fmt: skip
-
-SUB_AGENT: list[dict[str, Any]] = [
-    {"type": "user", "uuid": "x1", "parentUuid": None, "isSidechain": True, "timestamp": _at(16),
-     "message": {"content": "Explore the code"}},
-    {"type": "assistant", "uuid": "x2", "parentUuid": "x1", "isSidechain": True, "timestamp": _at(17),
-     "message": {"content": [{"type": "text", "text": "Found it."}]}},
-]  # fmt: skip
-
-
-def _chunk(entries: list[dict[str, Any]]) -> bytes:
-    return ("".join(json.dumps(entry) + "\n" for entry in entries)).encode()
-
-
-def _index_story(
-    database: DatabaseSettings, store: ObjectStore, main: list[dict[str, Any]] | None = None
-) -> None:
-    store.put(transcript_chunk_key(SESSION, "main", 0), _chunk(main or STORY))
-    store.put(transcript_chunk_key(SESSION, "agent-a1", 0), _chunk(SUB_AGENT))
-    meta = {"agentType": "Explore", "toolUseId": "ag1", "spawnDepth": 1}
-    store.put(transcript_chunk_key(SESSION, "agent-a1.meta", 0), (json.dumps(meta) + "\n").encode())
-    PostgresRepository(database).record_chunk(SESSION)
-    assert process_next_job(store, IndexRepository(database)) is True
 
 
 def _rows(database: DatabaseSettings, sql: str) -> list[tuple[Any, ...]]:
@@ -154,7 +44,7 @@ def _rows(database: DatabaseSettings, sql: str) -> list[tuple[Any, ...]]:
 
 @pytest.fixture
 def story(database: DatabaseSettings, object_store: ObjectStore) -> DatabaseSettings:
-    _index_story(database, object_store)
+    index_story(database, object_store)
     return database
 
 
@@ -228,13 +118,13 @@ def test_a_plan_decision_is_listed_as_approved_or_rejected(
     database: DatabaseSettings, object_store: ObjectStore
 ) -> None:
     plan = [
-        _prompt("p1", None, 0, "Plan it"),
-        _call("a1", "p1", 1, "ExitPlanMode", "pl1", plan="the plan"),
-        _result("r1", "a1", 2, "pl1"),
-        _call("a2", "r1", 3, "ExitPlanMode", "pl2", plan="another plan"),
-        _failed("r2", "a2", 4, "pl2", "The user rejected the plan"),
+        make_prompt("p1", None, 0, "Plan it"),
+        make_call("a1", "p1", 1, "ExitPlanMode", "pl1", plan="the plan"),
+        make_result("r1", "a1", 2, "pl1"),
+        make_call("a2", "r1", 3, "ExitPlanMode", "pl2", plan="another plan"),
+        make_failed("r2", "a2", 4, "pl2", "The user rejected the plan"),
     ]
-    _index_story(database, object_store, plan)
+    index_story(database, object_store, plan)
 
     rows = _rows(
         database,
@@ -251,11 +141,11 @@ def test_a_failure_that_is_never_followed_by_a_pass_is_not_a_fix_cycle(
     database: DatabaseSettings, object_store: ObjectStore
 ) -> None:
     story_without_pass = [
-        _prompt("p1", None, 0, "Run the tests"),
-        _call("a1", "p1", 1, "Bash", "t1", command="pytest"),
-        _failed("r1", "a1", 2, "t1", "Exit code 1"),
+        make_prompt("p1", None, 0, "Run the tests"),
+        make_call("a1", "p1", 1, "Bash", "t1", command="pytest"),
+        make_failed("r1", "a1", 2, "t1", "Exit code 1"),
     ]
-    _index_story(database, object_store, story_without_pass)
+    index_story(database, object_store, story_without_pass)
 
     assert _rows(database, "SELECT count(*) FROM v_test_fix_cycle") == [(0,)]
     assert _rows(database, "SELECT count(*) FROM test_run WHERE passed = FALSE") == [(1,)]
@@ -265,14 +155,14 @@ def test_work_on_an_abandoned_branch_is_kept_and_flagged(
     database: DatabaseSettings, object_store: ObjectStore
 ) -> None:
     rewound = [
-        _prompt("p0", None, 0, "Start"),
-        _call("a0", "p0", 1, "Bash", "x0", command="ls"),
-        _prompt("p1", "a0", 2, "First idea"),
-        _call("a1", "p1", 3, "Edit", "e1"),
-        _edit("r1", "a1", 4, "e1"),
-        _prompt("p2", "a0", 6, "Second idea"),
+        make_prompt("p0", None, 0, "Start"),
+        make_call("a0", "p0", 1, "Bash", "x0", command="ls"),
+        make_prompt("p1", "a0", 2, "First idea"),
+        make_call("a1", "p1", 3, "Edit", "e1"),
+        make_edit("r1", "a1", 4, "e1"),
+        make_prompt("p2", "a0", 6, "Second idea"),
     ]
-    _index_story(database, object_store, rewound)
+    index_story(database, object_store, rewound)
 
     rows = _rows(database, "SELECT is_abandoned, prompt FROM v_file_history")
 

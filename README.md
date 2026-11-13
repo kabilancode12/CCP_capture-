@@ -82,6 +82,7 @@ Something not working? [docs/troubleshooting.md](docs/troubleshooting.md).
 | Start the ingestion API | `ccp-ingest` (see [docs/ingestion-api.md](docs/ingestion-api.md)) |
 | Close idle sessions once | `ccp-ingest close-idle` |
 | Index stored transcripts into PostgreSQL | `ccp-index run` or `ccp-index run --once` (see [docs/indexer.md](docs/indexer.md)) |
+| Rebuild the index and prove it is identical | `ccp-index rebuild --all --check` |
 | Take a code snapshot now (developer machine) | `ccp-capture snapshot --session-id <id>` (see [docs/snapshots.md](docs/snapshots.md)) |
 | Print the Claude Code hook settings | `ccp-capture hook-settings` (see [docs/hooks.md](docs/hooks.md)) |
 | Record where a session runs (developer machine) | `ccp-capture environment --session-id <id>` (see [docs/environment.md](docs/environment.md)) |

@@ -93,7 +93,9 @@ with the pilot (1.12) and works on the sessions the pilot captures.
 - [x] **2.7** The six saved SQL questions as views or documented queries, and the docs for the indexer.
   *Done when:* each question has a test with known answers.
 - [ ] **2.8** Rebuild and real-data check. *Done when:* dropping the index and rebuilding from MinIO gives
-  identical rows, on the sessions captured during the pilot.
+  identical rows, on the sessions captured during the pilot. (`ccp-index rebuild --all --check` is built and
+  gives identical rows on five real local sessions with sub-agents. Left: run it on the pilot data, and look
+  into the model-usage gap, see [indexer.md](indexer.md).)
 
 **Gate:** 2.8 passes.
 
