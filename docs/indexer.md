@@ -34,7 +34,8 @@ Because of (2) and (3), a crash leaves a chunk fully indexed or not at all, a re
 a chunk that arrives later is simply added. A failed job is tried again up to three times, then stays
 `failed` (see `job.status`); a new chunk of the session queues a fresh job.
 
-Sub-agent entries are stored under the **parent's** session id, with the actor `subagent`.
+Sub-agent entries are stored under the **parent's** session id, with the actor `subagent`. The stream's
+name is in the event's `raw_object_key` (`sessions/<id>/agent-<agent id>/...`).
 
 ## What an entry becomes
 
@@ -80,6 +81,26 @@ transcript says nothing. `ended_at` and `end_reason` are not set here: the idle-
 SessionEnd hook set them. `repository` and `start_commit` are not in the transcript (it has only the local
 folder) and stay empty until the capture client sends them.
 
+## Sub-agent runs
+
+Each sub-agent has its own transcript (stream `agent-<id>`) and a one-line description (stream
+`agent-<id>.meta`, fact 17). The description is **not** an event: it is read into `agent_run` instead. One row
+per run, with:
+
+| Column | From |
+| --- | --- |
+| `agent_type`, `description`, `model`, `spawn_depth`, `tool_use_id` | the description |
+| `launch_event_id` | the event whose tool call has that `tool_use_id`: the parent's `Agent` call, or a call inside another sub-agent for nested agents |
+| `instructions` | the `prompt` of that call |
+| `result` | the text of the sub-agent's last plain reply (empty if it ended on a tool call) |
+| `started_at`, `ended_at`, `event_count` | the sub-agent's own transcript |
+
+A run exists as soon as its transcript is seen, even before the description arrives; the description fills in
+the rest later. A description that cannot be read is skipped and counted, and does not fail the job. The
+descriptions are read again at every job (they are tiny and stored by an upsert).
+
+Checked on two real sessions with a sub-agent (`Explore`): each run found its launching call and its prompt.
+
 ## Model usage and cost
 
 - `model_usage`: one row per model **response** (API message), with model, input, output, thinking, cache-read
@@ -92,9 +113,12 @@ folder) and stay empty until the capture client sends them.
   writes session titles) and `has_unknown_model_cost`, which says the total is partial.
 
 The two do not have to add up: `cost-state` also counts work that has no entry in the main transcript.
-Checked on four real sessions with only the main transcript indexed: one matched exactly (output tokens 8202 =
-8202); two were lower than `cost-state` (sub-agent files were not included); one was higher (168540 against
-147572), which is not explained yet. Task 2.8 repeats the check with sub-agent streams included.
+Checked on real sessions: one matched exactly (output tokens 8202 = 8202). With sub-agent streams included, two
+sessions got closer but stayed lower (3295 against 5238, 12091 against 15823), and two had no sub-agents and
+were off in opposite directions (653591 against 661529; 168540 against 147572). The reason is not yet known
+(rewound or resumed work are the first suspects), so **do not treat `model_usage` as the bill**: use
+`session_cost` for cost, and `model_usage` for attribution to events. Task 2.8 looks into the gap. A few
+rows have the model `<synthetic>` (messages Claude Code makes itself, with zero tokens).
 
 ## Thinking
 
@@ -116,4 +140,4 @@ table as restricted when access roles are set up (Step 5).
 - The rewind rule was checked on this machine's own transcripts (one rewind, found), not yet on a variety of
   real sessions; the pilot data is the real test (task 2.8). Whether `last-prompt`'s `leafUuid` agrees with it
   is not yet checked.
-- Sub-agent runs, file changes and test runs follow in tasks 2.4 to 2.6 of [TODO.md](TODO.md).
+- File changes and test runs follow in tasks 2.5 and 2.6 of [TODO.md](TODO.md).

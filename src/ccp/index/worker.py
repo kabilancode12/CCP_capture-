@@ -7,7 +7,11 @@ more when the session is closed). A job means "bring the index of this session u
 2. skip chunks that were indexed before: a chunk never changes, because its key contains its
    position in the source file;
 3. for each new chunk, read every line and store one event per line;
-4. recompute what is derived from the events: abandoned branches, compactions, session facts.
+4. recompute what is derived from the events: abandoned branches, compactions, session facts, model
+   usage and cost, sub-agent runs.
+
+A sub-agent's small description file (stream ``agent-<id>.meta``) is not a transcript: it is read
+into the ``agent_run`` table instead of becoming events.
 
 Doing it this way makes indexing **idempotent**: running a job again, or two jobs for the same
 session, never creates a duplicate. A chunk is stored in one transaction, so a crash leaves a
@@ -22,9 +26,16 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from ccp.index.agents import (
+    AgentMeta,
+    AgentMetaError,
+    agent_id_of,
+    is_meta_stream,
+    parse_agent_meta,
+)
 from ccp.index.parser import ParsedEntry, ParseError, parse_line
 from ccp.index.repository import IndexJob
-from ccp.storage.keys import session_prefix
+from ccp.storage.keys import session_prefix, stream_of
 
 logger = logging.getLogger("ccp.index")
 
@@ -59,6 +70,9 @@ class JobRepository(Protocol):
     ) -> None:
         """Store one chunk's events."""
 
+    def save_agent_meta(self, session_id: str, agent_id: str, meta: AgentMeta) -> None:
+        """Store a sub-agent's description."""
+
     def refresh_session(self, session_id: str) -> None:
         """Recompute what is derived from the session's events (tree, compactions, facts)."""
 
@@ -86,7 +100,15 @@ def index_session(store: ChunkStore, repository: JobRepository, session_id: str)
     done = repository.indexed_keys(session_id)
     chunks = events = skipped = 0
     for key in store.list_keys(session_prefix(session_id)):
-        if not key.endswith(".jsonl") or key in done:
+        if not key.endswith(".jsonl"):
+            continue
+        stream = stream_of(key)
+        if is_meta_stream(stream):
+            # A description, not a transcript: it has no events. It is tiny and stored by an
+            # upsert, so it is read again every time instead of being tracked.
+            skipped += not _save_meta(store, repository, session_id, stream, key)
+            continue
+        if key in done:
             continue
         entries, bad_lines = _read_chunk(store.get(key))
         repository.save_chunk(session_id, key, entries)
@@ -97,6 +119,18 @@ def index_session(store: ChunkStore, repository: JobRepository, session_id: str)
     # indexed by an earlier version of the indexer up to date.
     repository.refresh_session(session_id)
     return IndexResult(chunks, events, skipped)
+
+
+def _save_meta(
+    store: ChunkStore, repository: JobRepository, session_id: str, stream: str, key: str
+) -> bool:
+    """Store one sub-agent description. Returns False if it could not be read (it is skipped)."""
+    try:
+        meta = parse_agent_meta(store.get(key).decode("utf-8").strip())
+    except (AgentMetaError, UnicodeDecodeError):
+        return False
+    repository.save_agent_meta(session_id, agent_id_of(stream), meta)
+    return True
 
 
 def _read_chunk(data: bytes) -> tuple[list[tuple[int, ParsedEntry]], int]:

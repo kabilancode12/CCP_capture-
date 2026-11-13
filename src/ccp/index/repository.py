@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import pg8000.dbapi
 
 from ccp.db.connection import connect
+from ccp.index.agents import AgentMeta
 from ccp.index.parser import ParsedEntry
 from ccp.index.tree import TreeNode, abandoned_event_ids
 from ccp.settings import DatabaseSettings
@@ -194,6 +195,64 @@ _REFRESH_MODEL_COSTS = """
 """
 
 
+# A sub-agent's description (from its .meta stream). Uploaded once, so a repeat just sets it again.
+_SAVE_AGENT_META = """
+    INSERT INTO agent_run (session_id, agent_id, agent_type, description, model, spawn_depth,
+                           tool_use_id)
+    VALUES (%s, %s, %s, %s, %s, %s, %s)
+    ON CONFLICT (session_id, agent_id) DO UPDATE SET
+        agent_type = EXCLUDED.agent_type, description = EXCLUDED.description,
+        model = EXCLUDED.model, spawn_depth = EXCLUDED.spawn_depth,
+        tool_use_id = EXCLUDED.tool_use_id
+"""
+
+# Every sub-agent stream seen in the events has a run, even if its description has not arrived.
+# (The stream name is "agent-<id>"; the id starts at the 7th character.)
+_ENSURE_AGENT_RUNS = """
+    INSERT INTO agent_run (session_id, agent_id)
+    SELECT DISTINCT session_id, substr(split_part(raw_object_key, '/', 3), 7) FROM event
+     WHERE session_id = %s AND split_part(raw_object_key, '/', 3) ~ '^agent-'
+    ON CONFLICT (session_id, agent_id) DO NOTHING
+"""
+
+# What the events say about each run: the parent's call that launched it (the event holding a
+# tool_use with the description's toolUseId; it may sit in another sub-agent's stream), the prompt
+# of that call, the agent's own first and last time, and its last plain text reply.
+_REFRESH_AGENT_RUNS = """
+    UPDATE agent_run a SET
+        launch_event_id = d.launch_id, instructions = d.instructions, result = d.result,
+        started_at = d.started, ended_at = d.ended, event_count = d.total
+      FROM (
+        SELECT r.agent_id, l.event_id AS launch_id,
+               jsonb_path_query_first(
+                   l.payload,
+                   '$.message.content[*] ? (@.type == "tool_use" && @.id == $id).input.prompt',
+                   jsonb_build_object('id', r.tool_use_id)) #>> '{}' AS instructions,
+               (SELECT jsonb_path_query_first(
+                           x.payload, '$.message.content[*] ? (@.type == "text").text') #>> '{}'
+                  FROM event x
+                 WHERE x.session_id = r.session_id AND x.event_type = 'response'
+                   AND split_part(x.raw_object_key, '/', 3) = 'agent-' || r.agent_id
+                 ORDER BY x.raw_object_key DESC, x.raw_line_number DESC LIMIT 1) AS result,
+               s.started, s.ended, s.total
+          FROM agent_run r
+          LEFT JOIN LATERAL (
+              SELECT e.event_id, e.payload FROM event e
+               WHERE e.session_id = r.session_id AND r.tool_use_id IS NOT NULL
+                 AND e.payload @> jsonb_build_object('message', jsonb_build_object('content',
+                         jsonb_build_array(jsonb_build_object(
+                             'type', 'tool_use', 'id', r.tool_use_id))))
+               ORDER BY e.raw_object_key, e.raw_line_number LIMIT 1) l ON TRUE
+          LEFT JOIN LATERAL (
+              SELECT min(e.occurred_at) AS started, max(e.occurred_at) AS ended, count(*) AS total
+                FROM event e
+               WHERE e.session_id = r.session_id
+                 AND split_part(e.raw_object_key, '/', 3) = 'agent-' || r.agent_id) s ON TRUE
+         WHERE r.session_id = %s) d
+     WHERE a.session_id = %s AND a.agent_id = d.agent_id
+"""
+
+
 class IndexRepositoryError(RuntimeError):
     """Raised when the database cannot be reached or a statement fails."""
 
@@ -315,9 +374,9 @@ class IndexRepository:
         """Recompute everything that is derived from a session's events, in one transaction.
 
         That is: which events are on abandoned branches, the compaction rows, the session's
-        start time and branch, and its model usage and cost. It reads all of the session's events,
-        so the result is the same however many chunks were indexed in which order, and repeating
-        it changes nothing.
+        start time and branch, its model usage and cost, and its sub-agent runs. It reads all of
+        the session's events, so the result is the same however many chunks were indexed in
+        which order, and repeating it changes nothing.
         """
         connection = self._open()
         try:
@@ -342,6 +401,8 @@ class IndexRepository:
             cursor.execute(_REFRESH_SESSION_COST, (session_id, session_id))
             cursor.execute(_DELETE_MODEL_COSTS, (session_id,))
             cursor.execute(_REFRESH_MODEL_COSTS, (session_id, session_id))
+            cursor.execute(_ENSURE_AGENT_RUNS, (session_id,))
+            cursor.execute(_REFRESH_AGENT_RUNS, (session_id, session_id))
             connection.commit()
         except (pg8000.dbapi.Error, OSError) as error:
             connection.rollback()
@@ -350,6 +411,22 @@ class IndexRepository:
             ) from error
         finally:
             connection.close()
+
+    def save_agent_meta(self, session_id: str, agent_id: str, meta: AgentMeta) -> None:
+        """Store a sub-agent's description (creating its run if needed). Safe to repeat."""
+        self._run(
+            _SAVE_AGENT_META,
+            (
+                session_id,
+                agent_id,
+                meta.agent_type,
+                meta.description,
+                meta.model,
+                meta.spawn_depth,
+                meta.tool_use_id,
+            ),
+            "saving a sub-agent description",
+        )
 
     def _run(self, sql: str, parameters: tuple[object, ...], what: str) -> None:
         """Run one statement in its own transaction."""

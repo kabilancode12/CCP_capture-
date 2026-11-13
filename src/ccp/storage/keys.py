@@ -65,3 +65,18 @@ def attachment_key(digest: str) -> str:
     if not _SHA256_HEX.fullmatch(digest):
         raise ValueError("Invalid digest: must be 64 lowercase hex digits")
     return f"attachments/{digest[:2]}/{digest}"
+
+
+def stream_of(key: str) -> str:
+    """Return the stream part of a transcript chunk key, such as ``main`` or ``agent-a1``.
+
+    Args:
+        key: A key made by :func:`transcript_chunk_key`.
+
+    Raises:
+        ValueError: If ``key`` is not a transcript chunk key.
+    """
+    parts = key.split("/")
+    if len(parts) != 4 or parts[0] != "sessions":
+        raise ValueError("Not a transcript chunk key")
+    return parts[2]

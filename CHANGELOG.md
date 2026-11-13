@@ -12,6 +12,8 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
   `session.started_at` and `branch` are filled from the transcript (task 2.2).
 - Indexer: model usage per response (de-duplicated by message id) and session cost per model, read from
   the transcript's `cost-state` (migration 006, task 2.3).
+- Indexer: sub-agent runs (`agent_run`, migration 007, task 2.4). A sub-agent's description file is no longer
+  stored as an event.
 
 ### Changed
 

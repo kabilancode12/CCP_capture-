@@ -43,7 +43,7 @@ Rollback **deletes data** (it drops the tables); use it on a development databas
 | Applied versions are stored in `schema_migration` | The database knows its own version |
 | Line endings are ignored in the checksum | Windows and Linux checkouts agree |
 
-## Tables (migrations 001 to 006)
+## Tables (migrations 001 to 007)
 
 | Table | Holds |
 | --- | --- |
@@ -53,6 +53,7 @@ Rollback **deletes data** (it drops the tables); use it on a development databas
 | `compaction` | One row per compaction: trigger, tokens before and after, summary text |
 | `model_usage` | Tokens per model response (de-duplicated by message id) |
 | `session_cost`, `session_model_cost` | Session cost and tokens per model, read from the latest `cost-state` entry |
+| `agent_run` | One row per sub-agent run, linked to the call that launched it |
 | `thinking` | The model's reasoning blocks of a message (text is empty on Claude Code 2.1.289); restricted |
 | `redaction_log` | Rule, location and count of each redaction; never the redacted value (unique per session, rule and location, so a repeated report is safe) |
 | `job` | Work queue for indexing and distillation (at most one queued index job per session) |
