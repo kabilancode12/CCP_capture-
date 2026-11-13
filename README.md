@@ -84,6 +84,7 @@ Something not working? [docs/troubleshooting.md](docs/troubleshooting.md).
 | Index stored transcripts into PostgreSQL | `ccp-index run` or `ccp-index run --once` (see [docs/indexer.md](docs/indexer.md)) |
 | Rebuild the index and prove it is identical | `ccp-index rebuild --all --check` |
 | History of a file / which edit wrote a line | `ccp-audit history <file>` / `ccp-audit why <file> <line>` (see [docs/audit.md](docs/audit.md)) |
+| Link commits to sessions / see the link of a commit | `ccp-audit link-commits --repo <git directory>` / `ccp-audit commit <sha>` |
 | Take a code snapshot now (developer machine) | `ccp-capture snapshot --session-id <id>` (see [docs/snapshots.md](docs/snapshots.md)) |
 | Print the Claude Code hook settings | `ccp-capture hook-settings` (see [docs/hooks.md](docs/hooks.md)) |
 | Record where a session runs (developer machine) | `ccp-capture environment --session-id <id>` (see [docs/environment.md](docs/environment.md)) |

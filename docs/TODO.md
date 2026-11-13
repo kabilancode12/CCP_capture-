@@ -107,9 +107,10 @@ Builds on the index of Step 2 and is read-only with respect to it. Demo 1 of the
   edit (with its prompt) that last wrote a line, found by replaying the recorded line ranges edit by edit.
   *Done when:* on invented and on real edits, `why` names the right edit for lines that were rewritten,
   shifted by later edits, or never touched by an AI edit.
-- [ ] **3.2** Commit linking: which session produced a developer's commit, by Git notes written at commit time
-  and, as a fallback, by matching the commit's hunks to recorded edits (`commit_link`). *Done when:* a commit
-  made after a session is linked to it, with a confidence, on a test repository.
+- [x] **3.2** Commit linking: which session produced a developer's commit, by matching the commit's added lines
+  to recorded edits (`commit_link`, `ccp-audit link-commits`). *Done when:* a commit made after a session is
+  linked to it, with a confidence, on a test repository. (Built: the line-matching method. Not built: Git notes
+  written at commit time, which need a client hook; see [audit.md](audit.md#commit-linking).)
 - [ ] **3.3** Dashboards (Metabase on PostgreSQL, in the Compose file): usage, cost, models, fix loops, split by
   surface and actor class. *Done when:* a developer can open the dashboard and see the pilot data.
 - [ ] **3.4** Changes made by shell commands (`ai_command`) and by people (`human`), from the code snapshots.

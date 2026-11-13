@@ -6,6 +6,8 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
 
 ### Added
 
+- Commit linking: `ccp-audit link-commits`, `commit` and `session-commits` link commits to the sessions
+  whose recorded edits wrote their lines, with a confidence (`commit_link`, migration 012; Step 3, task 3.2).
 - `ccp-audit history <file>` and `ccp-audit why <file> <line>`: the history of a file, and which AI edit
   (with its prompt) wrote a line, found by replaying the recorded line ranges (Step 3, task 3.1).
 - The indexer (`ccp-index run [--once]`): turns stored transcripts into one `event` row per line, safe to
