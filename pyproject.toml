@@ -47,6 +47,8 @@ ccp-verify = "ccp.verify.cli:main"
 ccp-db = "ccp.db.cli:main"
 # Start the ingestion API.
 ccp-ingest = "ccp.ingest.server:main"
+# Index stored transcripts into PostgreSQL (server side).
+ccp-index = "ccp.index.cli:main"
 # Upload transcripts from a developer machine.
 ccp-capture = "ccp.capture.cli:main"
 

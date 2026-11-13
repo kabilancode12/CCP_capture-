@@ -4,6 +4,11 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
 
 ## [Unreleased]
 
+### Added
+
+- The indexer (`ccp-index run [--once]`): turns stored transcripts into one `event` row per line, safe to
+  repeat, with a retrying job queue. Migration 004 adds the `thinking` table (task 2.1).
+
 ### Changed
 
 - Quick start and troubleshooting now give the `python -m` form of every command (for machines that

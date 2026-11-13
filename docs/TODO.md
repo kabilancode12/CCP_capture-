@@ -72,15 +72,17 @@ The index is **rebuildable**: everything in it comes from the stored transcripts
 rebuilt at any time. It runs on the server only; developer machines are not touched. Starts in parallel
 with the pilot (1.12) and works on the sessions the pilot captures.
 
-- [ ] **2.1** Indexer core: a worker takes an `index_session` job, reads the session's stored chunks in
+- [x] **2.1** Indexer core: a worker takes an `index_session` job, reads the session's stored chunks in
   order and writes one `event` row per transcript line (type, actor, uuid, parent, time, payload, source
   object and line). *Done when:* indexing a session twice gives identical rows, and a session still
-  being uploaded can be indexed again later without duplicates.
+  being uploaded can be indexed again later without duplicates. Includes the `thinking` table (text kept
+  whenever Claude Code writes it; on 2.1.289 only a signature exists).
 - [ ] **2.2** Conversation tree and session facts: abandoned (rewound) branches, compaction records,
   `started_at`, `ended_at`, branch and repository filled on `session`. *Done when:* the verified facts in
   [transcript-facts.md](verify/transcript-facts.md) (rewind, compaction, resume) hold on test data.
-- [ ] **2.3** Model usage: model, tokens and cost per response, from a versioned price table.
-  *Done when:* totals per session match the numbers in the transcript.
+- [ ] **2.3** Model usage: model, tokens and cost per response. Cost is *read* from the transcript's
+  `cost-state` entries, not computed (fact 13), so no price table. *Done when:* totals per session match
+  the numbers in the transcript.
 - [ ] **2.4** Sub-agents: `agent_run` rows linked to the call that launched them, from the sub-agent
   streams. *Done when:* each sub-agent's instructions, result and events are reachable from the parent.
 - [ ] **2.5** File changes: `file_change` rows from Edit and Write results (hunks, who, which event

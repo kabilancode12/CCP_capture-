@@ -66,7 +66,7 @@ Something not working? [docs/troubleshooting.md](docs/troubleshooting.md).
 | Know every setting | [configuration.md](docs/configuration.md) |
 | Understand what is captured and how | [hooks.md](docs/hooks.md), [capture-client.md](docs/capture-client.md), [snapshots.md](docs/snapshots.md), [environment.md](docs/environment.md) |
 | Understand privacy and safety | [redaction.md](docs/redaction.md) (secrets and personal data), [environment.md](docs/environment.md) (personal data collected) |
-| Understand the server | [ingestion-api.md](docs/ingestion-api.md), [storage.md](docs/storage.md), [database.md](docs/database.md) |
+| Understand the server | [ingestion-api.md](docs/ingestion-api.md), [indexer.md](docs/indexer.md), [storage.md](docs/storage.md), [database.md](docs/database.md) |
 | See the design and decisions | [architecture.md](docs/architecture.md), [verify/transcript-facts.md](docs/verify/transcript-facts.md) |
 | Work on the project | [setup.md](docs/setup.md), [CONTRIBUTING.md](CONTRIBUTING.md), [docs/TODO.md](docs/TODO.md) |
 
@@ -80,6 +80,7 @@ Something not working? [docs/troubleshooting.md](docs/troubleshooting.md).
 | See which hooks fired | `ccp-verify probe-report` |
 | Start the ingestion API | `ccp-ingest` (see [docs/ingestion-api.md](docs/ingestion-api.md)) |
 | Close idle sessions once | `ccp-ingest close-idle` |
+| Index stored transcripts into PostgreSQL | `ccp-index run` or `ccp-index run --once` (see [docs/indexer.md](docs/indexer.md)) |
 | Take a code snapshot now (developer machine) | `ccp-capture snapshot --session-id <id>` (see [docs/snapshots.md](docs/snapshots.md)) |
 | Print the Claude Code hook settings | `ccp-capture hook-settings` (see [docs/hooks.md](docs/hooks.md)) |
 | Record where a session runs (developer machine) | `ccp-capture environment --session-id <id>` (see [docs/environment.md](docs/environment.md)) |
@@ -105,6 +106,7 @@ ccp_V2/
 │   ├── db/                  Database connection and migration runner
 │   ├── storage/             MinIO object store, key layout, attachment de-duplication
 │   ├── ingest/              Ingestion API (Starlette): receives transcript chunks
+│   ├── index/               Indexer: stored transcripts to events in PostgreSQL
 │   ├── capture/             Capture client: runs on developer machines, uploads transcripts
 │   └── verify/              Step 0 tools: transcript, environment and hook inspectors
 ├── tests/
@@ -126,6 +128,7 @@ ccp_V2/
 │   ├── database.md          Migrations: commands, writing and testing them
 │   ├── storage.md           Object storage, key layout, attachment de-duplication
 │   ├── ingestion-api.md     Endpoints, status codes and how an upload is handled
+│   ├── indexer.md           The indexer: how sessions become events and thinking rows
 │   ├── capture-client.md    The developer-machine client: how a sync works and its promises
 │   ├── environment.md       The environment record: fields, sources, privacy
 │   ├── hooks.md             Claude Code hooks: what each event does, setup, safety rules
