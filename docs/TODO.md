@@ -90,7 +90,7 @@ with the pilot (1.12) and works on the sessions the pilot captures.
   explains it). *Done when:* the history of one file lists every AI edit in order.
 - [x] **2.6** Test runs: recognise test commands and their pass or fail. *Done when:* common runners
   (pytest, npm test, dotnet test) are recognised on test data and unknown commands are ignored.
-- [ ] **2.7** The six saved SQL questions as views or documented queries, and the docs for the indexer.
+- [x] **2.7** The six saved SQL questions as views or documented queries, and the docs for the indexer.
   *Done when:* each question has a test with known answers.
 - [ ] **2.8** Rebuild and real-data check. *Done when:* dropping the index and rebuilding from MinIO gives
   identical rows, on the sessions captured during the pilot.

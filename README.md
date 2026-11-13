@@ -63,6 +63,7 @@ Something not working? [docs/troubleshooting.md](docs/troubleshooting.md).
 | --- | --- |
 | Get it running | [quickstart.md](docs/quickstart.md), then [troubleshooting.md](docs/troubleshooting.md) |
 | Run the one-week self-pilot | [pilot.md](docs/pilot.md) |
+| Ask questions of the captured data (cost, file history, sub-agents, ...) | [queries.md](docs/queries.md) |
 | Know every setting | [configuration.md](docs/configuration.md) |
 | Understand what is captured and how | [hooks.md](docs/hooks.md), [capture-client.md](docs/capture-client.md), [snapshots.md](docs/snapshots.md), [environment.md](docs/environment.md) |
 | Understand privacy and safety | [redaction.md](docs/redaction.md) (secrets and personal data), [environment.md](docs/environment.md) (personal data collected) |
@@ -128,7 +129,8 @@ ccp_V2/
 │   ├── database.md          Migrations: commands, writing and testing them
 │   ├── storage.md           Object storage, key layout, attachment de-duplication
 │   ├── ingestion-api.md     Endpoints, status codes and how an upload is handled
-│   ├── indexer.md           The indexer: how sessions become events and thinking rows
+│   ├── indexer.md           The indexer: how sessions become events, runs, changes and costs
+│   ├── queries.md           The six saved questions (SQL views) and how to use them
 │   ├── capture-client.md    The developer-machine client: how a sync works and its promises
 │   ├── environment.md       The environment record: fields, sources, privacy
 │   ├── hooks.md             Claude Code hooks: what each event does, setup, safety rules

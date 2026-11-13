@@ -184,6 +184,11 @@ version writes the text, it is kept without any change here.
 Thinking text is summarised reasoning, never proof of intent, and can contain anything the model saw. Treat the
 table as restricted when access roles are set up (Step 5).
 
+## Asking questions
+
+The six questions the audit trail must answer are views on top of these tables: see
+[queries.md](queries.md).
+
 ## Limits
 
 - A job whose worker crashed stays `running`; it is not picked up again automatically. Queue a new job by
@@ -196,4 +201,4 @@ table as restricted when access roles are set up (Step 5).
 - The rewind rule was checked on this machine's own transcripts (one rewind, found), not yet on a variety of
   real sessions; the pilot data is the real test (task 2.8). Whether `last-prompt`'s `leafUuid` agrees with it
   is not yet checked.
-- The saved SQL questions and the final rebuild check follow in tasks 2.7 and 2.8 of [TODO.md](TODO.md).
+- The final rebuild check on real pilot data is task 2.8 of [TODO.md](TODO.md).

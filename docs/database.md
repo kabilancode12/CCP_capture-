@@ -43,7 +43,7 @@ Rollback **deletes data** (it drops the tables); use it on a development databas
 | Applied versions are stored in `schema_migration` | The database knows its own version |
 | Line endings are ignored in the checksum | Windows and Linux checkouts agree |
 
-## Tables (migrations 001 to 010)
+## Tables (migrations 001 to 011)
 
 | Table | Holds |
 | --- | --- |
@@ -59,6 +59,10 @@ Rollback **deletes data** (it drops the tables); use it on a development databas
 | `thinking` | The model's reasoning blocks of a message (text is empty on Claude Code 2.1.289); restricted |
 | `redaction_log` | Rule, location and count of each redaction; never the redacted value (unique per session, rule and location, so a repeated report is safe) |
 | `job` | Work queue for indexing and distillation (at most one queued index job per session) |
+
+Migration 011 adds six read-only views (`v_session_cost`, `v_file_history`, `v_agent_run`,
+`v_human_decision`, `v_compaction`, `v_test_fix_cycle`) that answer the audit questions: see
+[queries.md](queries.md).
 
 The full planned design (all steps) is in [`db/drafts/001_init.sql`](../db/drafts/001_init.sql).
 
