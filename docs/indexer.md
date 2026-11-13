@@ -80,6 +80,22 @@ transcript says nothing. `ended_at` and `end_reason` are not set here: the idle-
 SessionEnd hook set them. `repository` and `start_commit` are not in the transcript (it has only the local
 folder) and stay empty until the capture client sends them.
 
+## Model usage and cost
+
+- `model_usage`: one row per model **response** (API message), with model, input, output, thinking, cache-read
+  and cache-creation tokens. Claude Code writes one entry per content block and repeats the same usage on each,
+  so rows are de-duplicated by the message id (the entry's own id if it has none); summing entries would count
+  a response about three times over on real data. Join to `event` through `event_id` for the time and actor.
+- `session_cost` and `session_model_cost`: the session total and the per-model figures (tokens, cost), from the
+  **latest** `cost-state` entry of the main transcript. Cost is read from the transcript, never computed, so no
+  price list is kept. This is also the only place that shows helper models (for example the small model that
+  writes session titles) and `has_unknown_model_cost`, which says the total is partial.
+
+The two do not have to add up: `cost-state` also counts work that has no entry in the main transcript.
+Checked on four real sessions with only the main transcript indexed: one matched exactly (output tokens 8202 =
+8202); two were lower than `cost-state` (sub-agent files were not included); one was higher (168540 against
+147572), which is not explained yet. Task 2.8 repeats the check with sub-agent streams included.
+
 ## Thinking
 
 Every reasoning block of an assistant message gets a row in `thinking`, with the block's position and its text.
@@ -100,4 +116,4 @@ table as restricted when access roles are set up (Step 5).
 - The rewind rule was checked on this machine's own transcripts (one rewind, found), not yet on a variety of
   real sessions; the pilot data is the real test (task 2.8). Whether `last-prompt`'s `leafUuid` agrees with it
   is not yet checked.
-- Model usage, sub-agent runs, file changes and test runs follow in tasks 2.3 to 2.6 of [TODO.md](TODO.md).
+- Sub-agent runs, file changes and test runs follow in tasks 2.4 to 2.6 of [TODO.md](TODO.md).

@@ -10,6 +10,8 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
   repeat, with a retrying job queue. Migration 004 adds the `thinking` table (task 2.1).
 - Indexer: abandoned (rewound) branches are marked, compactions get their own table (migration 005), and
   `session.started_at` and `branch` are filled from the transcript (task 2.2).
+- Indexer: model usage per response (de-duplicated by message id) and session cost per model, read from
+  the transcript's `cost-state` (migration 006, task 2.3).
 
 ### Changed
 

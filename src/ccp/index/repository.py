@@ -124,6 +124,76 @@ _REFRESH_SESSION_FACTS = """
 """
 
 
+# One row per API message. The same message appears in several entries (one per content block)
+# with the same usage, so the first entry of each message is kept.
+_REFRESH_MODEL_USAGE = """
+    INSERT INTO model_usage (session_id, message_id, event_id, model, input_tokens, output_tokens,
+                             thinking_tokens, cache_read_tokens, cache_creation_tokens)
+    SELECT DISTINCT ON (COALESCE(payload #>> '{message,id}', entry_uuid))
+           session_id, COALESCE(payload #>> '{message,id}', entry_uuid), event_id,
+           payload #>> '{message,model}',
+           json_bigint(payload #> '{message,usage,input_tokens}'),
+           json_bigint(payload #> '{message,usage,output_tokens}'),
+           json_bigint(payload #> '{message,usage,output_tokens_details,thinking_tokens}'),
+           json_bigint(payload #> '{message,usage,cache_read_input_tokens}'),
+           json_bigint(payload #> '{message,usage,cache_creation_input_tokens}')
+      FROM event
+     WHERE session_id = %s AND event_type IN ('response', 'tool_call', 'thinking')
+       AND jsonb_typeof(payload #> '{message,usage}') = 'object'
+       AND COALESCE(payload #>> '{message,id}', entry_uuid) IS NOT NULL
+     ORDER BY COALESCE(payload #>> '{message,id}', entry_uuid), raw_object_key, raw_line_number
+    ON CONFLICT (session_id, message_id) DO NOTHING
+"""
+
+# Session cost comes from the latest cost-state entry of the main transcript: its totals cover the
+# whole session so far. (The same sub-query is used twice, to keep each statement self-contained.)
+_REFRESH_SESSION_COST = """
+    INSERT INTO session_cost (session_id, total_cost_usd, has_unknown_model_cost, lines_added,
+                              lines_removed, api_duration_ms, tool_duration_ms)
+    SELECT %s,
+           CASE WHEN jsonb_typeof(l.payload -> 'totalCostUSD') = 'number'
+                THEN (l.payload ->> 'totalCostUSD')::numeric END,
+           CASE WHEN jsonb_typeof(l.payload -> 'hasUnknownModelCost') = 'boolean'
+                THEN (l.payload ->> 'hasUnknownModelCost')::boolean END,
+           json_bigint(l.payload -> 'totalLinesAdded'),
+           json_bigint(l.payload -> 'totalLinesRemoved'),
+           json_bigint(l.payload -> 'totalAPIDuration'),
+           json_bigint(l.payload -> 'totalToolDuration')
+      FROM (SELECT payload FROM event
+             WHERE session_id = %s AND event_type = 'cost-state'
+               AND split_part(raw_object_key, '/', 3) = 'main'
+             ORDER BY raw_object_key DESC, raw_line_number DESC LIMIT 1) AS l
+    ON CONFLICT (session_id) DO UPDATE SET
+        total_cost_usd = EXCLUDED.total_cost_usd,
+        has_unknown_model_cost = EXCLUDED.has_unknown_model_cost,
+        lines_added = EXCLUDED.lines_added, lines_removed = EXCLUDED.lines_removed,
+        api_duration_ms = EXCLUDED.api_duration_ms, tool_duration_ms = EXCLUDED.tool_duration_ms
+"""
+
+_DELETE_MODEL_COSTS = "DELETE FROM session_model_cost WHERE session_id = %s"
+
+_REFRESH_MODEL_COSTS = """
+    INSERT INTO session_model_cost (session_id, model, input_tokens, output_tokens, thinking_tokens,
+                                    cache_read_tokens, cache_creation_tokens, web_search_requests,
+                                    cost_usd)
+    SELECT %s, m.key,
+           json_bigint(m.value -> 'inputTokens'),
+           json_bigint(m.value -> 'outputTokens'),
+           json_bigint(m.value -> 'thinkingTokens'),
+           json_bigint(m.value -> 'cacheReadInputTokens'),
+           json_bigint(m.value -> 'cacheCreationInputTokens'),
+           json_bigint(m.value -> 'webSearchRequests'),
+           CASE WHEN jsonb_typeof(m.value -> 'costUSD') = 'number'
+                THEN (m.value ->> 'costUSD')::numeric END
+      FROM (SELECT payload FROM event
+             WHERE session_id = %s AND event_type = 'cost-state'
+               AND split_part(raw_object_key, '/', 3) = 'main'
+             ORDER BY raw_object_key DESC, raw_line_number DESC LIMIT 1) AS l,
+           jsonb_each(CASE WHEN jsonb_typeof(l.payload -> 'modelUsage') = 'object'
+                           THEN l.payload -> 'modelUsage' ELSE '{}'::jsonb END) AS m
+"""
+
+
 class IndexRepositoryError(RuntimeError):
     """Raised when the database cannot be reached or a statement fails."""
 
@@ -244,9 +314,10 @@ class IndexRepository:
     def refresh_session(self, session_id: str) -> None:
         """Recompute everything that is derived from a session's events, in one transaction.
 
-        That is: which events are on abandoned branches, the compaction rows, and the session's
-        start time and branch. It reads all of the session's events, so the result is the same
-        however many chunks were indexed in which order, and repeating it changes nothing.
+        That is: which events are on abandoned branches, the compaction rows, the session's
+        start time and branch, and its model usage and cost. It reads all of the session's events,
+        so the result is the same however many chunks were indexed in which order, and repeating
+        it changes nothing.
         """
         connection = self._open()
         try:
@@ -267,6 +338,10 @@ class IndexRepository:
             cursor.execute(_MARK_ABANDONED, (abandoned, session_id, abandoned))
             cursor.execute(_REFRESH_COMPACTIONS, (session_id,))
             cursor.execute(_REFRESH_SESSION_FACTS, (session_id, session_id))
+            cursor.execute(_REFRESH_MODEL_USAGE, (session_id,))
+            cursor.execute(_REFRESH_SESSION_COST, (session_id, session_id))
+            cursor.execute(_DELETE_MODEL_COSTS, (session_id,))
+            cursor.execute(_REFRESH_MODEL_COSTS, (session_id, session_id))
             connection.commit()
         except (pg8000.dbapi.Error, OSError) as error:
             connection.rollback()
