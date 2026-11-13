@@ -16,6 +16,7 @@ from ccp.db.connection import connect
 from ccp.index.agents import AgentMeta
 from ccp.index.filechanges import extract_file_change
 from ccp.index.parser import ParsedEntry
+from ccp.index.testruns import detect_test_runner, exit_code_of, outcome
 from ccp.index.tree import TreeNode, abandoned_event_ids, nearest_prompts
 from ccp.settings import DatabaseSettings
 
@@ -240,7 +241,7 @@ _REFRESH_AGENT_RUNS = """
           LEFT JOIN LATERAL (
               SELECT e.event_id, e.payload FROM event e
                WHERE e.session_id = r.session_id AND r.tool_use_id IS NOT NULL
-                 AND e.tool_use_ids @> ARRAY[r.tool_use_id]
+                 AND e.event_type = 'tool_call' AND e.tool_use_ids @> ARRAY[r.tool_use_id]
                ORDER BY e.raw_object_key, e.raw_line_number LIMIT 1) l ON TRUE
           LEFT JOIN LATERAL (
               SELECT min(e.occurred_at) AS started, max(e.occurred_at) AS ended, count(*) AS total
@@ -287,7 +288,7 @@ _LINK_FILE_CHANGE_CALLS = """
           JOIN LATERAL (
               SELECT e.event_id, e.payload FROM event e
                WHERE e.session_id = g.session_id
-                 AND e.tool_use_ids @> ARRAY[g.tool_use_id]
+                 AND e.event_type = 'tool_call' AND e.tool_use_ids @> ARRAY[g.tool_use_id]
                ORDER BY e.raw_object_key, e.raw_line_number LIMIT 1) l ON TRUE
          WHERE g.session_id = %s AND g.tool_use_id IS NOT NULL) c
      WHERE f.file_change_id = c.file_change_id
@@ -304,6 +305,54 @@ _SET_PROMPTS = """
       FROM unnest(%s::bigint[], %s::bigint[]) AS v(change_id, prompt_id)
      WHERE f.file_change_id = v.change_id AND f.prompt_event_id IS DISTINCT FROM v.prompt_id
 """
+
+
+# Shell calls (with the result that answered them) that are not yet test runs. The result's facts
+# are read in the database so that its (possibly huge) output is not sent: whether it was an
+# error, the exit code that a failure starts with, whether it was interrupted, and whether the
+# call was refused (a refused call never ran).
+_NEW_SHELL_CALLS = """
+    SELECT c.event_id, c.payload #> '{message,content}', r.event_id,
+           jsonb_path_exists(r.payload,
+               '$.message.content[*] ? (@.type == "tool_result" && @.is_error == true)'),
+           substring(r.payload #>> '{message,content,0,content}' FROM '^Exit code [0-9]+'),
+           COALESCE(r.payload #>> '{toolUseResult,interrupted}' = 'true', FALSE),
+           r.payload ? 'toolDenialKind'
+      FROM event c
+      JOIN event r ON r.session_id = c.session_id AND r.event_type = 'tool_result'
+                  AND r.tool_use_ids && c.tool_use_ids
+     WHERE c.session_id = %s AND c.event_type = 'tool_call'
+       AND jsonb_path_exists(c.payload,
+               '$.message.content[*] ? (@.type == "tool_use"
+                   && (@.name == "Bash" || @.name == "PowerShell"))')
+       AND NOT EXISTS (SELECT 1 FROM test_run t WHERE t.call_event_id = c.event_id)
+     ORDER BY c.event_id
+"""
+
+_INSERT_TEST_RUN = """
+    INSERT INTO test_run (session_id, call_event_id, result_event_id, tool_use_id, command,
+                          framework, passed, exit_code)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    ON CONFLICT (call_event_id) DO NOTHING
+"""
+
+# Commands longer than this are cut: a test command is short, and a long one is a script.
+MAX_COMMAND_LENGTH = 2000
+
+
+def _shell_test_command(block: object) -> tuple[str, str, str] | None:
+    """For a shell ``tool_use`` block that starts a test runner: ``(call id, command, runner)``."""
+    if not isinstance(block, dict) or block.get("type") != "tool_use":
+        return None
+    if block.get("name") not in ("Bash", "PowerShell"):
+        return None
+    arguments = block.get("input")
+    command = arguments.get("command") if isinstance(arguments, dict) else None
+    tool_use_id = block.get("id")
+    if not isinstance(command, str) or not isinstance(tool_use_id, str):
+        return None
+    runner = detect_test_runner(command)
+    return (tool_use_id, command, runner) if runner else None
 
 
 class IndexRepositoryError(RuntimeError):
@@ -428,7 +477,8 @@ class IndexRepository:
         """Recompute everything that is derived from a session's events, in one transaction.
 
         That is: which events are on abandoned branches, the compaction rows, the session's
-        start time and branch, its model usage and cost, its sub-agent runs and its file changes.
+        start time and branch, its model usage and cost, its sub-agent runs, file changes and
+        test runs.
         It reads the session's events, so the result is the same however many chunks were indexed
         in which order, and repeating it changes nothing.
         """
@@ -458,6 +508,7 @@ class IndexRepository:
             cursor.execute(_ENSURE_AGENT_RUNS, (session_id,))
             cursor.execute(_REFRESH_AGENT_RUNS, (session_id, session_id))
             self._refresh_file_changes(cursor, session_id, nodes)
+            self._refresh_test_runs(cursor, session_id)
             connection.commit()
         except (pg8000.dbapi.Error, OSError) as error:
             connection.rollback()
@@ -505,6 +556,49 @@ class IndexRepository:
         prompts = nearest_prompts(nodes, changes.values(), launches)
         ids = list(changes)
         cursor.execute(_SET_PROMPTS, (ids, [prompts[changes[i]] for i in ids]))
+
+    @staticmethod
+    def _refresh_test_runs(cursor: pg8000.dbapi.Cursor, session_id: str) -> None:
+        """Turn shell calls that ran a test runner into ``test_run`` rows.
+
+        Part of :meth:`refresh_session`, in its transaction. A call is looked at once, when its
+        result is there: a call without a result is not a run yet, and a call that is not a test
+        run is simply looked at again next time (these are few).
+        """
+        cursor.execute(_NEW_SHELL_CALLS, (session_id,))
+        for (
+            call_id,
+            blocks,
+            result_id,
+            is_error,
+            exit_text,
+            interrupted,
+            denied,
+        ) in cursor.fetchall():
+            if denied:
+                continue
+            for block in blocks if isinstance(blocks, list) else ():
+                found = _shell_test_command(block)
+                if found is None:
+                    continue
+                tool_use_id, command, runner = found
+                passed, code = outcome(
+                    is_error=is_error, exit_code=exit_code_of(exit_text), interrupted=interrupted
+                )
+                cursor.execute(
+                    _INSERT_TEST_RUN,
+                    (
+                        session_id,
+                        call_id,
+                        result_id,
+                        tool_use_id,
+                        command[:MAX_COMMAND_LENGTH],
+                        runner,
+                        passed,
+                        code,
+                    ),
+                )
+                break  # one run per call
 
     def save_agent_meta(self, session_id: str, agent_id: str, meta: AgentMeta) -> None:
         """Store a sub-agent's description (creating its run if needed). Safe to repeat."""

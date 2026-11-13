@@ -88,7 +88,7 @@ with the pilot (1.12) and works on the sessions the pilot captures.
   streams. *Done when:* each sub-agent's instructions, result and events are reachable from the parent.
 - [x] **2.5** File changes: `file_change` rows from Edit and Write results (hunks, who, which event
   explains it). *Done when:* the history of one file lists every AI edit in order.
-- [ ] **2.6** Test runs: recognise test commands and their pass or fail. *Done when:* common runners
+- [x] **2.6** Test runs: recognise test commands and their pass or fail. *Done when:* common runners
   (pytest, npm test, dotnet test) are recognised on test data and unknown commands are ignored.
 - [ ] **2.7** The six saved SQL questions as views or documented queries, and the docs for the indexer.
   *Done when:* each question has a test with known answers.

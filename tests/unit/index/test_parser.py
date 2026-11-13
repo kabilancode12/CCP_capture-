@@ -185,6 +185,10 @@ def test_the_ids_of_tool_calls_are_collected_from_assistant_entries() -> None:
     assert parsed.tool_use_ids == ("toolu_1", "toolu_2")
 
 
-def test_tool_results_do_not_count_as_tool_calls() -> None:
-    parsed = _message({"type": "tool_result", "tool_use_id": "toolu_1", "id": "x"}, type="user")
-    assert parsed.tool_use_ids == ()
+def test_the_ids_that_tool_results_answer_are_collected_too() -> None:
+    parsed = _message(
+        {"type": "tool_result", "tool_use_id": "toolu_1", "id": "ignored"},
+        {"type": "tool_result"},
+        type="user",
+    )
+    assert parsed.tool_use_ids == ("toolu_1",)

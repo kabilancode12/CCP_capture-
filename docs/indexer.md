@@ -131,6 +131,29 @@ indexed before this feature are caught up at their next job.
 Checked on three real sessions: 34, 126 and 317 edit results gave exactly 34, 126 and 317 rows, each linked
 to its call, tool and prompt. Indexing the largest (5,097 events) took 18 s the first time and 0.9 s when repeated.
 
+## Test runs
+
+A shell call (`Bash` or `PowerShell`) whose command **starts** a known test runner gets a row in `test_run`:
+pytest, unittest, `npm`/`yarn`/`pnpm test`, jest, vitest, `dotnet test`, `go test`, `cargo test`, maven, gradle,
+phpunit, rspec. Only the start of each part of the command counts (`cd app && python -m pytest -q` is a run;
+`pip install pytest`, `git commit -m "fix pytest"` and `pytest --collect-only` are not). The code is
+[`testruns.py`](../src/ccp/index/testruns.py).
+
+The transcript records no exit code for a success, so the outcome is read from how the call ended:
+
+| How the call ended | `passed` | `exit_code` |
+| --- | --- | --- |
+| No error | true | 0 |
+| An error whose text starts `Exit code <n>` | false | n |
+| Interrupted, or an error without an exit code | NULL (unknown) | |
+| Refused by a permission decision | no row: it never ran | |
+
+**Limits:** the outcome is the exit code of the *command*, so `pytest | tail` reports the exit code of `tail`;
+the number of tests passed and failed is not read; a command with several runners counts once, for the first; a
+runner that is not on the list is missed. A call is turned into a row once, when its result has arrived.
+
+Checked on three real sessions: 14, 77 and 39 runs found, one of them a failure, none with an unknown outcome.
+
 ## Model usage and cost
 
 - `model_usage`: one row per model **response** (API message), with model, input, output, thinking, cache-read
@@ -167,9 +190,10 @@ table as restricted when access roles are set up (Step 5).
   uploading again, or reset it by hand. (Recovery is planned with the Step 5 hardening.)
 - One event is inserted per statement: about 18 s for a session of 5,000 lines. To be batched if that becomes a
   problem.
-- `event.tool_use_ids` (migration 009, indexed) is what makes "which event holds this tool call" fast; it is
-  filled when an event is indexed.
+- `event.tool_use_ids` (migrations 009 and 010, indexed) holds the ids of the tool calls an entry makes or
+  answers. It is what makes "which event holds this tool call, or its result" fast; it is filled when an event
+  is indexed.
 - The rewind rule was checked on this machine's own transcripts (one rewind, found), not yet on a variety of
   real sessions; the pilot data is the real test (task 2.8). Whether `last-prompt`'s `leafUuid` agrees with it
   is not yet checked.
-- Test runs follow in task 2.6 of [TODO.md](TODO.md).
+- The saved SQL questions and the final rebuild check follow in tasks 2.7 and 2.8 of [TODO.md](TODO.md).

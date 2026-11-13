@@ -64,7 +64,7 @@ class ParsedEntry:
     occurred_at: datetime | None
     payload: dict[str, Any]  # the entry itself (already redacted before upload)
     thinking: tuple[ThinkingBlock, ...] = ()
-    tool_use_ids: tuple[str, ...] = ()  # ids of the tool calls in this entry
+    tool_use_ids: tuple[str, ...] = ()  # ids of the tool calls this entry makes or answers
 
 
 def parse_line(line: str) -> ParsedEntry:
@@ -110,7 +110,7 @@ def parse_line(line: str) -> ParsedEntry:
         occurred_at=_parse_time(entry.get("timestamp")),
         payload=_without_null_characters(entry),
         thinking=_thinking_blocks(blocks) if kind == "assistant" else (),
-        tool_use_ids=_tool_use_ids(blocks) if kind == "assistant" else (),
+        tool_use_ids=_tool_use_ids(blocks),
     )
 
 
@@ -162,12 +162,13 @@ def _thinking_blocks(blocks: list[dict[str, Any]]) -> tuple[ThinkingBlock, ...]:
 
 
 def _tool_use_ids(blocks: list[dict[str, Any]]) -> tuple[str, ...]:
-    """The ids of the tool calls in an assistant message."""
-    return tuple(
-        block["id"]
-        for block in blocks
-        if block.get("type") == "tool_use" and isinstance(block.get("id"), str) and block["id"]
-    )
+    """The ids of the tool calls an entry makes (``tool_use``) or answers (``tool_result``)."""
+    ids = []
+    for block in blocks:
+        value = block.get("id") if block.get("type") == "tool_use" else block.get("tool_use_id")
+        if block.get("type") in ("tool_use", "tool_result") and isinstance(value, str) and value:
+            ids.append(value)
+    return tuple(ids)
 
 
 def _text_or_none(value: object) -> str | None:
