@@ -62,6 +62,7 @@ Something not working? [docs/troubleshooting.md](docs/troubleshooting.md).
 | If you want to... | Read |
 | --- | --- |
 | Get it running | [quickstart.md](docs/quickstart.md), then [troubleshooting.md](docs/troubleshooting.md) |
+| Run the one-week self-pilot | [pilot.md](docs/pilot.md) |
 | Know every setting | [configuration.md](docs/configuration.md) |
 | Understand what is captured and how | [hooks.md](docs/hooks.md), [capture-client.md](docs/capture-client.md), [snapshots.md](docs/snapshots.md), [environment.md](docs/environment.md) |
 | Understand privacy and safety | [redaction.md](docs/redaction.md) (secrets and personal data), [environment.md](docs/environment.md) (personal data collected) |
