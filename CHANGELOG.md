@@ -8,6 +8,8 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
 
 - The indexer (`ccp-index run [--once]`): turns stored transcripts into one `event` row per line, safe to
   repeat, with a retrying job queue. Migration 004 adds the `thinking` table (task 2.1).
+- Indexer: abandoned (rewound) branches are marked, compactions get their own table (migration 005), and
+  `session.started_at` and `branch` are filled from the transcript (task 2.2).
 
 ### Changed
 

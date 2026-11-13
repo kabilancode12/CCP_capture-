@@ -27,6 +27,8 @@ session is closed. A job means "bring this session's index up to date":
 1. List the session's stored chunks: the main transcript and any sub-agent streams.
 2. Skip chunks that are already indexed. A chunk never changes: its key holds its position in the source file.
 3. Read each new chunk and store **one `event` row per transcript line**, in one transaction per chunk.
+4. Recompute what is derived from all of the session's events (see below), in one transaction. This runs at
+   the end of every job, even when no chunk was new, so it is always current.
 
 Because of (2) and (3), a crash leaves a chunk fully indexed or not at all, a repeated job adds nothing, and
 a chunk that arrives later is simply added. A failed job is tried again up to three times, then stays
@@ -52,6 +54,32 @@ Unknown types are stored, not rejected: Claude Code adds new ones. Each event ke
 it came from (`raw_object_key`, `raw_line_number`; the line number counts from 1 within the chunk). A NUL
 character, which PostgreSQL cannot store, is replaced by U+FFFD.
 
+## Abandoned branches (rewind)
+
+Entries form a tree through `parentUuid`. When the developer rewinds and types a new prompt, the old prompt and
+everything after it stay in the transcript, and the new prompt becomes a second user prompt under the same
+parent ([facts 19 and 20](verify/transcript-facts.md)). The rule: **when an entry has two or more user prompts
+as children, the last one in the file continued; every earlier one, and everything below it, is abandoned**
+(`event.is_abandoned = true`). Abandoned events are kept: they were really captured, and AI edits on them may
+have happened. Only user prompts written by a person count: tool calls (which also give an entry two
+children), messages Claude Code injects itself (`isMeta`) and sub-agent prompts do not. A compaction boundary
+has no parent but names `logicalParentUuid`, which is followed as if it were the parent. The code is
+[`tree.py`](../src/ccp/index/tree.py).
+
+## Compactions
+
+Every `compact_boundary` entry gets a row in `compaction`: the trigger (`manual` or `auto`), the token counts
+before and after, and the text of the summary entry that follows it. The summary may arrive in a later chunk
+than the boundary; the row is completed then. A boundary without metadata still gets a row, with empty fields.
+
+## Session facts
+
+From the main transcript (not sub-agent streams) the indexer fills `session.started_at` (the earliest entry
+time) and `session.branch` (the first Git branch named by an entry). A value already stored is kept if the
+transcript says nothing. `ended_at` and `end_reason` are not set here: the idle-session closer and the
+SessionEnd hook set them. `repository` and `start_commit` are not in the transcript (it has only the local
+folder) and stay empty until the capture client sends them.
+
 ## Thinking
 
 Every reasoning block of an assistant message gets a row in `thinking`, with the block's position and its text.
@@ -69,5 +97,7 @@ table as restricted when access roles are set up (Step 5).
   uploading again, or reset it by hand. (Recovery is planned with the Step 5 hardening.)
 - One event is inserted per statement: fine for sessions of thousands of lines, to be batched if indexing
   becomes slow.
-- Only events are filled so far. The conversation tree (abandoned branches), model usage, sub-agent runs, file
-  changes and test runs follow in tasks 2.2 to 2.6 of [TODO.md](TODO.md).
+- The rewind rule was checked on this machine's own transcripts (one rewind, found), not yet on a variety of
+  real sessions; the pilot data is the real test (task 2.8). Whether `last-prompt`'s `leafUuid` agrees with it
+  is not yet checked.
+- Model usage, sub-agent runs, file changes and test runs follow in tasks 2.3 to 2.6 of [TODO.md](TODO.md).

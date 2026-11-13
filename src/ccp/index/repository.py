@@ -14,6 +14,7 @@ import pg8000.dbapi
 
 from ccp.db.connection import connect
 from ccp.index.parser import ParsedEntry
+from ccp.index.tree import TreeNode, abandoned_event_ids
 from ccp.settings import DatabaseSettings
 
 # A job that failed is tried again this many times in all, then left as 'failed'.
@@ -63,6 +64,63 @@ _INSERT_EVENT = """
 _INSERT_THINKING = """
     INSERT INTO thinking (event_id, block_index, text, is_redacted) VALUES (%s, %s, %s, %s)
     ON CONFLICT (event_id, block_index) DO NOTHING
+"""
+
+
+# The events the tree rule needs. A prompt counts as the developer's only if a human wrote it and
+# Claude Code did not inject it (isMeta).
+_TREE_NODES = """
+    SELECT event_id, entry_uuid, parent_uuid, payload->>'logicalParentUuid',
+           event_type = 'prompt' AND actor = 'human'
+               AND COALESCE(payload->>'isMeta', 'false') <> 'true',
+           raw_object_key, raw_line_number
+      FROM event WHERE session_id = %s
+"""
+
+# Set the flag on exactly the abandoned events; rows that already have the right value are not
+# touched, so repeating this changes nothing.
+_MARK_ABANDONED = """
+    UPDATE event SET is_abandoned = (event_id = ANY(%s::bigint[]))
+     WHERE session_id = %s AND is_abandoned IS DISTINCT FROM (event_id = ANY(%s::bigint[]))
+"""
+
+# One compaction row per boundary entry, with the summary that follows it (the user entry whose
+# parent is the boundary). The summary may be indexed in a later chunk than the boundary, so an
+# existing row is brought up to date.
+_REFRESH_COMPACTIONS = """
+    INSERT INTO compaction (session_id, event_id, trigger, pre_tokens, post_tokens, summary)
+    SELECT b.session_id, b.event_id,
+           b.payload #>> '{compactMetadata,trigger}',
+           CASE WHEN jsonb_typeof(b.payload #> '{compactMetadata,preTokens}') = 'number'
+                THEN (b.payload #>> '{compactMetadata,preTokens}')::numeric::bigint END,
+           CASE WHEN jsonb_typeof(b.payload #> '{compactMetadata,postTokens}') = 'number'
+                THEN (b.payload #>> '{compactMetadata,postTokens}')::numeric::bigint END,
+           (SELECT s.payload #>> '{message,content}' FROM event s
+             WHERE s.session_id = b.session_id AND s.parent_uuid = b.entry_uuid
+               AND s.event_type = 'compaction_summary'
+             ORDER BY s.event_id LIMIT 1)
+      FROM event b
+     WHERE b.session_id = %s AND b.event_type = 'compact_boundary'
+    ON CONFLICT (event_id) DO UPDATE SET
+        trigger = EXCLUDED.trigger, pre_tokens = EXCLUDED.pre_tokens,
+        post_tokens = EXCLUDED.post_tokens, summary = EXCLUDED.summary
+"""
+
+# Facts about the session that the transcript knows: when it started, and on which Git branch.
+# Only the main transcript counts (sub-agent streams are the third part of the key), and the
+# branch is the first one named. A known value is replaced; if the transcript says nothing, a
+# value stored earlier stays.
+_REFRESH_SESSION_FACTS = """
+    UPDATE session SET
+        started_at = COALESCE(f.first_at, session.started_at),
+        branch = COALESCE(f.first_branch, session.branch)
+      FROM (SELECT min(occurred_at) AS first_at,
+                   (array_agg(payload->>'gitBranch' ORDER BY raw_object_key, raw_line_number)
+                       FILTER (WHERE payload->>'gitBranch' IS NOT NULL
+                                 AND payload->>'gitBranch' <> ''))[1] AS first_branch
+              FROM event
+             WHERE session_id = %s AND split_part(raw_object_key, '/', 3) = 'main') AS f
+     WHERE session.session_id = %s
 """
 
 
@@ -180,6 +238,41 @@ class IndexRepository:
         except (pg8000.dbapi.Error, OSError) as error:
             connection.rollback()
             raise IndexRepositoryError(f"saving events failed: {type(error).__name__}") from error
+        finally:
+            connection.close()
+
+    def refresh_session(self, session_id: str) -> None:
+        """Recompute everything that is derived from a session's events, in one transaction.
+
+        That is: which events are on abandoned branches, the compaction rows, and the session's
+        start time and branch. It reads all of the session's events, so the result is the same
+        however many chunks were indexed in which order, and repeating it changes nothing.
+        """
+        connection = self._open()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(_TREE_NODES, (session_id,))
+            nodes = [
+                TreeNode(
+                    event_id=int(row[0]),
+                    entry_uuid=row[1],
+                    parent_uuid=row[2],
+                    logical_parent_uuid=row[3],
+                    is_user_prompt=bool(row[4]),
+                    position=(str(row[5]), int(row[6])),
+                )
+                for row in cursor.fetchall()
+            ]
+            abandoned = sorted(abandoned_event_ids(nodes))
+            cursor.execute(_MARK_ABANDONED, (abandoned, session_id, abandoned))
+            cursor.execute(_REFRESH_COMPACTIONS, (session_id,))
+            cursor.execute(_REFRESH_SESSION_FACTS, (session_id, session_id))
+            connection.commit()
+        except (pg8000.dbapi.Error, OSError) as error:
+            connection.rollback()
+            raise IndexRepositoryError(
+                f"refreshing a session failed: {type(error).__name__}"
+            ) from error
         finally:
             connection.close()
 

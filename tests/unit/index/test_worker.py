@@ -34,6 +34,7 @@ class FakeRepository:
         self.finished: list[int] = []
         self.failed: list[int] = []
         self.retry = True
+        self.refreshed: list[str] = []
 
     def claim_job(self) -> IndexJob | None:
         return self.jobs.pop(0) if self.jobs else None
@@ -47,6 +48,9 @@ class FakeRepository:
 
     def indexed_keys(self, session_id: str) -> set[str]:
         return set(self.saved)
+
+    def refresh_session(self, session_id: str) -> None:
+        self.refreshed.append(session_id)
 
     def save_chunk(
         self, session_id: str, object_key: str, entries: Sequence[tuple[int, ParsedEntry]]
@@ -157,3 +161,25 @@ def test_run_waits_when_the_queue_is_empty() -> None:
     with pytest.raises(StopLoopError):
         run(FakeStore({}), FakeRepository(), poll_seconds=5, sleep=sleep)
     assert waits == [5, 5]
+
+
+def test_the_derived_data_is_refreshed_after_every_run_even_when_nothing_was_new() -> None:
+    store = FakeStore({MAIN_0: _line(type="user")})
+    repository = FakeRepository()
+
+    index_session(store, repository, "s1")
+    index_session(store, repository, "s1")  # nothing new the second time
+
+    assert repository.refreshed == ["s1", "s1"]
+
+
+def test_a_refresh_that_fails_fails_the_job() -> None:
+    class BrokenRefresh(FakeRepository):
+        def refresh_session(self, session_id: str) -> None:
+            raise RuntimeError("database is down")
+
+    repository = BrokenRefresh([IndexJob(7, "s1", 1)])
+
+    process_next_job(FakeStore({MAIN_0: _line(type="user")}), repository)
+
+    assert (repository.failed, repository.finished) == ([7], [])

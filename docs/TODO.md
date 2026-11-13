@@ -77,7 +77,7 @@ with the pilot (1.12) and works on the sessions the pilot captures.
   object and line). *Done when:* indexing a session twice gives identical rows, and a session still
   being uploaded can be indexed again later without duplicates. Includes the `thinking` table (text kept
   whenever Claude Code writes it; on 2.1.289 only a signature exists).
-- [ ] **2.2** Conversation tree and session facts: abandoned (rewound) branches, compaction records,
+- [x] **2.2** Conversation tree and session facts: abandoned (rewound) branches, compaction records,
   `started_at`, `ended_at`, branch and repository filled on `session`. *Done when:* the verified facts in
   [transcript-facts.md](verify/transcript-facts.md) (rewind, compaction, resume) hold on test data.
 - [ ] **2.3** Model usage: model, tokens and cost per response. Cost is *read* from the transcript's

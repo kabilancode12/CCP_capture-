@@ -6,7 +6,8 @@ more when the session is closed). A job means "bring the index of this session u
 1. list the session's stored transcript chunks (the main transcript and any sub-agent streams);
 2. skip chunks that were indexed before: a chunk never changes, because its key contains its
    position in the source file;
-3. for each new chunk, read every line and store one event per line.
+3. for each new chunk, read every line and store one event per line;
+4. recompute what is derived from the events: abandoned branches, compactions, session facts.
 
 Doing it this way makes indexing **idempotent**: running a job again, or two jobs for the same
 session, never creates a duplicate. A chunk is stored in one transaction, so a crash leaves a
@@ -58,6 +59,9 @@ class JobRepository(Protocol):
     ) -> None:
         """Store one chunk's events."""
 
+    def refresh_session(self, session_id: str) -> None:
+        """Recompute what is derived from the session's events (tree, compactions, facts)."""
+
 
 @dataclass(frozen=True)
 class IndexResult:
@@ -89,6 +93,9 @@ def index_session(store: ChunkStore, repository: JobRepository, session_id: str)
         chunks += 1
         events += len(entries)
         skipped += bad_lines
+    # Always, even when no chunk was new: it is cheap, and it also brings sessions that were
+    # indexed by an earlier version of the indexer up to date.
+    repository.refresh_session(session_id)
     return IndexResult(chunks, events, skipped)
 
 
