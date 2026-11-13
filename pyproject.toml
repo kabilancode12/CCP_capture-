@@ -51,6 +51,8 @@ ccp-ingest = "ccp.ingest.server:main"
 ccp-index = "ccp.index.cli:main"
 # Questions about the index: file history, "why was this line written".
 ccp-audit = "ccp.audit.cli:main"
+# Set up the dashboards in Metabase.
+ccp-dashboards = "ccp.dashboards.cli:main"
 # Upload transcripts from a developer machine.
 ccp-capture = "ccp.capture.cli:main"
 
@@ -76,6 +78,7 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D", "S101", "E501"]              # tests need no docstrings and may use assert
+"src/ccp/dashboards/definitions.py" = ["E501"]  # one SQL question per line is easier to read
 
 [tool.mypy]
 python_version = "3.11"

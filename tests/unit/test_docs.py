@@ -26,7 +26,9 @@ DOCUMENTS = [
 ]
 
 LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
-COMMAND = re.compile(r"`(ccp-(?:db|ingest|index|audit|capture|verify))(?:\s+([a-z][a-z-]*))?")
+COMMAND = re.compile(
+    r"`(ccp-(?:db|ingest|index|audit|dashboards|capture|verify))(?:\s+([a-z][a-z-]*))?"
+)
 SETTING = re.compile(r"`((?:CCP|POSTGRES|MINIO)_[A-Z_]+)`")
 
 
@@ -72,6 +74,7 @@ def _scripts() -> dict[str, str]:
 def _subcommands() -> dict[str, set[str]]:
     from ccp.audit.cli import build_parser as audit_parser
     from ccp.capture.cli import build_parser as capture_parser
+    from ccp.dashboards.cli import build_parser as dashboards_parser
     from ccp.db.cli import build_parser as db_parser
     from ccp.index.cli import build_parser as index_parser
     from ccp.ingest.server import build_parser as ingest_parser
@@ -84,6 +87,7 @@ def _subcommands() -> dict[str, set[str]]:
     return {
         "ccp-audit": names(audit_parser()),
         "ccp-capture": names(capture_parser()),
+        "ccp-dashboards": names(dashboards_parser()),
         "ccp-db": names(db_parser()),
         "ccp-index": names(index_parser()),
         "ccp-ingest": names(ingest_parser()),

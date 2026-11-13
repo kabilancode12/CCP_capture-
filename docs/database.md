@@ -16,6 +16,7 @@ variables in `.env` (see [configuration.md](configuration.md)).
 | Apply up to a version | `ccp-db migrate --target 1` |
 | Undo the latest migration | `ccp-db rollback` |
 | Undo the latest two | `ccp-db rollback --steps 2` |
+| Make the read-only role for dashboards | `ccp-db create-reader` (see [dashboards.md](dashboards.md)) |
 
 If the `ccp-db` launcher is blocked on your machine, use `python -m ccp.db <command>`.
 Rollback **deletes data** (it drops the tables); use it on a development database only.
@@ -43,7 +44,7 @@ Rollback **deletes data** (it drops the tables); use it on a development databas
 | Applied versions are stored in `schema_migration` | The database knows its own version |
 | Line endings are ignored in the checksum | Windows and Linux checkouts agree |
 
-## Tables (migrations 001 to 012)
+## Tables (migrations 001 to 013)
 
 | Table | Holds |
 | --- | --- |
@@ -61,7 +62,8 @@ Rollback **deletes data** (it drops the tables); use it on a development databas
 | `redaction_log` | Rule, location and count of each redaction; never the redacted value (unique per session, rule and location, so a repeated report is safe) |
 | `job` | Work queue for indexing and distillation (at most one queued index job per session) |
 
-Migration 011 adds six read-only views (`v_session_cost`, `v_file_history`, `v_agent_run`,
+Migration 013 adds five views for dashboards (`d_session`, `d_model_cost`, `d_edit`, `d_test_run`, `d_fix_loop`; counts
+and categories only, see [dashboards.md](dashboards.md)). Migration 011 adds six read-only views (`v_session_cost`, `v_file_history`, `v_agent_run`,
 `v_human_decision`, `v_compaction`, `v_test_fix_cycle`) that answer the audit questions: see
 [queries.md](queries.md).
 

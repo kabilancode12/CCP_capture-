@@ -6,6 +6,7 @@ Examples:
     ccp-db migrate --target 1     # apply up to version 1
     ccp-db rollback               # undo the latest migration
     ccp-db rollback --steps 2     # undo the latest two
+    ccp-db create-reader          # a read-only role for dashboards (password: CCP_READER_PASSWORD)
 
 The database comes from the POSTGRES_* variables (see docs/configuration.md).
 """
@@ -19,7 +20,8 @@ from pathlib import Path
 
 from ccp.db.connection import connect
 from ccp.db.migrations import MigrationError, discover_migrations, migrate, rollback, status
-from ccp.settings import SettingsError, load_database_settings
+from ccp.db.readers import DEFAULT_READER, ReaderError, create_reader
+from ccp.settings import SettingsError, load_database_settings, load_reader_password
 
 DEFAULT_MIGRATIONS_DIR = Path("db/migrations")
 
@@ -36,6 +38,10 @@ def build_parser() -> argparse.ArgumentParser:
     up.add_argument("--target", type=int, help="stop after this version")
     down = commands.add_parser("rollback", help="undo the latest migrations")
     down.add_argument("--steps", type=int, default=1, help="how many to undo (default 1)")
+    reader = commands.add_parser(
+        "create-reader", help="create or update the read-only role for dashboards"
+    )
+    reader.add_argument("--name", default=DEFAULT_READER, help="role name (default %(default)s)")
     return parser
 
 
@@ -51,11 +57,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         migrations = discover_migrations(args.dir)
-        connection = connect(load_database_settings())
+        settings = load_database_settings()
+        connection = connect(settings)
         try:
             if args.command == "status":
                 for migration, is_applied in status(connection, migrations):
                     print(f"[{'x' if is_applied else ' '}] {migration.label}")
+            elif args.command == "create-reader":
+                create_reader(connection, settings.name, load_reader_password().reveal(), args.name)
+                print(f"Role {args.name} can read the dashboard views of {settings.name}.")
             elif args.command == "migrate":
                 done = migrate(connection, migrations, args.target)
                 print("Applied: " + (", ".join(m.label for m in done) or "nothing to do"))
@@ -64,7 +74,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print("Rolled back: " + (", ".join(m.label for m in undone) or "nothing to undo"))
         finally:
             connection.close()
-    except (MigrationError, SettingsError) as error:
+    except (MigrationError, SettingsError, ReaderError) as error:
         print(error, file=sys.stderr)
         return 1
     return 0

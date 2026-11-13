@@ -111,8 +111,10 @@ Builds on the index of Step 2 and is read-only with respect to it. Demo 1 of the
   to recorded edits (`commit_link`, `ccp-audit link-commits`). *Done when:* a commit made after a session is
   linked to it, with a confidence, on a test repository. (Built: the line-matching method. Not built: Git notes
   written at commit time, which need a client hook; see [audit.md](audit.md#commit-linking).)
-- [ ] **3.3** Dashboards (Metabase on PostgreSQL, in the Compose file): usage, cost, models, fix loops, split by
-  surface and actor class. *Done when:* a developer can open the dashboard and see the pilot data.
+- [x] **3.3** Dashboards (Metabase on PostgreSQL, in the Compose file): usage, cost, models, fix loops, split by
+  surface and actor class. *Done when:* a developer can open the dashboard and see the pilot data. (Built and
+  run against a real Metabase on invented data; opening it on the pilot data is left for the pilot. See
+  [dashboards.md](dashboards.md).)
 - [ ] **3.4** Changes made by shell commands (`ai_command`) and by people (`human`), from the code snapshots.
   *Done when:* a file changed by `sed` or by hand shows in the file history with the right actor class.
 

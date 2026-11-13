@@ -46,6 +46,22 @@ service account with access to one bucket instead of the root credentials.
 | `CCP_SESSION_IDLE_MINUTES` | no | `30` | Minutes without activity before a session is marked closed (1-1440); see [ingestion-api.md](ingestion-api.md#idle-sessions) |
 | `CCP_MAX_CHUNK_BYTES` | no | `8388608` | Largest transcript chunk the API accepts, in bytes (1 KiB to 64 MiB) |
 
+### Dashboards (optional)
+
+Used by `ccp-db create-reader`, `ccp-dashboards setup` and the Metabase service of the Compose file; see
+[dashboards.md](dashboards.md).
+
+| Variable | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `CCP_READER_PASSWORD` | **yes** for dashboards (secret) | | Password of the read-only database role (at least 12 characters). Set by `ccp-db create-reader`, used by Metabase |
+| `CCP_READER_USER` | no | `ccp_reader` | Name of that role (`ccp-db create-reader` takes `--name` instead) |
+| `CCP_METABASE_ADMIN_EMAIL` | **yes** for dashboards | | Address of the Metabase administrator that `ccp-dashboards setup` creates the first time. Use your own |
+| `CCP_METABASE_ADMIN_PASSWORD` | **yes** for dashboards (secret) | | That administrator's password, at least 12 characters |
+| `METABASE_PORT` | no | `3000` | Port on this machine where Metabase answers (bound to `127.0.0.1`) |
+| `METABASE_URL` | no | `http://127.0.0.1:<METABASE_PORT>` | Address `ccp-dashboards` uses to reach Metabase |
+| `CCP_METABASE_DB_HOST` | no | `postgres` | PostgreSQL as Metabase sees it: inside the Compose network it is `postgres` |
+| `CCP_METABASE_DB_PORT` | no | `5432` | The port of that PostgreSQL (1-65535) |
+
 ### Capture client
 
 Read from **environment variables only**; a `.env` file is deliberately not read (see

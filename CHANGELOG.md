@@ -6,6 +6,9 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
 
 ### Added
 
+- Dashboards: five content-free dashboard views (migration 013), `ccp-db create-reader` (a read-only role that
+  can read only those views), an optional Metabase service in the Compose file (`--profile dashboards`) and
+  `ccp-dashboards setup`, which makes the 16-card dashboard through Metabase's API, repeatably (Step 3, task 3.3).
 - Commit linking: `ccp-audit link-commits`, `commit` and `session-commits` link commits to the sessions
   whose recorded edits wrote their lines, with a confidence (`commit_link`, migration 012; Step 3, task 3.2).
 - `ccp-audit history <file>` and `ccp-audit why <file> <line>`: the history of a file, and which AI edit

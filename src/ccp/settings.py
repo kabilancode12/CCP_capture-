@@ -122,7 +122,23 @@ class ClientSettings:
 
 
 @dataclass(frozen=True)
+class DashboardSettings:
+    """Settings for setting up the dashboards in Metabase (``ccp-dashboards``)."""
+
+    metabase_url: str  # where Metabase answers, without a trailing slash
+    admin_email: str  # the Metabase administrator that is created on first setup
+    admin_password: Secret
+    database_name: str  # the database the dashboards read (POSTGRES_DB)
+    database_host: str  # PostgreSQL as Metabase sees it (inside Compose: ``postgres``)
+    database_port: int
+    reader_user: str  # the read-only role made by ``ccp-db create-reader``
+    reader_password: Secret
+
+
+@dataclass(frozen=True)
 class Settings:
+    """All application settings."""
+
     """All application settings."""
 
     database: DatabaseSettings
@@ -254,6 +270,45 @@ def load_database_settings(
     database = _read_database(reader)
     reader.raise_if_errors()
     return database
+
+
+def load_reader_password(
+    env: Mapping[str, str] | None = None, env_file: Path | None = DEFAULT_ENV_FILE
+) -> Secret:
+    """Read the password for the dashboards' read-only database role (``CCP_READER_PASSWORD``).
+
+    Raises:
+        SettingsError: If it is missing or shorter than 12 characters.
+    """
+    reader = _Reader(_merge_env(env, env_file))
+    password = reader.secret("CCP_READER_PASSWORD", min_length=12)
+    reader.raise_if_errors()
+    return password
+
+
+def load_dashboard_settings(
+    env: Mapping[str, str] | None = None, env_file: Path | None = DEFAULT_ENV_FILE
+) -> DashboardSettings:
+    """Build the settings for ``ccp-dashboards`` (Metabase address, administrator, read-only role).
+
+    Raises:
+        SettingsError: If anything is missing or invalid; the message lists every problem.
+    """
+    merged = _merge_env(env, env_file)
+    reader = _Reader(merged)
+    port = merged.get("METABASE_PORT", "").strip() or "3000"
+    settings = DashboardSettings(
+        metabase_url=reader.text("METABASE_URL", f"http://127.0.0.1:{port}").rstrip("/"),
+        admin_email=reader.text("CCP_METABASE_ADMIN_EMAIL"),
+        admin_password=reader.secret("CCP_METABASE_ADMIN_PASSWORD", min_length=12),
+        database_name=reader.text("POSTGRES_DB"),
+        database_host=reader.text("CCP_METABASE_DB_HOST", "postgres"),
+        database_port=reader.integer("CCP_METABASE_DB_PORT", 5432, 1, 65535),
+        reader_user=reader.text("CCP_READER_USER", "ccp_reader"),
+        reader_password=reader.secret("CCP_READER_PASSWORD", min_length=12),
+    )
+    reader.raise_if_errors()
+    return settings
 
 
 def load_client_settings(env: Mapping[str, str] | None = None) -> ClientSettings:
