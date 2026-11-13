@@ -49,6 +49,8 @@ ccp-db = "ccp.db.cli:main"
 ccp-ingest = "ccp.ingest.server:main"
 # Index stored transcripts into PostgreSQL (server side).
 ccp-index = "ccp.index.cli:main"
+# Questions about the index: file history, "why was this line written".
+ccp-audit = "ccp.audit.cli:main"
 # Upload transcripts from a developer machine.
 ccp-capture = "ccp.capture.cli:main"
 

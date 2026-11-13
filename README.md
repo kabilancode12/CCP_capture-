@@ -63,7 +63,7 @@ Something not working? [docs/troubleshooting.md](docs/troubleshooting.md).
 | --- | --- |
 | Get it running | [quickstart.md](docs/quickstart.md), then [troubleshooting.md](docs/troubleshooting.md) |
 | Run the one-week self-pilot | [pilot.md](docs/pilot.md) |
-| Ask questions of the captured data (cost, file history, sub-agents, ...) | [queries.md](docs/queries.md) |
+| Ask questions of the captured data (cost, file history, sub-agents, ...) | [queries.md](docs/queries.md), [audit.md](docs/audit.md) |
 | Know every setting | [configuration.md](docs/configuration.md) |
 | Understand what is captured and how | [hooks.md](docs/hooks.md), [capture-client.md](docs/capture-client.md), [snapshots.md](docs/snapshots.md), [environment.md](docs/environment.md) |
 | Understand privacy and safety | [redaction.md](docs/redaction.md) (secrets and personal data), [environment.md](docs/environment.md) (personal data collected) |
@@ -83,6 +83,7 @@ Something not working? [docs/troubleshooting.md](docs/troubleshooting.md).
 | Close idle sessions once | `ccp-ingest close-idle` |
 | Index stored transcripts into PostgreSQL | `ccp-index run` or `ccp-index run --once` (see [docs/indexer.md](docs/indexer.md)) |
 | Rebuild the index and prove it is identical | `ccp-index rebuild --all --check` |
+| History of a file / which edit wrote a line | `ccp-audit history <file>` / `ccp-audit why <file> <line>` (see [docs/audit.md](docs/audit.md)) |
 | Take a code snapshot now (developer machine) | `ccp-capture snapshot --session-id <id>` (see [docs/snapshots.md](docs/snapshots.md)) |
 | Print the Claude Code hook settings | `ccp-capture hook-settings` (see [docs/hooks.md](docs/hooks.md)) |
 | Record where a session runs (developer machine) | `ccp-capture environment --session-id <id>` (see [docs/environment.md](docs/environment.md)) |
@@ -109,6 +110,7 @@ ccp_V2/
 │   ├── storage/             MinIO object store, key layout, attachment de-duplication
 │   ├── ingest/              Ingestion API (Starlette): receives transcript chunks
 │   ├── index/               Indexer: stored transcripts to events in PostgreSQL
+│   ├── audit/               Audit commands: file history, which edit wrote a line
 │   ├── capture/             Capture client: runs on developer machines, uploads transcripts
 │   └── verify/              Step 0 tools: transcript, environment and hook inspectors
 ├── tests/
@@ -132,6 +134,7 @@ ccp_V2/
 │   ├── ingestion-api.md     Endpoints, status codes and how an upload is handled
 │   ├── indexer.md           The indexer: how sessions become events, runs, changes and costs
 │   ├── queries.md           The six saved questions (SQL views) and how to use them
+│   ├── audit.md             ccp-audit: file history and "why was this line written"
 │   ├── capture-client.md    The developer-machine client: how a sync works and its promises
 │   ├── environment.md       The environment record: fields, sources, privacy
 │   ├── hooks.md             Claude Code hooks: what each event does, setup, safety rules

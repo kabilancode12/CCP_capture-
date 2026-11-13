@@ -6,6 +6,8 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
 
 ### Added
 
+- `ccp-audit history <file>` and `ccp-audit why <file> <line>`: the history of a file, and which AI edit
+  (with its prompt) wrote a line, found by replaying the recorded line ranges (Step 3, task 3.1).
 - The indexer (`ccp-index run [--once]`): turns stored transcripts into one `event` row per line, safe to
   repeat, with a retrying job queue. Migration 004 adds the `thinking` table (task 2.1).
 - Indexer: abandoned (rewound) branches are marked, compactions get their own table (migration 005), and

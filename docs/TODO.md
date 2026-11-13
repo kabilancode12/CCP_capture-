@@ -99,8 +99,26 @@ with the pilot (1.12) and works on the sessions the pilot captures.
 
 **Gate:** 2.8 passes.
 
+## Step 3: reading the data (history, "why", dashboards, commit linking)
+
+Builds on the index of Step 2 and is read-only with respect to it. Demo 1 of the project plan.
+
+- [x] **3.1** `ccp-audit history <file>` and `ccp-audit why <file> <line>`: the history of a file, and the AI
+  edit (with its prompt) that last wrote a line, found by replaying the recorded line ranges edit by edit.
+  *Done when:* on invented and on real edits, `why` names the right edit for lines that were rewritten,
+  shifted by later edits, or never touched by an AI edit.
+- [ ] **3.2** Commit linking: which session produced a developer's commit, by Git notes written at commit time
+  and, as a fallback, by matching the commit's hunks to recorded edits (`commit_link`). *Done when:* a commit
+  made after a session is linked to it, with a confidence, on a test repository.
+- [ ] **3.3** Dashboards (Metabase on PostgreSQL, in the Compose file): usage, cost, models, fix loops, split by
+  surface and actor class. *Done when:* a developer can open the dashboard and see the pilot data.
+- [ ] **3.4** Changes made by shell commands (`ai_command`) and by people (`human`), from the code snapshots.
+  *Done when:* a file changed by `sed` or by hand shows in the file history with the right actor class.
+
+**Gate:** 3.1 to 3.4 pass on the pilot data.
+
 ## Later steps (summary)
 
-- **Step 3:** dashboards, file history, "why did this line change", commit linking (demo 1).
+- **Step 3:** see below.
 - **Step 4:** distillation, pgvector search, MCP server, review step (demo 2).
 - **Step 5:** move to a server, add developers, access roles, retention jobs.

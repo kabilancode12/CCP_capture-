@@ -41,7 +41,8 @@ SELECT occurred_at, session_id, tool, lines_added, lines_removed, prompt
  ORDER BY occurred_at;
 ```
 
-Covers Edit and Write. Not covered: files changed by a shell command, and changes made by a person
+`ccp-audit history <file>` prints the same list, and `ccp-audit why <file> <line>` goes one step further
+([audit.md](audit.md)). Covers Edit and Write. Not covered: files changed by a shell command, and changes made by a person
 ([indexer.md](indexer.md#file-changes)). `actor_class` is `ai_edit` for every row today.
 
 ## 3. Sub-agents: `v_agent_run`
