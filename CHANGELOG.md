@@ -6,6 +6,8 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
 
 ### Changed
 
+- Quick start and troubleshooting now give the `python -m` form of every command (for machines that
+  block `.exe` launchers), explain changing ports and `CCP_STATE_DIR`, and describe what part C shows.
 - Dependencies are split: the capture client needs no packages; the server's are in the `server`
   extra. Importing the client no longer loads MinIO (import time 0.46 s to 0.15 s).
 - The chunk upload response no longer contains `next_offset` (the uploaded text is redacted, so its

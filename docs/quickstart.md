@@ -31,7 +31,7 @@ Do this once, in the repository folder.
 cd <the repository folder>
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
 `[dev]` includes everything the server needs plus the test tools. (A server that will not be developed on
@@ -39,7 +39,17 @@ can use `".[server]"` instead.) If PowerShell refuses to run the activate script
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then try again.
 
 Check: `ccp-db --help` prints usage. If it says the command is not recognised, the virtual environment is not
-active in this window: run the `Activate.ps1` line again, or use `python -m ccp.db --help`.
+active in this window: run the `Activate.ps1` line again.
+
+**If your machine blocks `.exe` launchers** ("blocked by an Application Control policy"), every command in
+this guide has a module form that needs no launcher. Use `python -m pip` as above, and:
+
+| Launcher | Module form |
+| --- | --- |
+| `ccp-db` | `python -m ccp.db` |
+| `ccp-ingest` | `python -m ccp.ingest` |
+| `ccp-capture` | `python -m ccp.capture` |
+| `ccp-verify` | `python -m ccp.verify` |
 
 ### A2. Configure
 
@@ -59,6 +69,10 @@ programs (Docker creates MinIO with the first of each pair; the application sign
 | `CCP_INGEST_TOKEN` | | at least 16 characters; developers need it in part B |
 
 Keep `127.0.0.1` as the host (not `localhost`; see troubleshooting). `.env` is ignored by Git: never commit it.
+
+The commands below use the default ports (PostgreSQL 5432, MinIO 9000 and 9001, API 8000). If one is taken,
+change `POSTGRES_PORT`, `MINIO_API_PORT`, `MINIO_CONSOLE_PORT` or `CCP_API_PORT` in `.env`, set
+`MINIO_ENDPOINT` to match, and use the new port in the URLs below.
 
 ### A3. Start PostgreSQL and MinIO
 
@@ -109,7 +123,7 @@ Python** and no database or storage credentials: the client talks only to the AP
 
 ```powershell
 python -m venv $HOME\.ccp\venv
-& $HOME\.ccp\venv\Scripts\pip install <path to the repository folder>
+& $HOME\.ccp\venv\Scripts\python -m pip install <path to the repository folder>
 & $HOME\.ccp\venv\Scripts\python -m ccp.capture hook-settings --api-url http://127.0.0.1:8000
 ```
 
@@ -127,11 +141,13 @@ block into it:
 - replace `REPLACE_WITH_THE_INGEST_TOKEN` with the real `CCP_INGEST_TOKEN` from part A2.
 
 Keep the file valid JSON. (To try it on one project first, put the same content in that project's
-`.claude/settings.local.json` instead.)
+`.claude/settings.local.json` instead.) Settings are read when Claude Code starts, so sessions that were
+already open do not capture anything: start a new one. To keep the client's log and position somewhere other
+than `$HOME\.ccp\capture`, add `"CCP_STATE_DIR": "<folder>"` to the `env` block.
 
 ### B3. See it work
 
-Start Claude Code in any Git repository and ask it something. Then:
+Start a new Claude Code session in any Git repository and ask it something. Then:
 
 ```powershell
 Get-Content $HOME\.ccp\capture\hook.log -Tail 20
@@ -171,9 +187,11 @@ docker compose --env-file .env -f infra/docker-compose.yml exec postgres psql -U
 ```
 
 You should see your session (`open` until it has been quiet for 30 minutes), its environment record, and the
-redactions that were made (your own e-mail address is one). The uploaded transcript is in the MinIO console at
+redactions that were made (your own e-mail address is one). `started_at` is empty for now: the indexer
+(Step 2) fills it from the transcript. The uploaded transcript is in the MinIO console at
 <http://127.0.0.1:9001> (sign in with `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`), in bucket `ccp-raw`, under
-`sessions/<session id>/`. Every line there has already been redacted on the developer machine.
+`sessions/<session id>/main/` (one object per uploaded chunk; files that were pasted or attached are stored
+once each under `attachments/`). Every line there has already been redacted on the developer machine.
 
 ## Stopping and starting again
 

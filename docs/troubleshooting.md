@@ -19,7 +19,7 @@ Problems we have actually met, by where they show up. First, where the logs are.
 | `ccp-db` (or any `ccp-...`) "is not recognized" | The virtual environment is not active in this window. Run `.\.venv\Scripts\Activate.ps1`, or call it as a module with the environment's Python: `python -m ccp.db`, `python -m ccp.capture`, `python -m ccp.verify` |
 | `Activate.ps1 cannot be loaded because running scripts is disabled` | Once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
 | `python3: Python was not found` or the Microsoft Store opens | The Store shortcut is on the PATH. Use `python`, or switch the shortcut off in Settings > Apps > Advanced app settings > App execution aliases |
-| `pytest.exe` / `mypy.exe` "blocked by an Application Control policy" | Company policy blocks unsigned launchers. Run them as modules: `python -m pytest`, `python -m mypy` |
+| `pip.exe`, `pytest.exe`, `mypy.exe`, `ccp-db.exe`, `ccp-ingest.exe` ... "blocked by an Application Control policy" | Company policy blocks unsigned launchers. Run them as modules: `python -m pip`, `python -m pytest`, `python -m mypy`, `python -m ccp.db`, `python -m ccp.ingest`, `python -m ccp.capture`, `python -m ccp.verify` |
 | `mypy` fails with "DLL load failed ... Application Control policy" | The prebuilt mypy has a compiled file that is blocked. Install the pure-Python build: `pip install --force-reinstall --no-deps --no-binary mypy mypy` |
 | An import fails with "DLL load failed ... Application Control policy" for another package | The package has a compiled part that company policy blocks. This project uses pure-Python packages on purpose (`pg8000`, `starlette`, `minio`); do not swap in `psycopg[binary]` or `pydantic`/FastAPI |
 

@@ -61,7 +61,7 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
   assignments, a per-repository allowlist). 6 % of this repository's own files were excluded.
   *Done when:* the false-positive rate on real repositories is acceptable without letting a hard-coded
   password through.
-- [ ] **1.11** Docs: setup, run and hook registration for Windows. *Done when:* a new developer can follow them cold.
+- [x] **1.11** Docs: setup, run and hook registration for Windows. *Done when:* a new developer can follow them cold. (Cold-start test by a fresh agent reached a captured session; its findings were fixed: module forms of every command, port changes, `CCP_STATE_DIR`, `started_at`, MinIO paths.)
 - [ ] **1.12** Self-pilot for a week. *Done when:* zero lost sessions and no planted secret on the server.
 
 **Gate:** 1.12 passes.
