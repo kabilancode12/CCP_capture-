@@ -77,7 +77,7 @@ Placeholders look like `[REDACTED:<rule-id>]`. Rules are applied in this order.
 1. Add a `_rule(...)` entry to `SECRET_RULES` or `PERSONAL_DATA_RULES` in
    [`rules.py`](../src/ccp/redaction/rules.py) with an id, a description and a pattern.
 2. Add a fake value for the rule to the `fakes` fixture in
-   [`tests/unit/redaction/conftest.py`](../tests/unit/redaction/conftest.py). Build it from
+   [`tests/conftest.py`](../tests/conftest.py). Build it from
    pieces so that no complete fake credential appears in the source.
 3. Add "must not match" examples to `test_rules.py`. A rule without near-miss tests is not done.
 4. Run the rules on a real transcript and check the counts (see below) for false positives.
