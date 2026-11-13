@@ -119,7 +119,7 @@ STORY: list[dict[str, Any]] = [
     },
 ]  # fmt: skip
 
-SUB_AGENT = [
+SUB_AGENT: list[dict[str, Any]] = [
     {"type": "user", "uuid": "x1", "parentUuid": None, "isSidechain": True, "timestamp": _at(16),
      "message": {"content": "Explore the code"}},
     {"type": "assistant", "uuid": "x2", "parentUuid": "x1", "isSidechain": True, "timestamp": _at(17),
