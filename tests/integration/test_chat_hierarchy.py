@@ -386,6 +386,9 @@ def _event(database: DatabaseSettings, chat: str, line: int, event_type: str, pa
             (chat, event_type, T0, json.dumps(payload), f"sessions/{chat}/main/0.jsonl", line),
         )
         (event_id,) = cursor.fetchone()
+        # What the indexer does once a chat holds a message (a chat first seen through its
+        # environment record starts as empty).
+        cursor.execute("UPDATE session SET is_empty = FALSE WHERE session_id = %s", (chat,))
         connection.commit()
         return int(event_id)
     finally:

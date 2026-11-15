@@ -53,7 +53,12 @@ _UPSERT_ENVIRONMENT = (
 )
 
 # Make sure the session exists (session_env refers to it) without touching its activity.
-_ENSURE_SESSION = "INSERT INTO session (session_id) VALUES (%s) ON CONFLICT (session_id) DO NOTHING"
+# A chat first seen through its environment record or a start/end has no message yet: it starts
+# as empty, and the indexer clears the flag once its transcript holds a prompt or a reply.
+_ENSURE_SESSION = (
+    "INSERT INTO session (session_id, is_empty) VALUES (%s, TRUE) "
+    "ON CONFLICT (session_id) DO NOTHING"
+)
 
 # Close every open session that has been quiet for %s minutes, and queue one final index job for
 # each so nothing indexed earlier is stale. A session of the chat (chat_session) that never received
@@ -91,7 +96,7 @@ _CLOSE_IDLE_SESSIONS = """
 # nothing. The start's time is the client's clock, so a large clock difference can still reopen a
 # chat once; the idle closer then closes it again. An end only makes sure the chat exists.
 _ENSURE_SESSION_FOR_START = """
-    INSERT INTO session (session_id) VALUES (%s)
+    INSERT INTO session (session_id, is_empty) VALUES (%s, TRUE)
     ON CONFLICT (session_id) DO UPDATE SET
         last_activity_at = now(), status = 'open', ended_at = NULL, end_reason = NULL
      WHERE session.last_activity_at < %s AND (session.ended_at IS NULL OR session.ended_at < %s)
