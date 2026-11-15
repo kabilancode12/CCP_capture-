@@ -60,7 +60,7 @@ in Metabase is treated as new, and the old one is left alone.
 
 ## What is on it
 
-16 cards in four rows. The questions are in [`definitions.py`](../src/ccp/dashboards/definitions.py), one SQL line
+25 cards in five rows. The questions are in [`definitions.py`](../src/ccp/dashboards/definitions.py), one SQL line
 each.
 
 | Row | Cards |
@@ -69,6 +69,13 @@ each.
 | Over time | Sessions per day, cost per day, cost by model, sessions by surface, Claude Code versions |
 | The work done | Lines changed per day by actor, edits by tool, edits the developer changed before accepting |
 | Fix loops and decisions | Test runs per day, fix loops by test runner, rewinds / refused tool calls / compactions per day, most expensive sessions |
+| Tokens by project, model and account | Total tokens, projects, Claude accounts, models; tokens by project, by model and by account; tokens per day by project; a table of usage by project, account and model |
+
+The token cards read `d_usage` (migration 015). A project is the folder the session ran in (its last part, for
+example `ccp_V2`), an account is a neutral name such as `account-3f9a1c`. An administrator can give both a real
+name with `ccp-db label` (see [access.md](access.md)); the dashboard never shows an e-mail address or a full path.
+Tokens are Claude Code's own `cost-state` figures when the session has them; otherwise the recorded responses are
+summed and the cost stays empty (`token_source` says which).
 
 "Split by actor class" is there (lines changed per day, by actor), but until the code snapshots are used (task
 3.4) every change is an `ai_edit`, so the split is not yet informative.

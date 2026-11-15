@@ -1,10 +1,12 @@
+import json
 from pathlib import Path
 
 import pytest
 
+from ccp.capture import reader
 from ccp.capture.reader import (
     SourceLine,
-    TranscriptError,
+    oversized_line_placeholder,
     read_complete_lines,
     split_into_chunks,
 )
@@ -62,14 +64,59 @@ def test_invalid_utf8_is_replaced_not_fatal(tmp_path: Path) -> None:
     assert "�" in result.lines[0].text
 
 
-def test_a_file_shorter_than_the_saved_position_is_an_error(tmp_path: Path) -> None:
-    with pytest.raises(TranscriptError, match="shorter"):
-        read_complete_lines(_file(tmp_path, b'{"a":1}\n'), 100)
+def test_a_file_shorter_than_the_saved_position_gives_nothing_and_is_logged(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    result = read_complete_lines(_file(tmp_path, b'{"a":1}\n'), 100)  # truncated or rewritten
+    assert result.lines == [] and result.reached_end
+    assert "shorter" in caplog.text
 
 
-def test_a_line_longer_than_the_window_is_an_error(tmp_path: Path) -> None:
-    with pytest.raises(TranscriptError, match="longer than the read window"):
-        read_complete_lines(_file(tmp_path, b"x" * 100), 0, window_bytes=50)
+# ---------------------------------------------------------------- a line longer than the window
+
+
+def test_a_line_longer_than_the_window_becomes_a_placeholder_of_the_same_size(
+    tmp_path: Path,
+) -> None:
+    secret = b'{"t":"' + b"s" * 94 + b'"}'  # 102 bytes, more than the 50-byte window
+    path = _file(tmp_path, secret + b"\n" + b'{"b":2}\n')
+
+    result = read_complete_lines(path, 0, window_bytes=50)
+
+    (line,) = result.lines
+    assert line.size == len(secret) + 1  # covers the source bytes exactly, newline included
+    assert json.loads(line.text) == {
+        "type": "ccp-withheld",
+        "reason": "line too long to read",
+        "bytes": len(secret),
+    }
+    assert "sss" not in line.text  # only the size is kept, never the content
+    assert not result.reached_end  # more lines follow
+
+
+def test_the_lines_after_a_too_long_line_are_read_next(tmp_path: Path) -> None:
+    path = _file(tmp_path, b'{"a":1}\n' + b"x" * 200 + b"\n" + b'{"b":2}\n')
+
+    first = read_complete_lines(path, 0, window_bytes=50)
+    assert [line.text for line in first.lines] == ['{"a":1}']  # stops before the long line
+    second = read_complete_lines(path, 8, window_bytes=50)
+    assert second.lines == [SourceLine(oversized_line_placeholder(200), 201)]
+    third = read_complete_lines(path, 8 + 201, window_bytes=50)
+    assert [line.text for line in third.lines] == ['{"b":2}'] and third.reached_end
+
+
+def test_the_end_of_a_long_line_is_found_block_by_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(reader, "_SCAN_BLOCK_BYTES", 7)  # many small blocks
+    path = _file(tmp_path, b"y" * 123 + b"\n")
+    (line,) = read_complete_lines(path, 0, window_bytes=10).lines
+    assert line.size == 124
+
+
+def test_a_long_line_still_being_written_waits(tmp_path: Path) -> None:
+    result = read_complete_lines(_file(tmp_path, b"x" * 100), 0, window_bytes=50)  # no newline
+    assert result.lines == [] and result.reached_end
 
 
 def test_a_missing_file_raises_file_not_found(tmp_path: Path) -> None:

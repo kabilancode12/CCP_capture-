@@ -117,4 +117,6 @@ def test_attachment_deduplication_end_to_end(object_store: ObjectStore) -> None:
     assert len(object_store.list_keys("attachments/")) == 1  # one stored object, two lines
     assert restore_line(first.text, object_store) == line("a", "s1")
     assert restore_line(second.text, object_store) == line("b", "s2")
-    assert object_store.exists(attachment_key(json.loads(first.text)["attachment"]["$ccp_ref"]))
+    kept = json.loads(first.text)["attachment"]
+    assert kept["type"] == "skill_listing"  # small values stay in the line
+    assert object_store.exists(attachment_key(kept["text"]["$ccp_ref"]))

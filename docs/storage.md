@@ -37,10 +37,28 @@ duplicate, and listing keys alphabetically gives the chunks in order.
 About 80 % of a Claude Code transcript is `attachment` entries (skill, tool and agent listings,
 prompt snapshots), and the same content repeats in every session. For each attachment line:
 
-1. Large values (1 KB or more) of the line, such as `attachment` and `rendered`, are stored under
-   the SHA-256 hash of their content and replaced by a pointer: `{"$ccp_ref": "<sha256>"}`.
+1. Large values (1 KB or more) are stored under the SHA-256 hash of their content and replaced by
+   a pointer: `{"$ccp_ref": "<sha256>"}`. Two levels are looked at:
+   - the line's own values, such as `rendered`;
+   - the values **inside** the `attachment` object, such as a skill listing's `content` or a
+     prompt snapshot's `systemPrompt`. Its small values, above all its `type`, stay in the line,
+     so SQL can still tell what kind of attachment it is.
 2. If the same content is already stored (from this or any other session), nothing is written.
 3. `restore_line` rebuilds the original line **byte-for-byte**.
+
+A stored line looks like this (shortened):
+
+```json
+{"type":"attachment","uuid":"…","attachment":{"type":"skill_listing","content":{"$ccp_ref":"<sha256>"},"skillCount":42,"isInitial":true}}
+```
+
+An `attachment` object made only of small values stays as it is, even if it is 1 KB or more in
+total; an `attachment` value that is not an object (a long string, a list) is moved out as a
+whole.
+
+**Older lines.** Lines stored before this form replaced the whole `attachment` object by one
+pointer (`"attachment":{"$ccp_ref":"<sha256>"}`), so their attachment `type` is not in the line.
+`restore_line` still rebuilds them exactly; they are not rewritten.
 
 ```python
 from ccp.storage.attachments import externalise_line, restore_line
@@ -63,13 +81,17 @@ Guarantees and rules:
   original; a line that would not match (unusual number formats, different spacing) is left
   untouched.
 - **Identifying fields** (`type`, `uuid`, `parentUuid`, `sessionId`, `session_id`, `timestamp`)
-  are never moved out.
+  are never moved out, neither from the line nor from inside its `attachment` object.
 - Only `attachment` entries are touched; user and assistant lines are never changed.
 
 Measured on a real test session (Claude Code 2.1.289, 184 lines, redacted first): lines shrank to
 22 % of their size, 15 unique objects were stored, 13 repeats were reused, and the total kept was
 65 % of the original. 0 lines failed to rebuild exactly. Across many sessions the saving grows,
-because the same listings repeat (not yet measured).
+because the same listings repeat (not yet measured). These figures were taken with the earlier
+form (the whole `attachment` object moved out); the current form keeps the small values in the
+line, so lines are slightly larger. Checked with the current form on a longer real session
+(868 lines, 56 attachment lines): every attachment line kept its `type`, and 0 lines failed to
+rebuild exactly.
 
 ## Tests
 

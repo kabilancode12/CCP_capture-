@@ -51,8 +51,9 @@ Problems we have actually met, by where they show up. First, where the logs are.
 | --- | --- |
 | `hook.log` does not exist | The hooks never ran. In Claude Code run `/hooks`: the six capture hooks should be listed. Check the JSON in `settings.json` is valid and was merged under `hooks`. A hook command that points to the wrong Python path fails silently: it must be `"<full path>/python.exe" -m ccp.capture hook` |
 | `settings invalid: ... CCP_INGEST_TOKEN is required` | The `env` block is missing in `settings.json`, or the token is shorter than 16 characters |
-| `rejected (401)` | The token in `settings.json` differs from the server's `CCP_INGEST_TOKEN`, or still is `REPLACE_WITH_THE_INGEST_TOKEN` |
-| `the API is unavailable; will retry on the next sync` | The server is not running, or `CCP_API_URL` is wrong, or a firewall blocks the port. Nothing is lost: the next hook retries from the same place |
+| `the API refused the token (401); check CCP_INGEST_TOKEN` (or `rejected (401)`) | The token in `settings.json` differs from the server's `CCP_INGEST_TOKEN`, or still is `REPLACE_WITH_THE_INGEST_TOKEN`. The client stops trying other streams and sessions until the next hook; nothing is lost |
+| `chunk of <stream> at <offset> refused 3 times in a row` | The API keeps refusing one chunk (for example 413, too large). A `ccp-withheld` placeholder was uploaded in its place so the stream could move on; the earlier `upload of ... refused` lines give the server's reason |
+| `the API is unavailable; will retry on the next sync` | The server is not running, or `CCP_API_URL` is wrong, or a firewall blocks the port. With `not from the API?` in the log, something else answered (a proxy or a captive portal). Nothing is lost: the next hook retries from the same place |
 | `no transcript yet` on the first events | Normal. Claude Code creates the transcript file only after the first response; `Stop` uploads it |
 | `skipped: internal helper (no agent type)` after every response | Normal. Claude Code fires `SubagentStop` for an internal helper; it has no transcript to upload |
 | The last lines of a session are missing | The `SessionEnd` background flush is best effort. The next `SessionStart` uploads what is left; start Claude Code again on that machine |

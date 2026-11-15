@@ -1,6 +1,6 @@
 import json
 
-from ccp.capture.pipeline import INVALID_RULE, WITHHELD_RULE, prepare_chunk
+from ccp.capture.pipeline import INVALID_RULE, WITHHELD_RULE, prepare_chunk, refused_chunk
 from ccp.capture.reader import SourceLine
 from ccp.storage.attachments import MIN_EXTERNAL_BYTES, POINTER_KEY
 
@@ -64,7 +64,8 @@ def test_large_attachments_are_replaced_by_pointers_and_collected() -> None:
     chunk = prepare_chunk(KEY, _lines(line))
 
     entry = json.loads(chunk.body.decode())
-    assert POINTER_KEY in entry["attachment"]
+    assert POINTER_KEY in entry["attachment"]["text"]
+    assert entry["attachment"]["type"] == "skill_listing"  # the kind stays queryable
     assert len(chunk.attachments) == 1
     assert len(chunk.body) < len(line) / 5
 
@@ -116,3 +117,21 @@ def test_a_line_that_cannot_be_processed_is_withheld(monkeypatch) -> None:  # ty
     assert json.loads(chunk.body.decode())["type"] == "ccp-withheld"
     assert "secret-ish" not in chunk.body.decode()
     assert [r.rule_id for r in chunk.records] == [WITHHELD_RULE]
+
+
+def test_a_refused_chunk_becomes_one_placeholder_covering_the_same_source_bytes() -> None:
+    source = _lines('{"type":"user","message":"private words"}', '{"type":"assistant"}')
+    chunk = prepare_chunk(KEY, source)
+
+    placeholder = refused_chunk(source, 413)
+
+    assert placeholder.source_bytes == chunk.source_bytes
+    assert json.loads(placeholder.body) == {
+        "type": "ccp-withheld",
+        "reason": "chunk refused by the API",
+        "status": 413,
+        "lines": 2,
+        "bytes": chunk.source_bytes,
+    }
+    assert placeholder.body.endswith(b"\n") and b"private words" not in placeholder.body
+    assert placeholder.attachments == {} and placeholder.records == []

@@ -34,7 +34,7 @@ from ccp.index.agents import (
     parse_agent_meta,
 )
 from ccp.index.parser import ParsedEntry, ParseError, parse_line
-from ccp.index.repository import IndexJob
+from ccp.index.repository import IndexJob, IndexRepositoryError
 from ccp.storage.keys import session_prefix, stream_of
 
 logger = logging.getLogger("ccp.index")
@@ -83,7 +83,7 @@ class IndexResult:
 
     chunks_indexed: int
     events_stored: int
-    lines_skipped: int  # lines that were not JSON objects (the server should have refused them)
+    lines_skipped: int  # lines not UTF-8 or not JSON objects (the server should have refused them)
 
 
 def index_session(store: ChunkStore, repository: JobRepository, session_id: str) -> IndexResult:
@@ -134,14 +134,20 @@ def _save_meta(
 
 
 def _read_chunk(data: bytes) -> tuple[list[tuple[int, ParsedEntry]], int]:
-    """Parse a chunk into ``(line number, entry)`` pairs, counting lines that cannot be read."""
+    """Parse a chunk into ``(line number, entry)`` pairs, counting lines that cannot be read.
+
+    A line that is not valid UTF-8 or not a JSON object is skipped and counted; the other lines
+    are kept with their own line numbers, so one bad line never blocks the rest of the session.
+    """
     entries: list[tuple[int, ParsedEntry]] = []
     bad_lines = 0
-    # Split on "\n" only (see ccp.ingest.chunks): the last piece is empty after the final newline.
-    for number, line in enumerate(data.decode("utf-8").split("\n")[:-1], start=1):
+    # Split the bytes on "\n" only (see ccp.ingest.chunks): the last piece is empty after the final
+    # newline. The byte "\n" never occurs inside a multi-byte UTF-8 character, so for valid UTF-8
+    # this gives exactly the lines (and line numbers) of decoding the whole chunk first.
+    for number, raw_line in enumerate(data.split(b"\n")[:-1], start=1):
         try:
-            entries.append((number, parse_line(line)))
-        except ParseError:
+            entries.append((number, parse_line(raw_line.decode("utf-8"))))
+        except (UnicodeDecodeError, ParseError):
             bad_lines += 1
     return entries, bad_lines
 
@@ -154,6 +160,9 @@ def process_next_job(store: ChunkStore, repository: JobRepository) -> bool:
 
     Returns:
         True if a job was taken (whether it succeeded or not), False if the queue was empty.
+
+    Raises:
+        IndexRepositoryError: If the database fails while taking the job or recording its outcome.
     """
     job = repository.claim_job()
     if job is None:
@@ -190,19 +199,36 @@ def run(
 ) -> int:
     """Work through the queue.
 
+    If the database fails while taking a job or recording its outcome (it restarted, the network
+    dropped), the error is logged and the loop waits ``poll_seconds`` and goes on: a worker must
+    outlive a short outage. A job left ``running`` that way is queued again later (see
+    ``STALE_JOB_MINUTES`` in ``repository.py``).
+
     Args:
         store: Where the transcript chunks are.
         repository: The database.
-        poll_seconds: How long to wait when the queue is empty.
-        once: Stop when the queue is empty instead of waiting for more jobs.
+        poll_seconds: How long to wait when the queue is empty, or after a database failure.
+        once: Stop when the queue is empty instead of waiting for more jobs. A database failure
+            then ends the run too: the error is raised, so the caller can report it.
         sleep: How to wait (replaced in tests).
 
     Returns:
         The number of jobs handled (only reached when ``once`` is true).
+
+    Raises:
+        IndexRepositoryError: Only when ``once`` is true, if the database failed.
     """
     handled = 0
     while True:
-        if process_next_job(store, repository):
+        try:
+            took_job = process_next_job(store, repository)
+        except IndexRepositoryError:
+            if once:
+                raise
+            logger.exception("the database failed; trying again in %s s", poll_seconds)
+            sleep(poll_seconds)
+            continue
+        if took_job:
             handled += 1
         elif once:
             return handled

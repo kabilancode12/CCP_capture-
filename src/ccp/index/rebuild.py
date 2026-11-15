@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import pg8000.dbapi
 
 from ccp.db.connection import connect
-from ccp.index.repository import IndexRepositoryError
+from ccp.index.repository import LOCK_SESSION, IndexRepositoryError
 from ccp.index.worker import ChunkStore, JobRepository, index_session
 from ccp.settings import DatabaseSettings
 
@@ -178,8 +178,11 @@ _QUEUE_JOB = """
     ON CONFLICT (session_id) WHERE job_type = 'index_session' AND status = 'queued' DO NOTHING
 """
 # Deleting a session's events removes, through the foreign keys, its thinking, model usage,
-# compactions, file changes and test runs. The other derived tables are cleared by name.
+# compactions, file changes and test runs. The other derived tables are cleared by name. The
+# session's lock comes first, so a worker indexing the session at the same time waits (or is
+# waited for) instead of mixing its rows with the reset.
 _RESET_STATEMENTS = (
+    LOCK_SESSION,
     "DELETE FROM agent_run WHERE session_id = %s",
     "DELETE FROM session_cost WHERE session_id = %s",
     "DELETE FROM session_model_cost WHERE session_id = %s",

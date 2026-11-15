@@ -21,6 +21,7 @@ class _Script:
     status = 200
     body: Any = {"stored": True}
     location: str | None = None  # for redirects
+    raw: bytes | None = None  # sent as is instead of ``body`` (for answers that are not JSON)
     received: list[dict[str, Any]]
 
     def __init__(self) -> None:
@@ -43,7 +44,7 @@ def _handler(script: _Script) -> type[BaseHTTPRequestHandler]:
             self.send_response(script.status)
             if script.location:
                 self.send_header("Location", script.location)
-            payload = json.dumps(script.body).encode()
+            payload = script.raw if script.raw is not None else json.dumps(script.body).encode()
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
@@ -139,6 +140,34 @@ def test_a_redirect_is_refused_so_the_token_cannot_be_forwarded(
     with pytest.raises(ApiRejectedError):
         client.put_chunk("s1", "main", 0, b"{}\n")
     assert len(script.received) == 1  # the redirect target was never contacted
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"<html>Please log in to the guest network</html>",  # a captive portal
+        b"\xff\xfe not even text",
+        b"",  # an empty body: no "stored" flag
+        b"[]",  # JSON, but not an object
+        b'{"ok":true}',  # an object without the "stored" flag
+    ],
+)
+def test_a_success_answer_that_is_not_the_apis_means_try_again_later(
+    client: HttpApiClient, script: _Script, raw: bytes
+) -> None:
+    script.status, script.raw = 200, raw
+    with pytest.raises(ApiUnavailableError, match="not from the API"):
+        client.put_chunk("s1", "main", 0, b"{}\n")
+    with pytest.raises(ApiUnavailableError, match="not from the API"):
+        client.put_attachment("c" * 64, b"{}")
+
+
+def test_a_report_with_a_non_json_answer_means_try_again_later(
+    client: HttpApiClient, script: _Script
+) -> None:
+    script.status, script.raw = 200, b"<html>proxy</html>"
+    with pytest.raises(ApiUnavailableError):
+        client.post_redactions("s1", [RedactionRecord("email", "key:1:a", 1)])
 
 
 def test_an_unreachable_server_means_try_again_later() -> None:

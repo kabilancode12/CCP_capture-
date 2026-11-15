@@ -17,6 +17,8 @@ variables in `.env` (see [configuration.md](configuration.md)).
 | Undo the latest migration | `ccp-db rollback` |
 | Undo the latest two | `ccp-db rollback --steps 2` |
 | Make the read-only role for dashboards | `ccp-db create-reader` (see [dashboards.md](dashboards.md)) |
+| Make the read-only role for auditors | `ccp-db create-auditor` (see [access.md](access.md)) |
+| Name Claude accounts and projects on the dashboards | `ccp-db labels`, `ccp-db label ...`, `ccp-db unlabel ...` (see [access.md](access.md)) |
 
 If the `ccp-db` launcher is blocked on your machine, use `python -m ccp.db <command>`.
 Rollback **deletes data** (it drops the tables); use it on a development database only.
@@ -61,8 +63,10 @@ Rollback **deletes data** (it drops the tables); use it on a development databas
 | `thinking` | The model's reasoning blocks of a message (text is empty on Claude Code 2.1.289); restricted |
 | `redaction_log` | Rule, location and count of each redaction; never the redacted value (unique per session, rule and location, so a repeated report is safe) |
 | `job` | Work queue for indexing and distillation (at most one queued index job per session) |
+| `account_label`, `project_label` | Short names shown on the dashboards for a Claude account and a project folder (migration 015) |
 
-Migration 013 adds five views for dashboards (`d_session`, `d_model_cost`, `d_edit`, `d_test_run`, `d_fix_loop`; counts
+Migration 015 adds the dashboard view `d_usage` (tokens and cost per session and model, with project and account
+labels) and the helper view `v_session_folder`. Migration 013 adds five views for dashboards (`d_session`, `d_model_cost`, `d_edit`, `d_test_run`, `d_fix_loop`; counts
 and categories only, see [dashboards.md](dashboards.md)). Migration 011 adds six read-only views (`v_session_cost`, `v_file_history`, `v_agent_run`,
 `v_human_decision`, `v_compaction`, `v_test_fix_cycle`) that answer the audit questions: see
 [queries.md](queries.md).

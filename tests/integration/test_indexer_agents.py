@@ -192,6 +192,54 @@ def test_indexing_again_changes_nothing(
     assert _rows(database, sql) == before
 
 
+# ------------------------------------------------------------------------ the sub-agent's model
+
+
+def _launch_result(tool_use_id: str, resolved_model: str | None) -> dict[str, Any]:
+    """The parent's result of an Agent call; later versions name the model it ran on."""
+    result: dict[str, Any] = {"agentId": "a1", "status": "async_launched"}
+    if resolved_model is not None:
+        result["resolvedModel"] = resolved_model
+    return {
+        "type": "user",
+        "uuid": "m2",
+        "message": {"content": [{"type": "tool_result", "tool_use_id": tool_use_id}]},
+        "toolUseResult": result,
+    }
+
+
+def _model_session(store: ObjectStore, resolved_model: str | None, **meta: Any) -> None:
+    launch = _launch("toolu_1", "Find it", "m1", "00:00")
+    _put(store, "main", launch + _chunk(_launch_result("toolu_1", resolved_model)))
+    _put(store, "agent-a1", _chunk(_assistant("x1", "00:01", {"type": "text"}, side=True)))
+    _put(store, "agent-a1.meta", _meta(agentType="Explore", toolUseId="toolu_1", **meta))
+
+
+@pytest.mark.parametrize(
+    ("resolved_model", "meta", "expected"),
+    [
+        (None, {"pickedEffortModel": "model-p"}, "model-p"),  # what real descriptions hold
+        (None, {"model": "model-m", "pickedEffortModel": "model-p"}, "model-m"),
+        ("model-r", {}, "model-r"),  # the description names none: the launch result does
+        ("model-r", {"pickedEffortModel": "model-p"}, "model-p"),  # the description wins
+        (None, {}, None),
+    ],
+)
+def test_the_sub_agents_model_is_found(
+    database: DatabaseSettings,
+    object_store: ObjectStore,
+    resolved_model: str | None,
+    meta: dict[str, Any],
+    expected: str | None,
+) -> None:
+    _model_session(object_store, resolved_model, **meta)
+
+    _index(database, object_store)
+    _index(database, object_store)  # and indexing again keeps it
+
+    assert _rows(database, "SELECT model FROM agent_run") == [(expected,)]
+
+
 def test_old_description_rows_are_removed_from_the_events_by_the_migration(
     temp_database: DatabaseSettings,
 ) -> None:

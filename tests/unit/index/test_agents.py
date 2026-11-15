@@ -66,3 +66,19 @@ def test_something_that_is_not_an_object_is_an_error(line: str) -> None:
 def test_streams_are_told_apart(stream: str, is_meta: bool, agent_id: str) -> None:
     assert is_meta_stream(stream) is is_meta
     assert agent_id_of(stream) == agent_id
+
+
+def test_the_model_is_read_from_picked_effort_model_as_real_files_write_it() -> None:
+    line = json.dumps({"agentType": "Explore", "pickedEffortModel": "model-y"})
+    assert parse_agent_meta(line).model == "model-y"
+
+
+def test_model_is_preferred_over_picked_effort_model() -> None:
+    line = json.dumps({"model": "model-x", "pickedEffortModel": "model-y"})
+    assert parse_agent_meta(line).model == "model-x"
+
+
+@pytest.mark.parametrize("model", ["", None, 5])
+def test_an_unusable_model_falls_back_to_picked_effort_model(model: object) -> None:
+    line = json.dumps({"model": model, "pickedEffortModel": "model-y"})
+    assert parse_agent_meta(line).model == "model-y"

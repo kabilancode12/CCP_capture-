@@ -156,15 +156,38 @@ def test_an_unreadable_line_is_skipped_and_the_rest_is_kept(
 def test_a_failed_job_is_tried_again_and_finally_given_up(
     database: DatabaseSettings, object_store: ObjectStore
 ) -> None:
-    _upload(object_store, database, b"\xff\n", 0)  # not UTF-8: cannot be indexed
+    class UnreadableStore:
+        """The bucket, but every chunk fails to download."""
+
+        def list_keys(self, prefix: str) -> list[str]:
+            return object_store.list_keys(prefix)
+
+        def get(self, key: str) -> bytes:
+            raise OSError("storage is down")
+
+    _upload(object_store, database, _clean_fixture(), 0)
     repository = IndexRepository(database)
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        assert process_next_job(object_store, repository) is True
+        assert process_next_job(UnreadableStore(), repository) is True
         expected = "queued" if attempt < MAX_ATTEMPTS else "failed"
         assert _rows(database, "SELECT status, attempts FROM job") == [(expected, attempt)]
 
-    assert process_next_job(object_store, repository) is False
+    assert process_next_job(UnreadableStore(), repository) is False
+
+
+def test_a_line_that_is_not_utf8_is_skipped_and_the_session_is_indexed(
+    database: DatabaseSettings, object_store: ObjectStore
+) -> None:
+    lines = _clean_fixture().split(b"\n")
+    lines[2] = b"\xff\xfe not utf-8"
+    _upload(object_store, database, b"\n".join(lines), 0)
+
+    assert process_next_job(object_store, IndexRepository(database)) is True
+
+    numbers = _rows(database, "SELECT raw_line_number FROM event ORDER BY 1")
+    assert numbers == [(1,), (2,), (4,), (5,), (6,), (7,)]
+    assert _rows(database, "SELECT status FROM job") == [("done",)]
 
 
 def test_two_workers_never_take_the_same_job(

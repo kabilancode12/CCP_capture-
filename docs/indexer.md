@@ -21,6 +21,10 @@ Settings are the `POSTGRES_*` and `MINIO_*` variables ([configuration.md](config
 is blocked on your machine, use `python -m ccp.index run`. `--poll-seconds N` sets how long it waits when the
 queue is empty (default 5).
 
+If the database fails while `run` takes a job or records its outcome (a restart, a network drop), the error is
+logged and the worker waits `--poll-seconds` and goes on: it outlives a short outage. `run --once` instead stops
+with the error and exit code 1, so a script notices.
+
 ## Rebuilding, and proving it works
 
 The index is only worth having if it can be rebuilt from the stored transcripts. `ccp-index rebuild` deletes the
@@ -64,6 +68,29 @@ Because of (2) and (3), a crash leaves a chunk fully indexed or not at all, a re
 a chunk that arrives later is simply added. A failed job is tried again up to three times, then stays
 `failed` (see `job.status`); a new chunk of the session queues a fresh job.
 
+A line that is not valid UTF-8, or not a JSON object, is skipped and counted (the job log says how many); the
+other lines keep their own line numbers. One bad line never blocks the rest of the session.
+
+The events of a chunk are sent **in batches** of 1,000, one statement per batch (`INSERT ... SELECT FROM
+unnest(...)`), and the thinking blocks likewise. The rows are exactly those that one statement per event gave:
+`tests/integration/test_indexer_batching.py` stores the same transcripts both ways and compares the rebuild
+fingerprints. Storing a synthetic 5,000-line chunk took 11 to 14 s one event at a time and about 1.0 s in
+batches; indexing the whole session (with the refresh) went from 13 to 14 s to 3 to 3.5 s.
+
+### Jobs and workers
+
+| Situation | What happens |
+| --- | --- |
+| A job is taken | `status = 'running'`, `attempts + 1`, `started_at = now()` (migration 014) |
+| The job succeeds | `done` |
+| The job fails | Queued again if it has attempts left (3 in all) and the session has no other queued job; otherwise `failed` |
+| The job fails just as the API queues a new job for the session | `done`: the new job indexes the session (at most one queued job per session, migration 002) |
+| A worker died: its job has been `running` for over 30 minutes | Before taking a job, a worker puts it back: queued again if it has attempts left, `done` if the session already has a queued job, `failed` if it has no attempts left. A job taken before migration 014 counts from its creation time |
+| Two workers work on the same session at once (a new chunk queued a job while the old one ran) | They take turns: storing a chunk, refreshing the derived rows and the rebuild's reset each hold a lock on the session (`pg_advisory_xact_lock(hashtext(session_id))`) for their transaction. Other sessions do not wait |
+
+The 30 minutes are `STALE_JOB_MINUTES` in [`repository.py`](../src/ccp/index/repository.py). A job that really
+runs longer than that is harmless: it would be started again, wait for the lock, and add nothing.
+
 Sub-agent entries are stored under the **parent's** session id, with the actor `subagent`. The stream's
 name is in the event's `raw_object_key` (`sessions/<id>/agent-<agent id>/...`).
 
@@ -71,7 +98,11 @@ name is in the event's `raw_object_key` (`sessions/<id>/agent-<agent id>/...`).
 
 | Transcript entry | `event_type` | `actor` |
 | --- | --- | --- |
-| user, a plain prompt | `prompt` | `human` (`subagent` inside a sub-agent) |
+| user, a prompt the developer typed | `prompt` | `human` (`subagent` inside a sub-agent) |
+| user, a slash command the developer typed | `slash_command` | `human` |
+| user, the output of a local command | `command_output` | `system` |
+| user, a message from another agent or a background task | `agent_message` | `system` (`subagent` for a sub-agent's hand-back) |
+| user, injected by Claude Code (`isMeta`) | `meta` | `system` |
 | user, tool results | `tool_result` | `system` |
 | user, compaction summary | `compaction_summary` | `system` |
 | assistant, with a tool call | `tool_call` | `ai` (`subagent` inside a sub-agent) |
@@ -79,6 +110,38 @@ name is in the event's `raw_object_key` (`sessions/<id>/agent-<agent id>/...`).
 | assistant, only thinking | `thinking` | `ai` (`subagent` inside a sub-agent) |
 | system | its `subtype`, for example `compact_boundary` | `system` |
 | any other type | the type itself, for example `cost-state`, or `unknown` | `system` |
+
+### Who wrote a "user" entry
+
+Many `user` entries were not typed by a person. The parser tells them apart with these tests, in this order
+(the code is `_classify_user` in [`parser.py`](../src/ccp/index/parser.py)); checked on a real transcript of a
+later Claude Code version:
+
+1. `isCompactSummary` is true: `compaction_summary`.
+2. The message holds tool results: `tool_result`.
+3. The text starts with `<local-command-stdout>`, `<local-command-stderr>`, `<local-command-caveat>`,
+   `<bash-stdout>` or `<bash-stderr>`: `command_output` (what `/model`, `/context` or `!` shell mode printed,
+   and the caveat Claude Code writes before it).
+4. `origin.kind` is there and is not `human` (for example `task-notification`: a background task finished;
+   `peer`: another agent's message): `agent_message`. A `peer` message with `origin.handback = true` is a
+   sub-agent handing back its report, so its actor is `subagent`; otherwise `system`.
+5. `isMeta` is true (a skill's body, a reminder): `meta`.
+6. The text starts with `<command-name>` or `<command-message>`: `slash_command`. (A skill's body starts the
+   same way but is marked `isMeta`, so step 5 took it.)
+7. Anything else is a `prompt`.
+
+An entry without `origin` (Claude Code 2.1.289 wrote none, nor does a later version on slash commands) is
+told apart by the other steps only, so a plain prompt of an old transcript is still a `prompt`.
+
+**The developer's prompts** are `prompt` and `slash_command` events with the actor `human`. They are what the
+rewind rule counts and what `file_change.prompt_event_id` points at: an edit made after a task notification or
+a sub-agent's report is traced back past it to the prompt the developer typed. The views of migrations 011 and
+013 (`v_human_decision`, `v_compaction.prompts_before`, `d_session.prompts`) count `prompt` events only, so
+they now leave out slash commands, injected messages and agents' messages.
+
+Sessions indexed before this change keep the old types until they are rebuilt (`ccp-index rebuild --all`); for
+a session with such entries, `rebuild --check` reports `DIFFERENT in event` once (and possibly `file_change`),
+which is the new classification, not damage.
 
 Unknown types are stored, not rejected: Claude Code adds new ones. Each event keeps the whole entry in
 `payload` (already redacted on the developer machine), the entry's `uuid` and `parentUuid`, its time, and where
@@ -92,8 +155,9 @@ everything after it stay in the transcript, and the new prompt becomes a second 
 parent ([facts 19 and 20](verify/transcript-facts.md)). The rule: **when an entry has two or more user prompts
 as children, the last one in the file continued; every earlier one, and everything below it, is abandoned**
 (`event.is_abandoned = true`). Abandoned events are kept: they were really captured, and AI edits on them may
-have happened. Only user prompts written by a person count: tool calls (which also give an entry two
-children), messages Claude Code injects itself (`isMeta`) and sub-agent prompts do not. A compaction boundary
+have happened. Only the developer's prompts count (typed prompts and slash commands, see above): tool calls
+(which also give an entry two children), messages Claude Code injects itself (`isMeta`), command output,
+messages from agents and background tasks, and sub-agent prompts do not. A compaction boundary
 has no parent but names `logicalParentUuid`, which is followed as if it were the parent. The code is
 [`tree.py`](../src/ccp/index/tree.py).
 
@@ -119,7 +183,7 @@ per run, with:
 
 | Column | From |
 | --- | --- |
-| `agent_type`, `description`, `model`, `spawn_depth`, `tool_use_id` | the description |
+| `agent_type`, `description`, `model`, `spawn_depth`, `tool_use_id` | the description. The model is its `model`, else its `pickedEffortModel` (what real files hold), else the `resolvedModel` of the parent's result for the launching call |
 | `launch_event_id` | the event whose tool call has that `tool_use_id`: the parent's `Agent` call, or a call inside another sub-agent for nested agents |
 | `instructions` | the `prompt` of that call |
 | `result` | the text of the sub-agent's last plain reply (empty if it ended on a tool call) |
@@ -159,7 +223,7 @@ Results already turned into rows are not read again, so a long session costs no 
 indexed before this feature are caught up at their next job.
 
 Checked on three real sessions: 34, 126 and 317 edit results gave exactly 34, 126 and 317 rows, each linked
-to its call, tool and prompt. Indexing the largest (5,097 events) took 18 s the first time and 0.9 s when repeated.
+to its call, tool and prompt. Indexing the largest (5,097 events) took 18 s the first time (one event per statement, before batching) and 0.9 s when repeated.
 
 ## Test runs
 
@@ -221,10 +285,7 @@ The six questions the audit trail must answer are views on top of these tables: 
 
 ## Limits
 
-- A job whose worker crashed stays `running`; it is not picked up again automatically. Queue a new job by
-  uploading again, or reset it by hand. (Recovery is planned with the Step 5 hardening.)
-- One event is inserted per statement: about 18 s for a session of 5,000 lines. To be batched if that becomes a
-  problem.
+- A job whose worker crashed is queued again only after 30 minutes (see [Jobs and workers](#jobs-and-workers)).
 - `event.tool_use_ids` (migrations 009 and 010, indexed) holds the ids of the tool calls an entry makes or
   answers. It is what makes "which event holds this tool call, or its result" fast; it is filled when an event
   is indexed.

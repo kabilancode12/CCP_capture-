@@ -134,8 +134,11 @@ def test_a_hostile_file_name_cannot_inject_lines_into_the_commit_message(world: 
     message = git(
         world.capture, "log", "-1", "--format=%B", f"refs/claude-capture/sessions/{SID}/0001"
     )
-    assert "session: forged" not in message.splitlines()
-    assert message.count("session:") == 1
+    lines = message.splitlines()
+    assert "session: forged" not in lines
+    # Exactly one real "session:" and "seq:" line; the name's own text stays inside the excluded line.
+    assert [line for line in lines if line.startswith("session:")] == [f"session: {SID}"]
+    assert [line for line in lines if line.startswith("seq:")] == ["seq: 1"]
     assert "excluded: evil?session: forged?seq: 99" in message
 
 

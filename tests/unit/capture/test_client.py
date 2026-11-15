@@ -1,12 +1,15 @@
 """The sync logic, tested with a fake API and real files in a temporary folder."""
 
+import functools
 import json
 from pathlib import Path
 
 import pytest
 
+from ccp.capture import client as client_module
 from ccp.capture.api import ApiRejectedError, ApiUnavailableError
-from ccp.capture.client import CaptureClient
+from ccp.capture.client import MAX_REFUSALS, CaptureClient
+from ccp.capture.reader import read_complete_lines
 from ccp.capture.state import StateStore
 from ccp.environment import EnvironmentRecord
 from ccp.storage.attachments import MIN_EXTERNAL_BYTES
@@ -175,10 +178,155 @@ def test_a_refused_upload_stops_and_reports_without_moving_the_position(
     api: FakeApi, state: StateStore, transcript: Path
 ) -> None:
     _write(transcript, _entry(1))
-    api.fail_with = ApiRejectedError(401, "missing or invalid token")
+    api.fail_with = ApiRejectedError(422, "malformed chunk")
     (result,) = _client(api, state).sync_session(SESSION, transcript)
-    assert "401" in (result.error or "")
+    assert "422" in (result.error or "")
     assert state.get_offset(SESSION, "main") == 0
+
+
+# ---------------------------------------------------------------- a refused token
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_a_refused_token_stops_the_run_and_says_which_setting_to_check(
+    api: FakeApi, state: StateStore, transcript: Path, status: int
+) -> None:
+    _write(transcript, _entry(1))
+    folder = transcript.with_suffix("") / "subagents"
+    folder.mkdir(parents=True)
+    _write(folder / "agent-a.jsonl", {"type": "user", "uuid": "a"})
+    api.fail_with = ApiRejectedError(status, "missing or invalid token")
+
+    results = _client(api, state).sync_session(SESSION, transcript)
+
+    assert [r.stream for r in results] == ["main"]  # the sub-agent would be refused too
+    (result,) = results
+    assert result.access_denied and result.stops_run and not result.api_unavailable
+    assert str(status) in (result.error or "") and "CCP_INGEST_TOKEN" in (result.error or "")
+    assert state.get_offset(SESSION, "main") == 0  # nothing is skipped: the data waits
+
+
+def test_catch_up_stops_at_the_first_refused_token(
+    api: FakeApi, state: StateStore, tmp_path: Path
+) -> None:
+    for name in ("s-a", "s-b", "s-c"):
+        path = tmp_path / name / f"{name}.jsonl"
+        _write(path, _entry(1))
+        state.remember_transcript(name, path)
+    api.fail_with = ApiRejectedError(401, "missing or invalid token")
+
+    results = _client(api, state).catch_up()
+
+    assert list(results) == ["s-a"]  # the other sessions were not tried
+
+
+def test_a_refused_token_is_never_counted_towards_skipping_a_chunk(
+    api: FakeApi, state: StateStore, transcript: Path
+) -> None:
+    _write(transcript, _entry(1))
+    api.fail_with = ApiRejectedError(401, "missing or invalid token")
+    client = _client(api, state)
+    for _ in range(MAX_REFUSALS + 2):
+        client.sync_session(SESSION, transcript)
+    assert api.chunks == {} and state.get_offset(SESSION, "main") == 0
+
+
+# ---------------------------------------------------------------- a chunk the API keeps refusing
+
+
+def _refuse_chunks_containing(api: FakeApi, marker: bytes, status: int = 413) -> None:
+    """Make the fake API refuse every chunk whose body contains ``marker``."""
+    original_put = api.put_chunk
+
+    def picky(session_id: str, stream: str, offset: int, body: bytes) -> bool:
+        if marker in body:
+            raise ApiRejectedError(status, "no thanks")
+        return original_put(session_id, stream, offset, body)
+
+    api.put_chunk = picky  # type: ignore[method-assign]
+
+
+def test_a_chunk_refused_three_times_is_replaced_by_a_placeholder_and_the_stream_moves_on(
+    api: FakeApi, state: StateStore, transcript: Path
+) -> None:
+    _write(transcript, _entry(1), _entry(2))
+    line_size = len(json.dumps(_entry(1), separators=(",", ":"))) + 1
+    client = _client(api, state, chunk_bytes=line_size)  # one line per chunk
+    _refuse_chunks_containing(api, b"hello 1")
+
+    for _ in range(MAX_REFUSALS - 1):  # the first refusals: the chunk is tried again later
+        (result,) = client.sync_session(SESSION, transcript)
+        assert "413" in (result.error or "") and result.skipped == 0
+        assert state.get_offset(SESSION, "main") == 0 and api.chunks == {}
+
+    (result,) = client.sync_session(SESSION, transcript)  # refused once more: skipped
+
+    assert result.skipped == 1 and result.error is None and result.caught_up
+    assert json.loads(api.chunks[("main", 0)]) == {
+        "type": "ccp-withheld",
+        "reason": "chunk refused by the API",
+        "status": 413,
+        "lines": 1,
+        "bytes": line_size,
+    }
+    assert b"hello 2" in api.chunks[("main", line_size)]  # the later lines went through
+    assert state.get_offset(SESSION, "main") == transcript.stat().st_size
+
+
+def test_refusals_are_counted_per_chunk_and_start_again_for_the_next_one(
+    api: FakeApi, state: StateStore, transcript: Path
+) -> None:
+    _write(transcript, _entry(1), _entry(2))
+    line_size = len(json.dumps(_entry(1), separators=(",", ":"))) + 1
+    client = _client(api, state, chunk_bytes=line_size)
+
+    api.fail_with = ApiRejectedError(422, "malformed")
+    for _ in range(MAX_REFUSALS - 1):
+        client.sync_session(SESSION, transcript)  # chunk 1 refused, not yet skipped
+    api.fail_with = None
+    _refuse_chunks_containing(api, b"hello 2", status=422)
+    client.sync_session(SESSION, transcript)  # chunk 1 accepted; chunk 2 refused once
+
+    assert b"hello 1" in api.chunks[("main", 0)]  # the real content, not a placeholder
+    assert ("main", line_size) not in api.chunks  # chunk 2 is not skipped after one refusal
+    assert state.get_offset(SESSION, "main") == line_size
+
+
+def test_if_the_placeholder_is_refused_too_the_stream_still_moves_on(
+    api: FakeApi, state: StateStore, transcript: Path
+) -> None:
+    _write(transcript, _entry(1))
+    api.fail_with = ApiRejectedError(409, "a different chunk is already stored")
+    client = _client(api, state)
+    for _ in range(MAX_REFUSALS):
+        (result,) = client.sync_session(SESSION, transcript)
+    assert result.skipped == 1 and result.caught_up
+    assert state.get_offset(SESSION, "main") == transcript.stat().st_size
+
+
+def test_if_the_api_is_down_when_the_placeholder_is_sent_it_is_sent_next_time(
+    api: FakeApi, state: StateStore, transcript: Path
+) -> None:
+    _write(transcript, _entry(1))
+    client = _client(api, state)
+    _refuse_chunks_containing(api, b"hello 1")
+    for _ in range(MAX_REFUSALS - 1):
+        client.sync_session(SESSION, transcript)
+
+    refusing_put = api.put_chunk
+
+    def down_for_placeholders(session_id: str, stream: str, offset: int, body: bytes) -> bool:
+        if b"ccp-withheld" in body:
+            raise ApiUnavailableError("down")
+        return refusing_put(session_id, stream, offset, body)
+
+    api.put_chunk = down_for_placeholders  # type: ignore[method-assign]
+    (down,) = client.sync_session(SESSION, transcript)
+    assert down.api_unavailable and state.get_offset(SESSION, "main") == 0
+
+    api.put_chunk = refusing_put  # type: ignore[method-assign]
+    (result,) = client.sync_session(SESSION, transcript)
+    assert result.skipped == 1 and b"ccp-withheld" in api.chunks[("main", 0)]
 
 
 def test_a_chunk_that_failed_is_retried_not_skipped_when_later_ones_exist(
@@ -264,14 +412,31 @@ def test_a_missing_transcript_is_reported_not_raised(
     assert "FileNotFoundError" in (result.error or "")
 
 
-def test_a_transcript_that_shrank_is_reported_and_nothing_is_uploaded(
+def test_a_transcript_that_shrank_uploads_nothing_and_does_not_fail(
     api: FakeApi, state: StateStore, transcript: Path
 ) -> None:
     _write(transcript, _entry(1))
     state.set_offset(SESSION, "main", 10_000)  # more than the file holds
     (result,) = _client(api, state).sync_session(SESSION, transcript)
-    assert "TranscriptError" in (result.error or "")
+    assert result.error is None
     assert api.calls == []
+    assert state.get_offset(SESSION, "main") == 10_000
+
+
+def test_a_line_too_long_to_read_is_replaced_and_the_lines_after_it_are_uploaded(
+    api: FakeApi, state: StateStore, transcript: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    small_window = functools.partial(read_complete_lines, window_bytes=200)
+    monkeypatch.setattr(client_module, "read_complete_lines", small_window)
+    huge = {"type": "user", "uuid": "u-huge", "message": "z" * 1000}
+    _write(transcript, _entry(1), huge, _entry(2))
+
+    (result,) = _client(api, state).sync_session(SESSION, transcript)
+
+    uploaded = b"".join(api.chunks[key] for key in sorted(api.chunks))
+    assert b"hello 1" in uploaded and b"hello 2" in uploaded  # one sync, all lines
+    assert b"zzz" not in uploaded and b"line too long to read" in uploaded
+    assert result.caught_up and state.get_offset(SESSION, "main") == transcript.stat().st_size
 
 
 # ---------------------------------------------------------------- sub-agents
@@ -322,6 +487,55 @@ def test_a_sub_agent_with_an_unsafe_file_name_is_skipped(
     bad = next(r for r in results if r.stream == "agent-bad name")
     assert bad.error == "stream name is not allowed"
     assert ("agent-bad name", 0) not in api.chunks
+
+
+def test_sub_agents_started_by_the_workflow_tool_are_uploaded_too(
+    api: FakeApi, state: StateStore, transcript: Path
+) -> None:
+    _write(transcript, _entry(1))
+    run = transcript.with_suffix("") / "subagents" / "workflows" / "wf_1a2b-3c"
+    run.mkdir(parents=True)
+    _write(run / "agent-a4cd7b54d2b8ca0ae.jsonl", {"type": "user", "uuid": "w1"})
+    (run / "agent-a4cd7b54d2b8ca0ae.meta.json").write_text('{"agentType":"x"}', encoding="utf-8")
+    _write(run / "journal.jsonl", {"type": "step"})  # the workflow's own journal: not an agent
+
+    results = _client(api, state).sync_session(SESSION, transcript)
+
+    assert [r.stream for r in results] == [
+        "main",
+        "agent-a4cd7b54d2b8ca0ae",
+        "agent-a4cd7b54d2b8ca0ae.meta",
+    ]
+    assert all(r.error is None and r.caught_up for r in results)
+    assert ("agent-a4cd7b54d2b8ca0ae", 0) in api.chunks
+    assert not any(b'"step"' in body for body in api.chunks.values())
+
+
+def test_an_agent_id_found_twice_is_uploaded_from_one_file_only(
+    api: FakeApi, state: StateStore, transcript: Path
+) -> None:
+    _write(transcript, _entry(1))
+    direct, _ = _agent_files(transcript, "agent-dup")
+    _write(direct, {"type": "user", "uuid": "first"})
+    run = direct.parent / "workflows" / "wf_1"
+    _write(run / "agent-dup.jsonl", {"type": "user", "uuid": "second"})
+
+    results = _client(api, state).sync_session(SESSION, transcript)
+
+    assert [r.stream for r in results] == ["main", "agent-dup"]
+    assert b"first" in api.chunks[("agent-dup", 0)]
+
+
+def test_a_meta_file_with_an_unsafe_name_is_skipped(
+    api: FakeApi, state: StateStore, transcript: Path
+) -> None:
+    _write(transcript, _entry(1))
+    _, meta = _agent_files(transcript, "agent-bad name")
+    meta.write_text('{"agentType":"x"}', encoding="utf-8")
+
+    results = _client(api, state).sync_session(SESSION, transcript)
+    bad = next(r for r in results if r.stream == "agent-bad name.meta")
+    assert bad.error == "stream name is not allowed"
 
 
 # ---------------------------------------------------------------- catch-up
@@ -425,9 +639,9 @@ def test_a_stream_result_says_when_the_api_was_unavailable(
     (result,) = _client(api, state).sync_session(SESSION, transcript)
     assert result.api_unavailable and result.error is not None
 
-    api.fail_with = ApiRejectedError(401, "bad token")  # a refusal is not "unavailable"
+    api.fail_with = ApiRejectedError(401, "bad token")  # a refused token is not "unavailable"
     (refused,) = _client(api, state).sync_session(SESSION, transcript)
-    assert not refused.api_unavailable and refused.error is not None
+    assert not refused.api_unavailable and refused.access_denied and refused.error is not None
 
 
 def test_sub_agent_streams_are_not_tried_once_the_api_is_known_to_be_down(

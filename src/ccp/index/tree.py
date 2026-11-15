@@ -9,8 +9,9 @@ that continued.
 
 Rule: when an entry has two or more user prompts as children, the **last** one in the file is the
 one that continued. Every earlier one, and everything below it, is abandoned. Tool calls also give
-an entry two children, so only user prompts count. Messages that Claude Code injects itself
-(``isMeta``) and sub-agent prompts are not user prompts.
+an entry two children, so only user prompts count. A slash command the developer typed is a user
+prompt; messages that Claude Code injects itself (``isMeta``), command output, messages from other
+agents or background tasks, and sub-agent prompts are not.
 
 A compaction cuts the chain: the boundary entry has no parent but names ``logicalParentUuid``
 (fact 20). That link is followed as if it were the parent, so a branch that contains a compaction is

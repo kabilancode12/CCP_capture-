@@ -192,3 +192,82 @@ def test_the_ids_that_tool_results_answer_are_collected_too() -> None:
         type="user",
     )
     assert parsed.tool_use_ids == ("toolu_1",)
+
+
+# ---------------------------------------------------------------- what a user entry really is
+# Shapes seen in real transcripts of later Claude Code versions (text invented).
+
+
+def _user(content: Any, **entry: Any) -> Any:
+    return _parse(type="user", message={"content": content}, **entry)
+
+
+@pytest.mark.parametrize(
+    ("entry", "event_type", "actor"),
+    [
+        # Typed by the developer.
+        ({"origin": {"kind": "human"}, "promptSource": "sdk"}, "prompt", "human"),
+        ({}, "prompt", "human"),  # no origin (Claude Code 2.1.289): as before
+        # A slash command: written without origin and without isMeta.
+        ({"content": "<command-name>/model</command-name>\n<command-args></command-args>"},
+         "slash_command", "human"),
+        ({"content": "<command-message>init</command-message>\n<command-name>/init</command-name>"},
+         "slash_command", "human"),
+        # What a local command printed, and the caveat Claude Code writes before it.
+        ({"content": "<local-command-stdout>Set model</local-command-stdout>"},
+         "command_output", "system"),
+        ({"content": "<local-command-caveat>Caveat: ...</local-command-caveat>", "isMeta": True},
+         "command_output", "system"),
+        ({"content": "<bash-stdout>ok</bash-stdout><bash-stderr></bash-stderr>"},
+         "command_output", "system"),
+        # Injected by Claude Code: a skill's body, a reminder.
+        ({"content": "<command-message>review</command-message>\n<command-name>/review"
+                     "</command-name>\n<skill-format>true</skill-format>", "isMeta": True},
+         "meta", "system"),
+        ({"content": [{"type": "text", "text": "Base directory for this skill"}], "isMeta": True},
+         "meta", "system"),
+        ({"content": "<system-reminder>x</system-reminder>", "isMeta": True}, "meta", "system"),
+        # From another agent or a background task.
+        ({"origin": {"kind": "task-notification", "producer": "session-task"},
+          "promptSource": "system", "content": "<task-notification>done</task-notification>"},
+         "agent_message", "system"),
+        ({"origin": {"kind": "peer", "handback": True}, "isMeta": True}, "agent_message",
+         "subagent"),
+        ({"origin": {"kind": "peer", "from": "another session"}, "isMeta": True},
+         "agent_message", "system"),
+        ({"origin": {"kind": "a-kind-from-a-future-version"}}, "agent_message", "system"),
+        # An origin that cannot be read changes nothing.
+        ({"origin": "human"}, "prompt", "human"),
+        ({"origin": {"producer": "x"}}, "prompt", "human"),
+    ],
+)  # fmt: skip
+def test_a_user_entry_is_told_apart_by_who_wrote_it(
+    entry: dict[str, Any], event_type: str, actor: str
+) -> None:
+    content = entry.pop("content", "please fix the bug")
+    parsed = _user(content, **entry)
+    assert (parsed.event_type, parsed.actor) == (event_type, actor)
+
+
+def test_leading_white_space_before_a_command_tag_does_not_matter() -> None:
+    assert _user("\n  <command-name>/clear</command-name>").event_type == "slash_command"
+
+
+def test_a_prompt_that_only_mentions_a_tag_is_still_a_prompt() -> None:
+    assert _user("why does <command-name> appear in the log?").event_type == "prompt"
+
+
+def test_a_slash_command_by_a_human_with_an_origin_is_a_slash_command() -> None:
+    parsed = _user("<command-name>/clear</command-name>", origin={"kind": "human"})
+    assert (parsed.event_type, parsed.actor) == ("slash_command", "human")
+
+
+def test_tool_results_and_compaction_summaries_keep_their_type_whatever_the_origin() -> None:
+    result = _message({"type": "tool_result", "content": "ok"}, type="user", origin={"kind": "x"})
+    summary = _user("summary", isCompactSummary=True, isMeta=True)
+    assert (result.event_type, summary.event_type) == ("tool_result", "compaction_summary")
+
+
+def test_a_sub_agents_briefing_is_still_a_sub_agent_prompt() -> None:
+    parsed = _user("do the task", isSidechain=True)
+    assert (parsed.event_type, parsed.actor) == ("prompt", "subagent")

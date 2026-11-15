@@ -9,18 +9,24 @@ then stores. What is known about the shapes is in docs/verify/transcript-facts.m
 
 How an entry becomes an event:
 
-====================  =====================  ==========================================
-Entry                 ``event_type``         ``actor``
-====================  =====================  ==========================================
-user, plain prompt    ``prompt``             ``human`` (``subagent`` inside a sub-agent)
-user, tool results    ``tool_result``        ``system``
-user, compact summary ``compaction_summary`` ``system``
-assistant, tool call  ``tool_call``          ``ai`` (``subagent`` inside a sub-agent)
-assistant, text       ``response``           ``ai`` (``subagent`` inside a sub-agent)
-assistant, thinking   ``thinking``           ``ai`` (``subagent`` inside a sub-agent)
-system                its ``subtype``        ``system``
-anything else         its ``type``           ``system``
-====================  =====================  ==========================================
+=====================  =====================  ==========================================
+Entry                  ``event_type``         ``actor``
+=====================  =====================  ==========================================
+user, plain prompt     ``prompt``             ``human`` (``subagent`` inside a sub-agent)
+user, slash command    ``slash_command``      ``human``
+user, command output   ``command_output``     ``system``
+user, from an agent    ``agent_message``      ``system`` (``subagent`` for a hand-back)
+user, injected         ``meta``               ``system``
+user, tool results     ``tool_result``        ``system``
+user, compact summary  ``compaction_summary`` ``system``
+assistant, tool call   ``tool_call``          ``ai`` (``subagent`` inside a sub-agent)
+assistant, text        ``response``           ``ai`` (``subagent`` inside a sub-agent)
+assistant, thinking    ``thinking``           ``ai`` (``subagent`` inside a sub-agent)
+system                 its ``subtype``        ``system``
+anything else          its ``type``           ``system``
+=====================  =====================  ==========================================
+
+See ``_classify_user`` for how a user entry is told apart (docs/indexer.md has the details).
 """
 
 from __future__ import annotations
@@ -38,6 +44,20 @@ _ASSISTANT_TYPES = {
     "thinking": "thinking",
     "redacted_thinking": "thinking",
 }
+
+# A user entry starting with one of these is the output of a command run in Claude Code itself
+# (/model, /context, "!" shell mode ...), not something a person typed.
+_COMMAND_OUTPUT_TAGS = (
+    "<local-command-stdout>",
+    "<local-command-stderr>",
+    "<local-command-caveat>",
+    "<bash-stdout>",
+    "<bash-stderr>",
+)
+
+# A user entry starting with one of these is a slash command the developer typed. (Claude Code
+# also writes the body of a skill this way, but marks that isMeta.)
+_SLASH_COMMAND_TAGS = ("<command-name>", "<command-message>")
 
 
 class ParseError(ValueError):
@@ -126,13 +146,47 @@ def content_blocks(entry: dict[str, Any]) -> list[dict[str, Any]]:
 def _classify_user(
     entry: dict[str, Any], blocks: list[dict[str, Any]], in_sub_agent: bool
 ) -> tuple[str, str]:
-    """A user entry is a prompt, the result of tool calls, or the summary made by a compaction."""
+    """Tell apart what a "user" entry really is; only some of them were typed by a person.
+
+    In order: a compaction summary; tool results; the output of a local command; a message from
+    another agent or a background task (``origin.kind`` is not ``human``); a message Claude Code
+    injected (``isMeta``: skill bodies, reminders); a slash command; and finally a prompt. An entry
+    without ``origin`` (Claude Code 2.1.289 wrote none) is told apart by the other tests only.
+    """
     if entry.get("isCompactSummary") is True:
         return "compaction_summary", "system"
     if any(block.get("type") == "tool_result" for block in blocks):
         return "tool_result", "system"
+    text = _user_text(entry, blocks).lstrip()
+    if text.startswith(_COMMAND_OUTPUT_TAGS):
+        return "command_output", "system"
+    origin = entry.get("origin")
+    origin = origin if isinstance(origin, dict) else {}
+    sender = origin.get("kind")
+    if isinstance(sender, str) and sender != "human":
+        # A sub-agent handing its report back is the sub-agent speaking; other senders (another
+        # session, a background task finishing) are the system.
+        from_sub_agent = sender == "peer" and origin.get("handback") is True
+        return "agent_message", "subagent" if from_sub_agent else "system"
+    if entry.get("isMeta") is True:
+        return "meta", "system"
+    if text.startswith(_SLASH_COMMAND_TAGS):
+        return "slash_command", "human"
     # Inside a sub-agent the "user" is the parent agent briefing it, not a person.
     return "prompt", "subagent" if in_sub_agent else "human"
+
+
+def _user_text(entry: dict[str, Any], blocks: list[dict[str, Any]]) -> str:
+    """The text of a user entry: its message if that is plain text, else its first text block."""
+    message = entry.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if isinstance(content, str):
+        return content
+    for block in blocks:
+        text = block.get("text")
+        if block.get("type") == "text" and isinstance(text, str):
+            return text
+    return ""
 
 
 def _classify_assistant(blocks: list[dict[str, Any]], in_sub_agent: bool) -> tuple[str, str]:

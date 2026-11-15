@@ -11,6 +11,10 @@ Two safeguards keep a bad line from blocking a stream forever, while never uploa
   placeholder, because the server accepts only JSON-object lines.
 
 Each replacement is reported as a redaction record, so it is visible in the log.
+
+A chunk the API keeps refusing is replaced as a whole by :func:`refused_chunk` (see
+:mod:`ccp.capture.client`), and a line too long to read by the reader's own placeholder (see
+:mod:`ccp.capture.reader`); both use the same ``ccp-withheld`` form.
 """
 
 from __future__ import annotations
@@ -100,6 +104,32 @@ def prepare_chunk(chunk_key: str, lines: Sequence[SourceLine]) -> PreparedChunk:
         attachments=collector.bodies,
         records=records_from_hits(hits, chunk_key),
         source_bytes=sum(line.size for line in lines),
+    )
+
+
+def refused_chunk(lines: Sequence[SourceLine], status: int) -> PreparedChunk:
+    """Return a one-line placeholder chunk that stands in for a chunk the API keeps refusing.
+
+    It covers the same source bytes, so the stream can move past the chunk. Only counts and the
+    HTTP status are kept, never content.
+
+    Args:
+        lines: The source lines of the refused chunk.
+        status: The HTTP status of the last refusal (for example 413 or 422).
+    """
+    source_bytes = sum(line.size for line in lines)
+    placeholder = {
+        "type": "ccp-withheld",
+        "reason": "chunk refused by the API",
+        "status": status,
+        "lines": len(lines),
+        "bytes": source_bytes,
+    }
+    return PreparedChunk(
+        body=(json.dumps(placeholder) + "\n").encode("utf-8"),
+        attachments={},
+        records=[],
+        source_bytes=source_bytes,
     )
 
 

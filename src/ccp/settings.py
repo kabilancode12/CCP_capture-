@@ -286,6 +286,20 @@ def load_reader_password(
     return password
 
 
+def load_auditor_password(
+    env: Mapping[str, str] | None = None, env_file: Path | None = DEFAULT_ENV_FILE
+) -> Secret:
+    """Read the password for the auditors' read-only database role (``CCP_AUDITOR_PASSWORD``).
+
+    Raises:
+        SettingsError: If it is missing or shorter than 12 characters.
+    """
+    reader = _Reader(_merge_env(env, env_file))
+    password = reader.secret("CCP_AUDITOR_PASSWORD", min_length=12)
+    reader.raise_if_errors()
+    return password
+
+
 def load_dashboard_settings(
     env: Mapping[str, str] | None = None, env_file: Path | None = DEFAULT_ENV_FILE
 ) -> DashboardSettings:

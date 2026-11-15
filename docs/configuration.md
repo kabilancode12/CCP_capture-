@@ -55,6 +55,7 @@ Used by `ccp-db create-reader`, `ccp-dashboards setup` and the Metabase service 
 | --- | --- | --- | --- |
 | `CCP_READER_PASSWORD` | **yes** for dashboards (secret) | | Password of the read-only database role (at least 12 characters). Set by `ccp-db create-reader`, used by Metabase |
 | `CCP_READER_USER` | no | `ccp_reader` | Name of that role (`ccp-db create-reader` takes `--name` instead) |
+| `CCP_AUDITOR_PASSWORD` | only for `ccp-db create-auditor` (secret) | | Password of the auditors' read-only role that can read everything (at least 12 characters); see [access.md](access.md) |
 | `CCP_METABASE_ADMIN_EMAIL` | **yes** for dashboards | | Address of the Metabase administrator that `ccp-dashboards setup` creates the first time. Use your own |
 | `CCP_METABASE_ADMIN_PASSWORD` | **yes** for dashboards (secret) | | That administrator's password, at least 12 characters |
 | `METABASE_PORT` | no | `3000` | Port on this machine where Metabase answers (bound to `127.0.0.1`) |

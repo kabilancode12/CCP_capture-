@@ -5,7 +5,8 @@ Built on ``urllib`` from the standard library, so a developer's machine needs no
 Errors are split by what the caller should do:
 
 * :class:`ApiUnavailableError`: the server could not be reached or had a problem (network down,
-  timeout, 5xx, 429). Nothing is wrong with the request: try again later.
+  timeout, 5xx, 429), or the answer was not the API's own (for example a proxy or a captive portal
+  page instead of JSON). Nothing is wrong with the request: try again later.
 * :class:`ApiRejectedError`: the server refused the request (a 4xx such as 401 or 422). Repeating
   the same request will not help.
 
@@ -92,14 +93,11 @@ class HttpApiClient:
     def put_chunk(self, session_id: str, stream: str, offset: int, body: bytes) -> bool:
         """Upload a chunk (``PUT .../chunks/{offset}``)."""
         path = f"/v1/sessions/{session_id}/streams/{stream}/chunks/{offset}"
-        return self._send("PUT", path, body, "application/x-ndjson")["stored"] is True
+        return _stored(self._send("PUT", path, body, "application/x-ndjson"))
 
     def put_attachment(self, digest: str, body: bytes) -> bool:
         """Upload an attachment body (``PUT /v1/attachments/{digest}``)."""
-        return (
-            self._send("PUT", f"/v1/attachments/{digest}", body, "application/json")["stored"]
-            is True
-        )
+        return _stored(self._send("PUT", f"/v1/attachments/{digest}", body, "application/json"))
 
     def post_redactions(self, session_id: str, records: Sequence[RedactionRecord]) -> None:
         """Report redactions (``POST /v1/sessions/{id}/redactions``)."""
@@ -120,8 +118,13 @@ class HttpApiClient:
     def _send(self, method: str, path: str, body: bytes, content_type: str) -> dict[str, Any]:
         """Send a request and return the decoded JSON response.
 
+        Returns:
+            The decoded JSON object; an empty dictionary for an empty body or a JSON value that is
+            not an object.
+
         Raises:
-            ApiUnavailableError: On a network error, a timeout, or a 5xx or 429 response.
+            ApiUnavailableError: On a network error, a timeout, a 5xx or 429 response, or a
+                success response whose body is not JSON (not the API's own answer).
             ApiRejectedError: On any other error response.
         """
         request = urllib.request.Request(  # noqa: S310  (scheme is validated in the settings)
@@ -135,7 +138,7 @@ class HttpApiClient:
         )
         try:
             with self._opener.open(request, timeout=self._timeout) as response:
-                decoded = json.loads(response.read() or b"{}")
+                raw = response.read()
         except urllib.error.HTTPError as error:
             message = _server_message(error)
             if error.code >= 500 or error.code == 429:
@@ -143,7 +146,34 @@ class HttpApiClient:
             raise ApiRejectedError(error.code, message) from error
         except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as error:
             raise ApiUnavailableError(f"cannot reach the API: {type(error).__name__}") from error
-        return decoded if isinstance(decoded, dict) else {}
+        return _decode_reply(raw)
+
+
+def _decode_reply(raw: bytes) -> dict[str, Any]:
+    """Decode a success response body.
+
+    Raises:
+        ApiUnavailableError: If the body is not JSON. Something between the client and the API
+            (a proxy, a captive portal) answered instead; the request may work later.
+    """
+    try:
+        decoded = json.loads(raw or b"{}")
+    except ValueError as error:  # includes JSONDecodeError and UnicodeDecodeError
+        raise ApiUnavailableError("the answer is not JSON (not from the API?)") from error
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _stored(reply: dict[str, Any]) -> bool:
+    """Return the ``stored`` flag of an upload reply.
+
+    Raises:
+        ApiUnavailableError: If the reply has no boolean ``stored`` field. The API always sends
+            one, so the answer came from something else; treating it as success could lose data.
+    """
+    stored = reply.get("stored")
+    if not isinstance(stored, bool):
+        raise ApiUnavailableError("the answer has no 'stored' flag (not from the API?)")
+    return stored
 
 
 def _server_message(error: urllib.error.HTTPError) -> str:

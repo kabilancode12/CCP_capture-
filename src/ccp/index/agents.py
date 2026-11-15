@@ -61,7 +61,9 @@ def parse_agent_meta(line: str) -> AgentMeta:
     return AgentMeta(
         agent_type=_text(data.get("agentType")),
         description=_text(data.get("description")),
-        model=_text(data.get("model")),
+        # Real description files name the model in "pickedEffortModel"; "model" is read first in
+        # case a version writes that.
+        model=_text(data.get("model")) or _text(data.get("pickedEffortModel")),
         spawn_depth=depth if isinstance(depth, int) and not isinstance(depth, bool) else None,
         tool_use_id=_text(data.get("toolUseId")),
     )
