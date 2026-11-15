@@ -107,3 +107,22 @@ def test_markers_are_remembered_per_session_and_name(state: StateStore) -> None:
 def test_marker_names_cannot_escape_the_state_folder(state: StateStore) -> None:
     with pytest.raises(ValueError):
         state.set_marker("s1", "../../evil", "x")
+
+
+def test_markers_can_be_listed_by_prefix_and_removed(state: StateStore) -> None:
+    state.set_marker("s1", "lifecycle-start-k1", "a")
+    state.set_marker("s1", "lifecycle-end-k1", "b")
+    state.set_marker("s1", "environment", "c")
+    state.set_marker("s2", "environment", "d")
+
+    assert state.marker_names("s1", "lifecycle-") == ["lifecycle-end-k1", "lifecycle-start-k1"]
+    assert state.sessions_with_markers("lifecycle-") == ["s1"]
+    assert state.marker_names("never-seen", "lifecycle-") == []
+
+    state.remove_marker("s1", "lifecycle-end-k1")
+    state.remove_marker("s1", "lifecycle-end-k1")  # removing twice is harmless
+    assert state.marker_names("s1", "lifecycle-") == ["lifecycle-start-k1"]
+
+
+def test_no_state_folder_means_no_sessions_with_markers(tmp_path: Path) -> None:
+    assert StateStore(tmp_path / "nothing").sessions_with_markers("lifecycle-") == []

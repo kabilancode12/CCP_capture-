@@ -45,9 +45,16 @@ the same fingerprint. A difference names the tables, for example `DIFFERENT in f
 check the index is the rebuilt one, so a difference is also repaired. The code is
 [`rebuild.py`](../src/ccp/index/rebuild.py).
 
-Rebuilt: events, thinking, model usage and cost, compactions, sub-agent runs, file changes, test runs, and the
-session's start time and branch. **Never touched:** the session row itself, the environment record and the
-redaction log, which come from the capture client and not from the transcript. A rebuild leaves one `done` job
+Rebuilt: events, thinking, model usage and cost (with effort), compactions, sub-agent runs (with their Workflow
+run), file changes (with role), test runs and their test cases, corrections found by rule, the sessions the
+indexer inferred, and the session's start time, branch, title and empty flag. The fingerprints cover all of
+these, including `test_case`, `correction` (rule rows only) and `chat_session`. **Never touched:** the session
+row itself, the environment record and the redaction log, which come from the capture client and not from the
+transcript; the Claude accounts and projects with their labels; `decision`; the explorer's `ui_user` and
+`ui_access_log`; and the `chat_session` rows the capture client reported (those with a `run_key`). A rebuild
+links the chat to its account and project again, it does not delete them. One limit: corrections found by the
+AI (`detected_by = 'ai'`) point at events, so deleting a chat's events removes them; the distillation writes
+them again. A rebuild leaves one `done` job
 behind for each session it checked (the job is queued first, so that a crash half way is finished by a worker).
 
 Checked on five real sessions from this machine, with their sub-agents (7,228 events in all): every rebuild
@@ -167,6 +174,35 @@ Every `compact_boundary` entry gets a row in `compaction`: the trigger (`manual`
 before and after, and the text of the summary entry that follows it. The summary may arrive in a later chunk
 than the boundary; the row is completed then. A boundary without metadata still gets a row, with empty fields.
 
+## The chat hierarchy (account, project, title, sessions)
+
+Migration 016 organises everything as Claude account, project, chat, sessions. At every refresh the indexer
+([`identity.py`](../src/ccp/index/identity.py), [`sessions.py`](../src/ccp/index/sessions.py)):
+
+- **Links the chat** to its Claude account and project with `ccp.db.hierarchy.link_chat`. The account is the
+  environment record's `account_uuid`; if the record has none (or the chat has no record), the account uuid of
+  the transcript's `session-owner` lines (the latest). The project is the Git remote, else the folder, else the
+  `cwd` of the first main-transcript entry. Accounts and projects are never deleted.
+- **Title**: the latest `ai-title` line of the main transcript. **`is_empty`**: true when the main transcript has
+  no `prompt`, `response`, `tool_call` or `thinking` event (opened and closed, or only a slash command).
+  Git user name and e-mail come with the environment record.
+- **Sessions** (`chat_session`): rows the capture client reported (with a `run_key`) are used as they are and
+  never touched. A chat without any gets **inferred** sessions: a new one at the first line and after every gap
+  longer than `CCP_SESSION_IDLE_MINUTES` (default 30) between two `user`, `assistant` or `system` lines of the
+  main transcript (bookkeeping lines are written at odd times and are ignored). Inferred rows have
+  `start_source = 'inferred'`, `end_reason = 'inferred'`, no `run_key`, and keep their id when the chat grows. As
+  soon as the client reports a session, the inferred ones are removed.
+- **Which session an event is in**: no view was needed. `CHAT_SESSION_OF_EVENT` in `sessions.py` is a SQL
+  fragment: the latest session that started at or before the event.
+
+  ```sql
+  SELECT e.event_id, cs.seq
+    FROM event e
+    LEFT JOIN LATERAL (SELECT s.chat_session_id, s.seq FROM chat_session s
+                        WHERE s.session_id = e.session_id AND s.started_at <= e.occurred_at
+                        ORDER BY s.started_at DESC, s.seq DESC LIMIT 1) cs ON TRUE;
+  ```
+
 ## Session facts
 
 From the main transcript (not sub-agent streams) the indexer fills `session.started_at` (the earliest entry
@@ -188,12 +224,17 @@ per run, with:
 | `instructions` | the `prompt` of that call |
 | `result` | the text of the sub-agent's last plain reply (empty if it ended on a tool call) |
 | `started_at`, `ended_at`, `event_count` | the sub-agent's own transcript |
+| `effort` | the description's `effort` if it has one, else the **highest** `effort` (low, medium, high, xhigh, max) named by the agent's own assistant entries |
+| `workflow_run_id`, `workflow_name` | the Workflow run that started the agent. The capture client adds the run id (the folder `subagents/workflows/<run id>/`) to the description as `ccpWorkflowRunId`. A `workflow-subagent` captured before that has none: it belongs to the latest Workflow run launched at or before its first entry (the launching tool result names `toolUseResult.runId`). The name is that result's `workflowName` |
 
 A run exists as soon as its transcript is seen, even before the description arrives; the description fills in
 the rest later. A description that cannot be read is skipped and counted, and does not fail the job. The
 descriptions are read again at every job (they are tiny and stored by an upsert).
 
 Checked on two real sessions with a sub-agent (`Explore`): each run found its launching call and its prompt.
+The views `v_workflow_run` (one row per Workflow run, with its agents and launching call) and
+`v_slash_command` (name and arguments of each `/command`) read these columns and the events; on the chat
+`895d43d3` they give two runs (7 and 6 agents) and six `/model` commands.
 
 ## File changes
 
@@ -225,6 +266,18 @@ indexed before this feature are caught up at their next job.
 Checked on three real sessions: 34, 126 and 317 edit results gave exactly 34, 126 and 317 rows, each linked
 to its call, tool and prompt. Indexing the largest (5,097 events) took 18 s the first time (one event per statement, before batching) and 0.9 s when repeated.
 
+### Role of the file and tests added
+
+`file_role` sorts the path (the first rule that matches wins): **test** (a `tests`, `test` or `__tests__`
+folder; `test_*.py`, `*_test.py`, `conftest.py`, `*_test.go`, `*.spec.*`, `*.test.*`, `*Test(s).java/kt/cs`),
+**docs** (`*.md`, `*.rst`, `*.adoc`, a `docs` folder), **config** (`*.toml`, `*.yaml`, `*.yml`, `*.json`, `*.ini`,
+`*.cfg`, `.env*`, `Dockerfile*`), **code** (the usual source extensions), else **other**. `tests_added` counts the
+added lines that start a test definition: `def test_`, `async def test_`, `it(`, `test(`, `describe(`, `@Test`,
+`func Test`, `#[test]` (also `it.only(` and `#[tokio::test]`). Only the start of a line counts, so `x = test(1)`
+does not; documentation and configuration files count 0. The rules are
+[`fileroles.py`](../src/ccp/index/fileroles.py); rows stored before roles existed are completed at the next
+refresh.
+
 ## Test runs
 
 A shell call (`Bash` or `PowerShell`) whose command **starts** a known test runner gets a row in `test_run`:
@@ -243,15 +296,57 @@ The transcript records no exit code for a success, so the outcome is read from h
 | Refused by a permission decision | no row: it never ran | |
 
 **Limits:** the outcome is the exit code of the *command*, so `pytest | tail` reports the exit code of `tail`;
-the number of tests passed and failed is not read; a command with several runners counts once, for the first; a
-runner that is not on the list is missed. A call is turned into a row once, when its result has arrived.
+a command with several runners counts once, for the first; a runner that is not on the list is missed. A call
+is turned into a row once, when its result has arrived.
+
+### Counts and test cases
+
+The output of the run is read as well ([`testoutputs.py`](../src/ccp/index/testoutputs.py),
+[`testparsers.py`](../src/ccp/index/testparsers.py)) and gives `tests_passed`, `tests_failed`, `tests_skipped`
+and one `test_case` row per test the output names (name, outcome, first line of the message cut to 300
+characters; at most 500 per run, failures first, then skipped, then passed). `output_source` says where the text
+came from:
+
+| `output_source` | Meaning |
+| --- | --- |
+| `inline` | the result's own text (also set when the runner has no parser: the counts stay NULL) |
+| `tool_result_file` | the result only referenced a file (`<persisted-output>`); the file was uploaded to `sessions/<id>/tool-results/<name>` and was read |
+| `missing` | the file was not there (yet). The preview is **not** used: the summary is at the end of the output. The run is looked at again at every refresh |
+
+Parsers: pytest (summary line, `-v` lines, short summary with messages), unittest, jest and vitest, `go test`,
+`cargo test` (several result lines are added up), `dotnet test` (new and old summary). A count the output does
+not state is NULL, never a guess: `go test` without `-v` does not list passing tests, so `tests_passed` stays
+NULL. A script such as `npm test` is tried against every parser. Maven, Gradle, phpunit and rspec have no
+parser. A pytest `xpassed` counts as passed, `error` as failed, `xfailed` is not counted as skipped.
+
+## Corrections
+
+Rows of `correction` with `detected_by = 'rule'` are found at every refresh and replaced
+([`corrections.py`](../src/ccp/index/corrections.py)); rows found by the AI are not touched. Work on abandoned
+branches is not counted, except the rewind itself.
+
+| `kind` (`corrected_by`) | Rule | `trigger_event_id` / `fix_event_id` |
+| --- | --- | --- |
+| `test_fix` (test) | a failed run, edits, then a passing run of the same runner (the rows of `v_test_fix_cycle` with `edits_between > 0`) | the failed run's call / the passing run's call |
+| `command_retry` (claude) | a shell result that is an error with an exit code (not refused, not interrupted), and within the next 5 tool calls of the same transcript a shell command with the same first program (`cd x && CI=1 npm test` starts `npm`) | the failed result / the retrying call |
+| `rework` (claude) | an edit whose old lines overlap lines an earlier AI edit of the same file wrote, at most 30 minutes before; an earlier edit counts once | the earlier edit's result / the later edit's result |
+| `rewind` (developer) | a rewound prompt (`v_human_decision`) | the abandoned prompt / the prompt that replaced it |
+| `refused` (developer) | a refused tool call (`v_human_decision`) | the refused result / none |
+
+`chat_session_id` is the session the trigger event happened in. Notes are short categories (`pytest failed, 2
+edit(s), then passed`), never content. Limits: line ranges of a rework are compared as written, so edits above
+that moved the lines can hide or invent an overlap; `command_retry` does not judge whether the second command
+really was a retry.
 
 Checked on three real sessions: 14, 77 and 39 runs found, one of them a failure, none with an unknown outcome.
 
 ## Model usage and cost
 
 - `model_usage`: one row per model **response** (API message), with model, input, output, thinking, cache-read
-  and cache-creation tokens. Claude Code writes one entry per content block and repeats the same usage on each,
+  and cache-creation tokens, and since migration 016 the **effort** (`effort`: low, medium, high, xhigh or
+  max), the model that was asked for (`requested_model`) and the thinking time (`thinking_ms`: the sum of
+  `thinkingDurationMs` over the message's distinct entries; an entry written twice counts once), all from the
+  assistant entry's top-level keys. Claude Code writes one entry per content block and repeats the same usage on each,
   so rows are de-duplicated by the message id (the entry's own id if it has none); summing entries would count
   a response about three times over on real data. Join to `event` through `event_id` for the time and actor.
 - `session_cost` and `session_model_cost`: the session total and the per-model figures (tokens, cost), from the
@@ -282,6 +377,16 @@ table as restricted when access roles are set up (Step 5).
 
 The six questions the audit trail must answer are views on top of these tables: see
 [queries.md](queries.md).
+
+## Real-data check (stage 1)
+
+Two real chats indexed into a throwaway database (all migrations applied, the real bucket read-only): 7,693
+events; two accounts and two folder projects linked; both chats have a title and are not empty; 7 inferred
+sessions in one chat and 1 in the other; effort high 1056, low 60, medium 27 (7 responses name none); 1,143
+responses with a requested model, 808 with a thinking time; two Workflow runs found for 13 agents (11 other
+agents belong to none); 6 `/model` commands; file changes by role: 24 code, 11 docs, 2 test (9 tests added);
+8 pytest runs with 1,142 passed and 4 failed counted from their output and 2 test cases; corrections by rule: 13
+`command_retry`, 3 `refused`, 1 `rework`. `ccp-index rebuild --check` was identical on both chats, twice.
 
 ## Limits
 

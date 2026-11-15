@@ -103,7 +103,62 @@ leave it unchanged, so the record can be sent in parts and repeated safely.
 | 422 | Not JSON, empty, an unknown field, or a value that is not a short string without control characters |
 | 503 | Database temporarily unavailable: retry later |
 
-This is personal data (user name, host name, account e-mail): restrict access to it.
+This is personal data (user name, host name, account e-mail, Git identity): restrict access to it.
+
+Since migration 016 the record also has `account_uuid`, `full_name`, `organisation_role`, `machine_key` (a
+hash, never the raw machine id), `folder`, `git_remote` and `git_user_name` / `git_user_email`. A Git remote is
+stored without credentials even if a client sent them. Each record links the chat to its Claude account and
+project (`ccp.db.hierarchy`, see [database.md](database.md#the-chat-hierarchy-migration-016)). An older server
+refuses these fields with 422; the client then sends the others again.
+
+### `POST /v1/sessions/{session_id}/lifecycle`
+
+Records that a **session** of the chat started (SessionStart hook) or ended (SessionEnd hook), as a row of
+`chat_session`. Send the bearer token and one JSON object:
+
+```json
+{"kind": "start", "run_key": "6f1c2d3e-...", "at": "2026-11-15T17:35:02+00:00", "source": "resume", "commit": "<sha or null>"}
+{"kind": "end",   "run_key": "6f1c2d3e-...", "at": "2026-11-15T18:00:00+00:00", "reason": "logout", "commit": null}
+```
+
+The run key makes it idempotent: the same event again changes nothing, and a start and an end with the same key
+fill one row, in either order. A start also ends an earlier session of the chat that is still open
+(`end_reason = inferred`: Claude Code runs no SessionEnd before `/compact`), reopens the chat for the idle closer,
+and sets the chat's first `start_source` and `start_commit`; an end sets the chat's `end_reason` and `ended_at`.
+A source or reason this server does not know is stored as `unknown` or `other` rather than refused. Unknown keys
+are ignored.
+
+| Status | Meaning |
+| --- | --- |
+| 200 | Recorded: `{"recorded": true, "seq": <the session's number in the chat>}` |
+| 400 | Unsafe `session_id` |
+| 401 | Missing or wrong token |
+| 409 | The run key belongs to another chat |
+| 413 | Larger than 4 KB |
+| 422 | Not JSON, or `kind`, `run_key` (8 to 64 letters, digits, dashes), `at` (ISO 8601) or `commit` (hex) malformed |
+| 503 | Database temporarily unavailable: retry later |
+
+### `PUT /v1/sessions/{session_id}/tool-results/{name}`
+
+Stores one **tool-result file**: a large tool output that Claude Code keeps in
+`<chat folder>/tool-results/<name>` and only refers to from the transcript. The body is the file's text,
+**already redacted** by the client, as UTF-8. It is stored in MinIO at `sessions/<id>/tool-results/<name>`
+(see [storage.md](storage.md)); a changed file is stored next to it as `<name>@<first 16 hex of its SHA-256>`,
+so nothing stored is ever replaced. `key` in the answer is where this content is stored; the client reports the
+file's redactions against it.
+
+| Status | Meaning |
+| --- | --- |
+| 201 | Stored for the first time: `{"stored": true, "key": "sessions/<id>/tool-results/<name>"}` |
+| 200 | Already stored unchanged (`{"stored": false, "key": ...}`, nothing written), or a changed version stored next to it (`{"stored": true, "key": "...<name>@<hash>"}`) |
+| 400 | Unsafe `session_id` or name (letters, digits, `.`, `_`, `-`; at most 128; not ending in `.jsonl`) |
+| 401 | Missing or wrong token |
+| 413 | Larger than `CCP_MAX_CHUNK_BYTES` |
+| 422 | Not UTF-8 text |
+| 503 | Storage temporarily unavailable: retry later |
+
+`tool-results` is not allowed as a stream name for chunks, so a tool result can never look like a transcript
+chunk to the indexer.
 
 ### `POST /v1/sessions/{session_id}/redactions`
 
@@ -141,6 +196,8 @@ run, the laptop may have been closed, the network may have dropped for good. Clo
 
 - sets `status = 'closed'`, `ended_at` to the time of its last activity, and `end_reason` to
   `idle_timeout` (an end reason that is already known, such as `prompt_input_exit`, is kept);
+- ends a session of the chat (`chat_session`) that never received its end, at the last activity, with
+  `end_reason = idle_timeout`;
 - queues one final index job, so nothing indexed earlier is stale (an already-queued job is not
   duplicated);
 - is **undone by a late chunk**: the next upload reopens the session.
@@ -182,6 +239,9 @@ loop.
   server). `tests/integration/test_idle_sessions.py`: the closing SQL against real PostgreSQL.
 - `tests/unit/ingest/test_attachment_upload.py`: the attachment endpoint (digest check, idempotency,
   limits, outages).
+- `tests/unit/ingest/test_lifecycle_api.py`, `test_tool_result_api.py`: the lifecycle and tool-result
+  endpoints. `tests/integration/test_chat_hierarchy.py`: both, and the account and project linking, against
+  the real PostgreSQL and MinIO.
 - `tests/integration/test_ingest_api.py`: the API against the real PostgreSQL and MinIO
   (throwaway database and bucket), including recovery after a database outage, and one test over
   a real network socket with uvicorn.

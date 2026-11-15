@@ -71,8 +71,10 @@ each.
 | Fix loops and decisions | Test runs per day, fix loops by test runner, rewinds / refused tool calls / compactions per day, most expensive sessions |
 | Tokens by project, model and account | Total tokens, projects, Claude accounts, models; tokens by project, by model and by account; tokens per day by project; a table of usage by project, account and model |
 
-The token cards read `d_usage` (migration 015). A project is the folder the session ran in (its last part, for
-example `ccp_V2`), an account is a neutral name such as `account-3f9a1c`. An administrator can give both a real
+The token cards read `d_usage` (migrations 015, 016). A project is shown by the name of its Git repository, or
+else by the last part of its folder (for example `ccp_V2`); a home folder (`/home/<user>`, `/Users/<user>`,
+`C:\Users\<user>`, `/root`) is shown as a neutral `project-3f9a1c` instead, because its last part is the
+person's login name. An account is a neutral name such as `account-3f9a1c`. An administrator can give both a real
 name with `ccp-db label` (see [access.md](access.md)); the dashboard never shows an e-mail address or a full path.
 Tokens are Claude Code's own `cost-state` figures when the session has them; otherwise the recorded responses are
 summed and the cost stays empty (`token_source` says which).
@@ -90,6 +92,10 @@ summed and the cost stays empty (`token_source` says which).
 A new column or view for dashboards goes in a **new migration** that creates the view; then add it to
 `DASHBOARD_VIEWS` in [`db/readers.py`](../src/ccp/db/readers.py) and run `ccp-db create-reader` so that the role
 may read it.
+
+**After migration 016, run `ccp-db create-reader` again.** It recreates `d_usage` and adds `d_chat`. The
+migration passes the right to read `d_usage` on to the new view and grants `d_chat` to the same roles, so the
+usage dashboard keeps working; running the command makes sure the role matches `DASHBOARD_VIEWS` exactly.
 
 ## Notes and limits
 

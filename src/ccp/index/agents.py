@@ -30,6 +30,9 @@ class AgentMeta:
     model: str | None
     spawn_depth: int | None  # 1 = launched by the main conversation
     tool_use_id: str | None  # the id of the parent's tool call that launched this agent
+    effort: str | None = None  # reasoning effort, if the description names it
+    workflow_run_id: str | None = None  # the Workflow run that started it (added by the client)
+    workflow_name: str | None = None
 
 
 def is_meta_stream(stream: str) -> bool:
@@ -66,6 +69,11 @@ def parse_agent_meta(line: str) -> AgentMeta:
         model=_text(data.get("model")) or _text(data.get("pickedEffortModel")),
         spawn_depth=depth if isinstance(depth, int) and not isinstance(depth, bool) else None,
         tool_use_id=_text(data.get("toolUseId")),
+        # The client adds the run id of a Workflow sub-agent as "ccpWorkflowRunId" (the name of the
+        # folder subagents/workflows/<run id>/, which the description file itself does not hold).
+        effort=_text(data.get("effort")) or _text(data.get("pickedEffort")),
+        workflow_run_id=_text(data.get("ccpWorkflowRunId")) or _text(data.get("workflowRunId")),
+        workflow_name=_text(data.get("workflowName")),
     )
 
 

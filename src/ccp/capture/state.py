@@ -10,7 +10,8 @@ Layout::
     <state_dir>/<session_id>/<stream>.offset      the number (a plain integer)
     <state_dir>/<session_id>/<stream>.lock        exists while a sync of that stream runs
     <state_dir>/<session_id>/transcript_path      where the session transcript is (for catch-up)
-    <state_dir>/<session_id>/<name>.marker        a small remembered value (for example a hash)
+    <state_dir>/<session_id>/<name>.marker        a small remembered value (for example a hash, or a
+                                                  lifecycle event waiting to be sent)
 """
 
 from __future__ import annotations
@@ -75,6 +76,32 @@ class StateStore:
         temporary = path.with_suffix(".marker.tmp")
         temporary.write_text(value, encoding="utf-8")
         os.replace(temporary, path)
+
+    def remove_marker(self, session_id: str, name: str) -> None:
+        """Forget a remembered value (nothing happens if there is none)."""
+        path = self._session_dir(session_id) / f"{check_id('marker name', name)}.marker"
+        path.unlink(missing_ok=True)
+
+    def marker_names(self, session_id: str, prefix: str) -> list[str]:
+        """Return the names of a session's markers that start with ``prefix``, sorted."""
+        folder = self._session_dir(session_id)
+        if not folder.is_dir():
+            return []
+        return sorted(
+            path.name.removesuffix(".marker")
+            for path in folder.glob(f"{check_id('marker prefix', prefix)}*.marker")
+        )
+
+    def sessions_with_markers(self, prefix: str) -> list[str]:
+        """Return the ids of every session that has a marker starting with ``prefix``, sorted."""
+        if not self._directory.is_dir():
+            return []
+        pattern = f"{check_id('marker prefix', prefix)}*.marker"
+        return sorted(
+            folder.name
+            for folder in self._directory.iterdir()
+            if folder.is_dir() and any(folder.glob(pattern))
+        )
 
     def remember_transcript(self, session_id: str, transcript_path: Path) -> None:
         """Remember where a session's transcript is, so a later catch-up can find it."""

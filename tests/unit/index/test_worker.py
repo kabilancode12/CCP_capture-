@@ -8,7 +8,7 @@ import pytest
 from ccp.index.agents import AgentMeta
 from ccp.index.parser import ParsedEntry
 from ccp.index.repository import IndexJob, IndexRepositoryError
-from ccp.index.worker import index_session, process_next_job, run
+from ccp.index.worker import ChunkStore, index_session, process_next_job, run
 
 
 def _line(**entry: object) -> bytes:
@@ -36,6 +36,7 @@ class FakeRepository:
         self.failed: list[int] = []
         self.retry = True
         self.refreshed: list[str] = []
+        self.outputs: list[str] = []
         self.agents: dict[tuple[str, str], AgentMeta] = {}
 
     def claim_job(self) -> IndexJob | None:
@@ -53,6 +54,9 @@ class FakeRepository:
 
     def refresh_session(self, session_id: str) -> None:
         self.refreshed.append(session_id)
+
+    def refresh_test_outputs(self, session_id: str, store: ChunkStore) -> None:
+        self.outputs.append(session_id)
 
     def save_agent_meta(self, session_id: str, agent_id: str, meta: AgentMeta) -> None:
         self.agents[(session_id, agent_id)] = meta

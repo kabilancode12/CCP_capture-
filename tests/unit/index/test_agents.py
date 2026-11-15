@@ -82,3 +82,25 @@ def test_model_is_preferred_over_picked_effort_model() -> None:
 def test_an_unusable_model_falls_back_to_picked_effort_model(model: object) -> None:
     line = json.dumps({"model": model, "pickedEffortModel": "model-y"})
     assert parse_agent_meta(line).model == "model-y"
+
+
+def test_effort_and_the_workflow_run_are_read_from_the_description() -> None:
+    line = json.dumps(
+        {
+            "agentType": "workflow-subagent",
+            "effort": "high",
+            "ccpWorkflowRunId": "wf_1",
+            "workflowName": "build-stage",
+        }
+    )
+    meta = parse_agent_meta(line)
+    assert (meta.effort, meta.workflow_run_id, meta.workflow_name) == (
+        "high",
+        "wf_1",
+        "build-stage",
+    )
+
+
+def test_a_description_without_them_leaves_them_empty() -> None:
+    meta = parse_agent_meta('{"agentType": "Explore"}')
+    assert (meta.effort, meta.workflow_run_id, meta.workflow_name) == (None, None, None)

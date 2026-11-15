@@ -109,6 +109,7 @@ ALLOWED_TEXT_COLUMNS = {
     "session_id", "branch", "status", "surface", "entrypoint", "claude_code_version", "os_name",
     "run_mode", "auth_type", "model", "path", "tool", "change_type", "actor_class", "framework",
     "project", "account", "token_source",  # d_usage: labels or neutral names, never e-mail or paths
+    "chat_id", "effort",  # d_chat (migration 016): the chat's id and the highest effort level
 }  # fmt: skip
 
 

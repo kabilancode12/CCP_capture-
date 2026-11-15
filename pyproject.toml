@@ -55,6 +55,12 @@ ccp-audit = "ccp.audit.cli:main"
 ccp-dashboards = "ccp.dashboards.cli:main"
 # Upload transcripts from a developer machine.
 ccp-capture = "ccp.capture.cli:main"
+# The always-on server: ingestion API, indexer, catalog, decisions and the Explorer website.
+ccp-server = "ccp.server.main:main"
+# Readable catalog of the chats in MinIO, decisions with AI/human approval, the Explorer website.
+ccp-catalog = "ccp.catalog.cli:main"
+ccp-decisions = "ccp.decisions.cli:main"
+ccp-explorer = "ccp.explorer.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ccp"]

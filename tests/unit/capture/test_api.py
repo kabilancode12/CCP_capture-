@@ -8,7 +8,8 @@ from typing import Any
 
 import pytest
 
-from ccp.capture.api import ApiRejectedError, ApiUnavailableError, HttpApiClient
+from ccp.capture.api import ApiRejectedError, ApiUnavailableError, HttpApiClient, ToolResultReply
+from ccp.environment import EnvironmentRecord
 from ccp.redaction.records import RedactionRecord
 from ccp.settings import Secret
 
@@ -184,3 +185,42 @@ def test_errors_never_contain_the_token(client: HttpApiClient, script: _Script) 
     with pytest.raises(ApiUnavailableError) as unavailable:
         unreachable.put_chunk("s1", "main", 0, b"{}\n")
     assert TOKEN not in str(rejected.value) and TOKEN not in str(unavailable.value)
+
+
+def test_a_client_that_fails_fast_does_not_try_again_once_the_server_was_unreachable() -> None:
+    client = HttpApiClient("http://127.0.0.1:1", Secret(TOKEN), 2.0, fail_fast=True)
+    with pytest.raises(ApiUnavailableError, match="cannot reach"):
+        client.put_chunk("s1", "main", 0, b"{}\n")
+    with pytest.raises(ApiUnavailableError, match="not tried again"):
+        client.put_environment("s1", EnvironmentRecord(surface="terminal"))
+
+
+def test_a_server_that_answered_with_an_error_does_not_make_the_client_fail_fast(
+    script: _Script,
+) -> None:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(script))
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.02})
+    thread.start()
+    try:
+        client = HttpApiClient(
+            f"http://127.0.0.1:{server.server_port}", Secret(TOKEN), 5.0, fail_fast=True
+        )
+        script.status, script.body = 503, {"error": "database down"}
+        with pytest.raises(ApiUnavailableError, match="server error"):
+            client.put_chunk("s1", "main", 0, b"{}\n")
+        script.status, script.body = 200, {"stored": True}
+        assert client.put_chunk("s1", "main", 0, b"{}\n") is True
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def test_a_tool_result_reply_names_the_key_the_server_stored(
+    client: HttpApiClient, script: _Script
+) -> None:
+    script.body = {"stored": True, "key": "sessions/s1/tool-results/a.txt@0123456789abcdef"}
+    reply = client.put_tool_result("s1", "a.txt", b"text")
+    assert reply == ToolResultReply(True, "sessions/s1/tool-results/a.txt@0123456789abcdef")
+    script.body = {"stored": False}
+    assert client.put_tool_result("s1", "a.txt", b"text") == ToolResultReply(False, None)

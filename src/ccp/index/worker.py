@@ -8,7 +8,10 @@ more when the session is closed). A job means "bring the index of this session u
    position in the source file;
 3. for each new chunk, read every line and store one event per line;
 4. recompute what is derived from the events: abandoned branches, compactions, session facts, model
-   usage and cost, sub-agent runs.
+   usage and cost (with effort), sub-agent runs and their Workflow runs, file changes (with their
+   role), test runs, the chat's account, project, title and sessions, and corrections;
+5. read the output of test runs (inline, or from an uploaded tool-result file) into counts and test
+   cases.
 
 A sub-agent's small description file (stream ``agent-<id>.meta``) is not a transcript: it is read
 into the ``agent_run`` table instead of becoming events.
@@ -76,6 +79,9 @@ class JobRepository(Protocol):
     def refresh_session(self, session_id: str) -> None:
         """Recompute what is derived from the session's events (tree, compactions, facts)."""
 
+    def refresh_test_outputs(self, session_id: str, store: ChunkStore) -> None:
+        """Read the output of the session's test runs (it may be in an uploaded file)."""
+
 
 @dataclass(frozen=True)
 class IndexResult:
@@ -118,6 +124,9 @@ def index_session(store: ChunkStore, repository: JobRepository, session_id: str)
     # Always, even when no chunk was new: it is cheap, and it also brings sessions that were
     # indexed by an earlier version of the indexer up to date.
     repository.refresh_session(session_id)
+    # After the refresh, which creates the test runs; reads uploaded tool-result files, so it needs
+    # the store. Runs whose output file has not arrived yet are read again at the next refresh.
+    repository.refresh_test_outputs(session_id, store)
     return IndexResult(chunks, events, skipped)
 
 

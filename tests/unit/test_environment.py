@@ -4,6 +4,7 @@ import pytest
 
 from ccp.environment import (
     FIELD_NAMES,
+    LEGACY_FIELD_NAMES,
     MAX_VALUE_LENGTH,
     EnvironmentRecord,
     EnvironmentRecordError,
@@ -28,12 +29,21 @@ def test_a_later_record_replaces_known_fields_and_keeps_the_rest() -> None:
 
 
 def test_the_field_names_match_the_database_columns() -> None:
-    # session_env in migration 001 (plus the key column); a mismatch would break the upsert.
-    assert set(FIELD_NAMES) == {
+    # session_env in migrations 001 and 016 (plus the key column); a mismatch would break the upsert.
+    assert set(LEGACY_FIELD_NAMES) == {
         "claude_code_version", "entrypoint", "surface", "run_mode", "tool_shell", "hook_shell",
         "os_name", "os_version", "cpu_architecture", "access_path", "os_user", "hostname",
         "account_name", "account_email", "organisation_name", "organisation_uuid", "auth_type",
     }  # fmt: skip
+    assert set(FIELD_NAMES) - set(LEGACY_FIELD_NAMES) == {
+        "account_uuid", "full_name", "organisation_role", "machine_key", "folder", "git_remote",
+        "git_user_name", "git_user_email",
+    }  # fmt: skip
+
+
+def test_a_record_can_be_restricted_to_the_fields_an_older_server_knows() -> None:
+    record = EnvironmentRecord(surface="terminal", account_uuid="u-1", git_remote="x")
+    assert record.restricted_to(LEGACY_FIELD_NAMES) == EnvironmentRecord(surface="terminal")
 
 
 def test_a_valid_payload_is_parsed() -> None:

@@ -15,8 +15,13 @@ import pg8000.dbapi
 
 from ccp.db.connection import connect
 from ccp.index.agents import AgentMeta
+from ccp.index.corrections import refresh_corrections
 from ccp.index.filechanges import extract_file_change
+from ccp.index.identity import refresh_identity
 from ccp.index.parser import ParsedEntry
+from ccp.index.sessions import idle_minutes_from_environment, refresh_chat_sessions
+from ccp.index.testoutputs import MISSING, OutputStore, read_test_output
+from ccp.index.testparsers import parse_test_output
 from ccp.index.testruns import detect_test_runner, exit_code_of, outcome
 from ccp.index.tree import TreeNode, abandoned_event_ids, nearest_prompts
 from ccp.settings import DatabaseSettings
@@ -177,24 +182,49 @@ _REFRESH_SESSION_FACTS = """
 
 
 # One row per API message. The same message appears in several entries (one per content block)
-# with the same usage, so the first entry of each message is kept.
+# with the same usage, so the first entry of each message is kept, and it also names the effort and
+# the model that was asked for. The thinking time is the sum over the message's distinct entries
+# (an entry is sometimes written twice with one uuid; each thinking block has its own time). A row
+# that exists already is brought up to date, so chats indexed before these columns get them.
 _REFRESH_MODEL_USAGE = """
+    WITH entries AS (
+        SELECT session_id, COALESCE(payload #>> '{message,id}', entry_uuid) AS message_id,
+               event_id, COALESCE(entry_uuid, event_id::text) AS entry_key, raw_object_key,
+               raw_line_number, payload, json_bigint(payload -> 'thinkingDurationMs') AS thinking_ms
+          FROM event
+         WHERE session_id = %s AND event_type IN ('response', 'tool_call', 'thinking')
+           AND jsonb_typeof(payload #> '{message,usage}') = 'object'
+           AND COALESCE(payload #>> '{message,id}', entry_uuid) IS NOT NULL
+    ), first_entry AS (
+        SELECT DISTINCT ON (message_id) * FROM entries
+         ORDER BY message_id, raw_object_key, raw_line_number
+    ), thinking AS (
+        SELECT message_id, sum(thinking_ms)::bigint AS thinking_ms FROM (
+            SELECT DISTINCT ON (message_id, entry_key) message_id, thinking_ms FROM entries
+             WHERE thinking_ms IS NOT NULL
+             ORDER BY message_id, entry_key, raw_object_key, raw_line_number) distinct_entries
+         GROUP BY message_id
+    )
     INSERT INTO model_usage (session_id, message_id, event_id, model, input_tokens, output_tokens,
-                             thinking_tokens, cache_read_tokens, cache_creation_tokens)
-    SELECT DISTINCT ON (COALESCE(payload #>> '{message,id}', entry_uuid))
-           session_id, COALESCE(payload #>> '{message,id}', entry_uuid), event_id,
-           payload #>> '{message,model}',
-           json_bigint(payload #> '{message,usage,input_tokens}'),
-           json_bigint(payload #> '{message,usage,output_tokens}'),
-           json_bigint(payload #> '{message,usage,output_tokens_details,thinking_tokens}'),
-           json_bigint(payload #> '{message,usage,cache_read_input_tokens}'),
-           json_bigint(payload #> '{message,usage,cache_creation_input_tokens}')
-      FROM event
-     WHERE session_id = %s AND event_type IN ('response', 'tool_call', 'thinking')
-       AND jsonb_typeof(payload #> '{message,usage}') = 'object'
-       AND COALESCE(payload #>> '{message,id}', entry_uuid) IS NOT NULL
-     ORDER BY COALESCE(payload #>> '{message,id}', entry_uuid), raw_object_key, raw_line_number
-    ON CONFLICT (session_id, message_id) DO NOTHING
+                             thinking_tokens, cache_read_tokens, cache_creation_tokens, effort,
+                             requested_model, thinking_ms)
+    SELECT f.session_id, f.message_id, f.event_id,
+           f.payload #>> '{message,model}',
+           json_bigint(f.payload #> '{message,usage,input_tokens}'),
+           json_bigint(f.payload #> '{message,usage,output_tokens}'),
+           json_bigint(f.payload #> '{message,usage,output_tokens_details,thinking_tokens}'),
+           json_bigint(f.payload #> '{message,usage,cache_read_input_tokens}'),
+           json_bigint(f.payload #> '{message,usage,cache_creation_input_tokens}'),
+           CASE WHEN jsonb_typeof(f.payload -> 'effort') = 'string' THEN f.payload ->> 'effort' END,
+           CASE WHEN jsonb_typeof(f.payload -> 'requestedModel') = 'string'
+                THEN f.payload ->> 'requestedModel' END,
+           t.thinking_ms
+      FROM first_entry f LEFT JOIN thinking t USING (message_id)
+    ON CONFLICT (session_id, message_id) DO UPDATE SET
+        effort = EXCLUDED.effort, requested_model = EXCLUDED.requested_model,
+        thinking_ms = EXCLUDED.thinking_ms
+     WHERE (model_usage.effort, model_usage.requested_model, model_usage.thinking_ms)
+           IS DISTINCT FROM (EXCLUDED.effort, EXCLUDED.requested_model, EXCLUDED.thinking_ms)
 """
 
 # Session cost comes from the latest cost-state entry of the main transcript: its totals cover the
@@ -249,12 +279,60 @@ _REFRESH_MODEL_COSTS = """
 # A sub-agent's description (from its .meta stream). Uploaded once, so a repeat just sets it again.
 _SAVE_AGENT_META = """
     INSERT INTO agent_run (session_id, agent_id, agent_type, description, model, spawn_depth,
-                           tool_use_id)
-    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                           tool_use_id, effort, workflow_run_id, workflow_name)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     ON CONFLICT (session_id, agent_id) DO UPDATE SET
         agent_type = EXCLUDED.agent_type, description = EXCLUDED.description,
         model = EXCLUDED.model, spawn_depth = EXCLUDED.spawn_depth,
-        tool_use_id = EXCLUDED.tool_use_id
+        tool_use_id = EXCLUDED.tool_use_id, effort = EXCLUDED.effort,
+        workflow_run_id = EXCLUDED.workflow_run_id, workflow_name = EXCLUDED.workflow_name
+"""
+
+# The reasoning effort a sub-agent ran with: the highest one named by its own assistant entries
+# (an agent can change effort between turns). The description file does not name it (so far).
+_REFRESH_AGENT_EFFORT = """
+    UPDATE agent_run a SET effort = e.effort
+      FROM (SELECT substr(split_part(raw_object_key, '/', 3), 7) AS agent_id,
+                   (ARRAY['low', 'medium', 'high', 'xhigh', 'max'])[
+                       max(array_position(ARRAY['low', 'medium', 'high', 'xhigh', 'max'],
+                                          payload ->> 'effort'))] AS effort
+              FROM event
+             WHERE session_id = %s AND split_part(raw_object_key, '/', 3) ~ '^agent-'
+               AND event_type IN ('response', 'tool_call', 'thinking')
+             GROUP BY 1) e
+     WHERE a.session_id = %s AND a.agent_id = e.agent_id AND e.effort IS NOT NULL
+       AND a.effort IS DISTINCT FROM e.effort
+"""
+
+# The Workflow run of a sub-agent. The capture client writes it into the description (it knows the
+# folder subagents/workflows/<run id>/). Chats captured before that have a description without it:
+# a "workflow-subagent" then belongs to the latest Workflow run launched at or before its first
+# entry (a run is launched by a tool result naming its runId, see v_workflow_run). The run's name
+# comes from that launching result.
+_INFER_WORKFLOW_RUN = """
+    UPDATE agent_run a SET workflow_run_id = (
+        SELECT l.run_id FROM (
+            SELECT payload #>> '{toolUseResult,runId}' AS run_id, min(occurred_at) AS launched_at
+              FROM event
+             WHERE session_id = a.session_id AND event_type = 'tool_result'
+               AND payload #>> '{toolUseResult,runId}' IS NOT NULL AND occurred_at IS NOT NULL
+             GROUP BY 1) l
+         WHERE l.launched_at <= a.started_at
+         ORDER BY l.launched_at DESC, l.run_id DESC LIMIT 1)
+     WHERE a.session_id = %s AND a.workflow_run_id IS NULL AND a.agent_type = 'workflow-subagent'
+       AND a.started_at IS NOT NULL
+"""
+
+_NAME_WORKFLOW_RUN = """
+    UPDATE agent_run a SET workflow_name = w.name
+      FROM (SELECT payload #>> '{toolUseResult,runId}' AS run_id,
+                   max(payload #>> '{toolUseResult,workflowName}') AS name
+              FROM event
+             WHERE session_id = %s AND event_type = 'tool_result'
+               AND payload #>> '{toolUseResult,runId}' IS NOT NULL
+             GROUP BY 1) w
+     WHERE a.session_id = %s AND a.workflow_run_id = w.run_id AND a.workflow_name IS NULL
+       AND w.name IS NOT NULL
 """
 
 # Every sub-agent stream seen in the events has a run, even if its description has not arrived.
@@ -311,9 +389,10 @@ _REFRESH_AGENT_RUNS = """
 """
 
 
-# The edit results not yet turned into file_change rows. The big fields that the indexer does not
-# need (the whole old file, the old and new text) are cut out in the database, so they are not
-# sent over the connection. A result counts if it names a file and holds a patch list.
+# The edit results not yet turned into file_change rows (or whose row has no file role yet: a row
+# stored before roles existed is completed, see _INSERT_FILE_CHANGE). The big fields that the
+# indexer does not need (the whole old file, the old and new text) are cut out in the database, so
+# they are not sent over the connection. A result counts if it names a file and holds a patch list.
 _NEW_FILE_RESULTS = """
     SELECT e.event_id,
            e.payload #- '{toolUseResult,originalFile}' #- '{toolUseResult,oldString}'
@@ -322,15 +401,18 @@ _NEW_FILE_RESULTS = """
      WHERE e.session_id = %s
        AND jsonb_typeof(e.payload #> '{toolUseResult,filePath}') = 'string'
        AND jsonb_typeof(e.payload #> '{toolUseResult,structuredPatch}') = 'array'
-       AND NOT EXISTS (SELECT 1 FROM file_change f WHERE f.event_id = e.event_id)
+       AND NOT EXISTS (SELECT 1 FROM file_change f
+                        WHERE f.event_id = e.event_id AND f.file_role IS NOT NULL)
      ORDER BY e.event_id
 """
 
 _INSERT_FILE_CHANGE = """
     INSERT INTO file_change (session_id, event_id, tool_use_id, path, absolute_path, change_type,
-                             user_modified, lines_added, lines_removed, hunks)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-    ON CONFLICT (event_id) DO NOTHING
+                             user_modified, lines_added, lines_removed, hunks, file_role,
+                             tests_added)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
+    ON CONFLICT (event_id) DO UPDATE SET
+        file_role = EXCLUDED.file_role, tests_added = EXCLUDED.tests_added
 """
 
 # The call behind each change (the event holding the tool_use with that id) and its tool name.
@@ -394,6 +476,29 @@ _INSERT_TEST_RUN = """
     ON CONFLICT (call_event_id) DO NOTHING
 """
 
+# Test runs whose output has not been read yet, or whose output file was not there last time, with
+# the result's content and the file it names (if any). Reading is done once per run.
+_PENDING_OUTPUTS = """
+    SELECT t.test_run_id, t.framework, r.payload #> '{message,content}',
+           r.payload #>> '{toolUseResult,persistedOutputPath}'
+      FROM test_run t LEFT JOIN event r ON r.event_id = t.result_event_id
+     WHERE t.session_id = %s AND (t.output_source IS NULL OR t.output_source = 'missing')
+     ORDER BY t.test_run_id
+"""
+
+_SET_TEST_OUTPUT = """
+    UPDATE test_run SET tests_passed = %s, tests_failed = %s, tests_skipped = %s,
+                        output_source = %s
+     WHERE test_run_id = %s
+"""
+_DELETE_TEST_CASES = "DELETE FROM test_case WHERE test_run_id = %s"
+_INSERT_TEST_CASES = """
+    INSERT INTO test_case (test_run_id, position, name, outcome, message)
+    SELECT %s, v.position, v.name, v.outcome, v.message
+      FROM unnest(%s::integer[], %s::text[], %s::text[], %s::text[])
+           AS v(position, name, outcome, message)
+"""
+
 # Commands longer than this are cut: a test command is short, and a long one is a script.
 MAX_COMMAND_LENGTH = 2000
 
@@ -429,9 +534,18 @@ class IndexJob:
 class IndexRepository:
     """Database access for the indexer, backed by PostgreSQL."""
 
-    def __init__(self, settings: DatabaseSettings) -> None:
-        """Remember the connection settings; nothing is connected yet."""
+    def __init__(self, settings: DatabaseSettings, idle_minutes: int | None = None) -> None:
+        """Remember the connection settings; nothing is connected yet.
+
+        Args:
+            settings: The database.
+            idle_minutes: The gap in a chat's transcript that starts a new session when sessions
+                are inferred. Default: ``CCP_SESSION_IDLE_MINUTES`` or 30.
+        """
         self._settings = settings
+        self._idle_minutes = (
+            idle_minutes if idle_minutes is not None else idle_minutes_from_environment()
+        )
 
     def claim_job(self) -> IndexJob | None:
         """Take the oldest queued index job and mark it running; None if the queue is empty.
@@ -632,7 +746,7 @@ class IndexRepository:
 
         That is: which events are on abandoned branches, the compaction rows, the session's
         start time and branch, its model usage and cost, its sub-agent runs, file changes and
-        test runs.
+        test runs, its account, project, title and sessions, and its corrections.
         It reads the session's events, so the result is the same however many chunks were indexed
         in which order, and repeating it changes nothing. The session's lock
         (:data:`LOCK_SESSION`) is held, so two refreshes of one session never run at once.
@@ -663,8 +777,14 @@ class IndexRepository:
             cursor.execute(_REFRESH_MODEL_COSTS, (session_id, session_id))
             cursor.execute(_ENSURE_AGENT_RUNS, (session_id,))
             cursor.execute(_REFRESH_AGENT_RUNS, (session_id, session_id))
+            cursor.execute(_REFRESH_AGENT_EFFORT, (session_id, session_id))
+            cursor.execute(_INFER_WORKFLOW_RUN, (session_id,))
+            cursor.execute(_NAME_WORKFLOW_RUN, (session_id, session_id))
             self._refresh_file_changes(cursor, session_id, nodes)
             self._refresh_test_runs(cursor, session_id)
+            refresh_identity(cursor, session_id)
+            refresh_chat_sessions(cursor, session_id, self._idle_minutes)
+            refresh_corrections(cursor, session_id)
             connection.commit()
         except (pg8000.dbapi.Error, OSError) as error:
             connection.rollback()
@@ -701,6 +821,8 @@ class IndexRepository:
                     change.lines_added,
                     change.lines_removed,
                     json.dumps(change.hunks),
+                    change.file_role,
+                    change.tests_added,
                 ),
             )
         cursor.execute(_LINK_FILE_CHANGE_CALLS, (session_id,))
@@ -756,6 +878,72 @@ class IndexRepository:
                 )
                 break  # one run per call
 
+    def refresh_test_outputs(self, session_id: str, store: OutputStore) -> None:
+        """Read the output of the session's test runs and store the counts and test cases.
+
+        A run is read once: from its result, or from the tool-result file the result names. If that
+        file has not been uploaded yet the run is marked ``missing`` and tried again at the next
+        refresh. The files are read before the session's lock is taken, then everything is stored
+        in one transaction.
+        """
+        connection = self._open()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(_PENDING_OUTPUTS, (session_id,))
+            pending = cursor.fetchall()
+        except (pg8000.dbapi.Error, OSError) as error:
+            raise IndexRepositoryError(
+                f"reading test runs failed: {type(error).__name__}"
+            ) from error
+        finally:
+            connection.close()
+        results = []
+        for run_id, framework, content, persisted_path in pending:
+            text, source = (
+                read_test_output(store, session_id, content, persisted_path)
+                if content is not None
+                else (None, MISSING)
+            )
+            summary = parse_test_output(framework, text) if text is not None else None
+            results.append((run_id, summary, source))
+        if not results:
+            return
+        connection = self._open()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(LOCK_SESSION, (session_id,))
+            for run_id, summary, source in results:
+                cursor.execute(
+                    _SET_TEST_OUTPUT,
+                    (
+                        summary.passed if summary else None,
+                        summary.failed if summary else None,
+                        summary.skipped if summary else None,
+                        source,
+                        run_id,
+                    ),
+                )
+                cursor.execute(_DELETE_TEST_CASES, (run_id,))
+                if summary and summary.cases:
+                    cursor.execute(
+                        _INSERT_TEST_CASES,
+                        (
+                            run_id,
+                            list(range(1, len(summary.cases) + 1)),
+                            [_clean(case.name) for case in summary.cases],
+                            [case.outcome for case in summary.cases],
+                            [_clean(case.message) for case in summary.cases],
+                        ),
+                    )
+            connection.commit()
+        except (pg8000.dbapi.Error, OSError) as error:
+            connection.rollback()
+            raise IndexRepositoryError(
+                f"storing test results failed: {type(error).__name__}"
+            ) from error
+        finally:
+            connection.close()
+
     def save_agent_meta(self, session_id: str, agent_id: str, meta: AgentMeta) -> None:
         """Store a sub-agent's description (creating its run if needed). Safe to repeat."""
         self._run(
@@ -768,6 +956,9 @@ class IndexRepository:
                 meta.model,
                 meta.spawn_depth,
                 meta.tool_use_id,
+                meta.effort,
+                meta.workflow_run_id,
+                meta.workflow_name,
             ),
             "saving a sub-agent description",
         )
@@ -792,6 +983,11 @@ class IndexRepository:
             raise IndexRepositoryError(
                 f"database connection failed: {type(error).__name__}"
             ) from error
+
+
+def _clean(text: str | None) -> str | None:
+    """Text for the database: PostgreSQL cannot store the NUL character."""
+    return text.replace("\x00", "\ufffd") if text is not None else None
 
 
 def _sqlstate(error: pg8000.dbapi.DatabaseError) -> str | None:

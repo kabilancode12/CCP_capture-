@@ -1,4 +1,4 @@
-"""Token usage by project, account and model (migration 015), labels, and the auditor role.
+"""Token usage by project, account and model (migrations 015, 016), labels, and the auditor role.
 
 Checked on the invented session of ``story.py``: it runs in the folder ``/work/app`` and its
 ``cost-state`` entry records ``model-a`` (100 input, 50 output tokens, 1.40 USD) and ``helper-model``
@@ -127,6 +127,17 @@ def test_an_account_is_never_shown_by_its_e_mail_address(story: DatabaseSettings
     assert EMAIL not in account
 
 
+@pytest.mark.parametrize("folder", ["/home/kabilan", "/Users/kabilan/", "C:\\Users\\kabilan"])
+def test_a_home_folder_never_shows_the_login_name(folder: str, story: DatabaseSettings) -> None:
+    # The last part of a home folder is the person's login name.
+    _execute(story, "INSERT INTO session_env (session_id, folder) VALUES (%s, %s)", SESSION, folder)
+    projects = {row[0] for row in _rows(story, USAGE_SQL)}
+    projects |= {row[0] for row in _rows(story, "SELECT project FROM d_chat")}
+    assert len(projects) == 1
+    (project,) = projects
+    assert project.startswith("project-") and len(project) == len("project-") + 6
+
+
 def test_labels_replace_the_neutral_names(story: DatabaseSettings) -> None:
     _execute(
         story,
@@ -197,7 +208,7 @@ def test_the_dashboard_reader_sees_usage_but_not_the_labels_behind_it(
     reader = _as(story, role_name)
 
     assert len(_rows(reader, "SELECT * FROM d_usage")) == 2
-    for table in ("account_label", "project_label", "v_session_folder"):
+    for table in ("claude_account", "project", "chat", "v_session_folder"):
         with pytest.raises(pg8000.dbapi.DatabaseError, match="permission denied"):
             _rows(reader, f"SELECT * FROM {table}")  # noqa: S608
 
@@ -217,7 +228,7 @@ def test_the_auditor_can_read_everything_and_change_nothing(
     for sql in (
         "DELETE FROM event",
         "UPDATE session SET branch = 'x'",
-        "INSERT INTO account_label VALUES ('a@b', 'x')",
+        "INSERT INTO claude_account (email, label) VALUES ('a@b', 'x')",
         "CREATE TABLE loot (x int)",
     ):
         with pytest.raises(pg8000.dbapi.DatabaseError):
@@ -247,3 +258,71 @@ def test_the_label_commands_work_from_the_command_line(
     assert "billing-api" in captured.out
     assert "Label of the project removed." in captured.out
     assert "A label is 1 to 40" in captured.err
+
+
+def test_a_project_can_be_labelled_by_its_name_key_or_remote(story: DatabaseSettings) -> None:
+    _execute(
+        story,
+        "INSERT INTO project (project_key, key_kind, name, git_remote, folders) VALUES "
+        "('github.com/acme/billing', 'git_remote', 'billing', 'https://github.com/acme/billing', "
+        "'{/work/app}')",
+    )
+    connection = connect(story)
+    try:
+        set_project_label(connection, "billing", "by-name")
+        assert ("by-name", "billing") in {(i.label, i.name) for i in list_labels(connection)}
+        set_project_label(connection, "github.com/acme/billing", "by-key")
+        set_project_label(connection, "https://github.com/acme/billing", "by-remote")
+        listed = [item for item in list_labels(connection) if item.kind == "project"]
+        assert ("https://github.com/acme/billing", "by-remote", "billing") in [
+            (i.key, i.label, i.name) for i in listed
+        ]
+    finally:
+        connection.close()
+
+
+def test_a_name_shared_by_two_projects_or_an_unknown_name_is_refused(
+    story: DatabaseSettings,
+) -> None:
+    _execute(
+        story,
+        "INSERT INTO project (project_key, key_kind, name) VALUES "
+        "('github.com/a/app', 'git_remote', 'app'), ('github.com/b/app', 'git_remote', 'app')",
+    )
+    connection = connect(story)
+    try:
+        with pytest.raises(LabelError, match="3 projects"):
+            set_project_label(connection, "app", "x")
+        with pytest.raises(LabelError, match="No project"):
+            set_project_label(connection, "nothing-like-it", "x")
+    finally:
+        connection.close()
+
+
+def test_an_account_label_can_be_removed(story: DatabaseSettings) -> None:
+    connection = connect(story)
+    try:
+        set_account_label(connection, EMAIL, "claude1")
+        assert remove_label(connection, "account", EMAIL.upper()) is True
+        assert remove_label(connection, "account", EMAIL) is False
+        with pytest.raises(LabelError):
+            remove_label(connection, "machine", EMAIL)
+    finally:
+        connection.close()
+
+
+def test_an_account_not_seen_yet_is_labelled_by_its_uuid_or_e_mail_and_nothing_else(
+    story: DatabaseSettings,
+) -> None:
+    uuid_key = "AAAAAAAA-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+    connection = connect(story)
+    try:
+        set_account_label(connection, uuid_key, "by-uuid")
+        set_account_label(connection, uuid_key.lower(), "by-uuid-again")  # the same account
+        with pytest.raises(LabelError, match="No account"):
+            set_account_label(connection, "not-an-address", "x")
+    finally:
+        connection.close()
+    assert _rows(story, "SELECT account_uuid, email, label FROM claude_account") == [
+        (uuid_key.lower(), None, "by-uuid-again")
+    ]

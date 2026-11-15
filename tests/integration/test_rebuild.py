@@ -154,6 +154,30 @@ def test_without_check_the_index_is_deleted_and_a_job_is_queued(
     assert _rows(story, "SELECT status FROM job WHERE status = 'queued'") == [("queued",)]
 
 
+def test_a_chat_without_a_transcript_keeps_the_start_time_its_session_start_gave(
+    database: DatabaseSettings, object_store: ObjectStore
+) -> None:
+    # An empty chat (opened and closed in VS Code without a message) has no events: its start time
+    # comes from the SessionStart hook only (table chat_session), and a rebuild must keep it.
+    _execute(
+        database,
+        "INSERT INTO session (session_id, started_at) VALUES ('empty', '2026-11-15 09:00+00')",
+    )
+    _execute(
+        database,
+        "INSERT INTO chat_session (session_id, seq, start_source, started_at, run_key) VALUES "
+        "('empty', 1, 'startup', '2026-11-15 09:00+00', 'k1'), "
+        "('empty', 2, 'resume', '2026-11-15 10:00+00', 'k2')",
+    )
+    rebuild = RebuildRepository(database)
+    before = rebuild.fingerprints("empty")
+
+    result = rebuild_session(object_store, IndexRepository(database), rebuild, "empty", check=True)
+
+    assert result is not None and result.differences == ()
+    assert rebuild.fingerprints("empty") == before
+
+
 def test_other_sessions_and_the_capture_data_are_not_touched(
     story: DatabaseSettings, object_store: ObjectStore
 ) -> None:

@@ -4,8 +4,14 @@ One record per session (the ``session_env`` table). It is built in two stages on
 machine (see :mod:`ccp.capture.environment`) and sent as partial updates that the server merges:
 a field that is present replaces the stored value, a missing field leaves it as it was.
 
-This record is **personal data** (user name, host name, account e-mail). It is collected on
-purpose, as the plan says, and is kept even in private mode. Access to it should be restricted.
+This record is **personal data** (user name, host name, account e-mail, Git identity). It is
+collected on purpose, as the plan says, and is kept even in private mode. Access to it should be
+restricted.
+
+Compatibility: the server refuses fields it does not know. A newer client therefore sends only
+:data:`LEGACY_FIELD_NAMES` again when an older server refuses the whole record (see
+:meth:`ccp.capture.client.CaptureClient.report_environment`), and an older client simply never sends
+the newer fields.
 """
 
 from __future__ import annotations
@@ -47,6 +53,15 @@ class EnvironmentRecord:
     organisation_name: str | None = None
     organisation_uuid: str | None = None
     auth_type: str | None = None  # subscription | api_key
+    # Added with migration 016 (the chat hierarchy). Observed on Claude Code 2.1.325.
+    account_uuid: str | None = None  # oauthAccount.accountUuid: names the Claude account
+    full_name: str | None = None  # oauthAccount.fullName
+    organisation_role: str | None = None  # oauthAccount.organizationRole
+    machine_key: str | None = None  # first 16 hex of SHA-256 of machineID (never the raw value)
+    folder: str | None = None  # the hook's working folder (cwd)
+    git_remote: str | None = None  # `git remote get-url origin`, without user name or password
+    git_user_name: str | None = None  # git config user.name
+    git_user_email: str | None = None  # git config user.email
 
     def to_payload(self) -> dict[str, str]:
         """Return only the fields that are known, as a JSON-ready dictionary."""
@@ -57,8 +72,15 @@ class EnvironmentRecord:
         merged = {**self.to_payload(), **other.to_payload()}
         return EnvironmentRecord(**merged)
 
+    def restricted_to(self, names: tuple[str, ...]) -> EnvironmentRecord:
+        """Return a record with only the fields named in ``names`` (the others unknown)."""
+        return EnvironmentRecord(**{k: v for k, v in self.to_payload().items() if k in names})
+
 
 FIELD_NAMES: tuple[str, ...] = tuple(f.name for f in fields(EnvironmentRecord))
+
+# The fields a server from before migration 016 accepts.
+LEGACY_FIELD_NAMES: tuple[str, ...] = FIELD_NAMES[: FIELD_NAMES.index("account_uuid")]
 
 
 def parse_environment(payload: Any) -> EnvironmentRecord:

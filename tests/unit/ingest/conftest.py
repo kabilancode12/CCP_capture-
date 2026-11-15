@@ -7,7 +7,8 @@ from starlette.testclient import TestClient
 
 from ccp.environment import EnvironmentRecord
 from ccp.ingest.app import IngestService
-from ccp.ingest.repository import RepositoryError
+from ccp.ingest.repository import RepositoryError, RunKeyConflictError
+from ccp.lifecycle import LifecycleEvent
 from ccp.redaction.records import RedactionRecord
 from ccp.settings import Secret
 from ccp.storage import StorageError
@@ -52,6 +53,8 @@ class FakeRepository:
         self.recorded: list[str] = []
         self.redactions: list[tuple[str, list[RedactionRecord]]] = []
         self.environments: list[tuple[str, EnvironmentRecord]] = []
+        self.lifecycle: list[tuple[str, LifecycleEvent]] = []
+        self.run_keys: dict[str, tuple[str, int]] = {}  # run key -> (chat, seq)
         self.down = False
 
     def record_chunk(self, session_id: str) -> None:
@@ -68,6 +71,16 @@ class FakeRepository:
         if self.down:
             raise RepositoryError("down")
         self.environments.append((session_id, record))
+
+    def record_lifecycle(self, session_id: str, event: LifecycleEvent) -> int:
+        if self.down:
+            raise RepositoryError("down")
+        chat, seq = self.run_keys.get(event.run_key, (session_id, len(self.run_keys) + 1))
+        if chat != session_id:
+            raise RunKeyConflictError("the run key belongs to another chat")
+        self.run_keys[event.run_key] = (chat, seq)
+        self.lifecycle.append((session_id, event))
+        return seq
 
     def ping(self) -> None:
         if self.down:

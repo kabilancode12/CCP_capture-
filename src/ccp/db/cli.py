@@ -8,8 +8,9 @@ Examples:
     ccp-db rollback --steps 2     # undo the latest two
     ccp-db create-reader          # a read-only role for dashboards (password: CCP_READER_PASSWORD)
     ccp-db create-auditor         # a read-only role for everything (password: CCP_AUDITOR_PASSWORD)
-    ccp-db labels                 # list Claude accounts and project folders with their labels
+    ccp-db labels                 # list Claude accounts and projects with their labels
     ccp-db label account someone@example.com claude1
+    ccp-db label project billing billing-api          # by project name, key or folder
     ccp-db label project /home/dev/work/billing billing-api
     ccp-db unlabel account someone@example.com
 
@@ -71,14 +72,18 @@ def build_parser() -> argparse.ArgumentParser:
         "create-auditor", help="create or update the read-only role that can read everything"
     )
     auditor.add_argument("--name", default=DEFAULT_AUDITOR, help="role name (default %(default)s)")
-    commands.add_parser("labels", help="list Claude accounts and project folders with their labels")
-    label = commands.add_parser("label", help="give a Claude account or a project folder a label")
+    commands.add_parser("labels", help="list Claude accounts and projects with their labels")
+    label = commands.add_parser("label", help="give a Claude account or a project a label")
     label.add_argument("kind", choices=("account", "project"))
-    label.add_argument("key", help="the account's e-mail address, or the project folder")
+    label.add_argument(
+        "key", help="the account's e-mail address or uuid, or the project's name, key or folder"
+    )
     label.add_argument("label", help="the name shown on the dashboards, for example claude1")
     unlabel = commands.add_parser("unlabel", help="remove a label")
     unlabel.add_argument("kind", choices=("account", "project"))
-    unlabel.add_argument("key", help="the account's e-mail address, or the project folder")
+    unlabel.add_argument(
+        "key", help="the account's e-mail address or uuid, or the project's name, key or folder"
+    )
     return parser
 
 
@@ -128,7 +133,8 @@ def _run_label_command(connection: pg8000.dbapi.Connection, args: argparse.Names
     """Run ``labels``, ``label`` or ``unlabel`` and print the outcome."""
     if args.command == "labels":
         for item in list_labels(connection):
-            print(f"{item.kind:8}  {item.label or '(no label)':20}  {item.key}")
+            name = f"  ({item.name})" if item.name else ""
+            print(f"{item.kind:8}  {item.label or '(no label)':20}  {item.key}{name}")
     elif args.command == "label":
         setter = set_account_label if args.kind == "account" else set_project_label
         setter(connection, args.key, args.label)

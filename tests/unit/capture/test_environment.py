@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -6,9 +7,12 @@ import pytest
 from ccp.capture.environment import (
     MAX_TRANSCRIPT_LINES,
     HostInfo,
+    collect_environment,
     collect_process_environment,
     collect_transcript_environment,
+    machine_key,
 )
+from ccp.capture.gitinfo import GitFacts
 from ccp.environment import MAX_VALUE_LENGTH
 
 HOST = HostInfo(
@@ -57,7 +61,68 @@ def test_the_process_record_has_machine_account_and_surface(home: Path) -> None:
         "organisation_name": "Acme",
         "organisation_uuid": "00000000-0000-0000-0000-000000000001",
         "auth_type": "subscription",
+        "full_name": "Dev Eloper",
     }
+
+
+# Observed on Claude Code 2.1.325: the account uuid, role and machine id (invented values here).
+FULL_CONFIG = {
+    "machineID": "f" * 64,
+    "oauthAccount": {
+        **ACCOUNT["oauthAccount"],
+        "accountUuid": "11111111-2222-3333-4444-555555555555",
+        "organizationRole": "admin",
+    },
+}
+
+
+def _fake_git(folder: Path) -> GitFacts:
+    return GitFacts(
+        remote="https://github.com/acme/app.git", user_name="Dev", user_email="dev@example.com"
+    )
+
+
+def test_the_account_uuid_role_and_a_hash_of_the_machine_id_are_collected(tmp_path: Path) -> None:
+    (tmp_path / ".claude.json").write_text(json.dumps(FULL_CONFIG), encoding="utf-8")
+    record = collect_process_environment({}, tmp_path, HOST)
+    assert record.account_uuid == "11111111-2222-3333-4444-555555555555"
+    assert record.organisation_role == "admin"
+    assert record.machine_key == hashlib.sha256(("f" * 64).encode()).hexdigest()[:16]
+    assert "f" * 64 not in repr(record.to_payload())  # never the raw machine id
+
+
+@pytest.mark.parametrize("value", [None, "", "  ", 5, ["x"]])
+def test_a_missing_or_odd_machine_id_gives_no_machine_key(value: object) -> None:
+    assert machine_key(value) is None
+
+
+def test_the_folder_and_git_facts_come_from_the_working_folder(home: Path) -> None:
+    asked: list[Path] = []
+
+    def git(folder: Path) -> GitFacts:
+        asked.append(folder)
+        return _fake_git(folder)
+
+    record = collect_process_environment({}, home, HOST, cwd=Path("/work/app"), git_facts=git)
+    assert asked == [Path("/work/app")]
+    assert (record.folder, record.git_remote) == (
+        str(Path("/work/app")),
+        "https://github.com/acme/app.git",
+    )
+    assert (record.git_user_name, record.git_user_email) == ("Dev", "dev@example.com")
+
+
+def test_without_a_working_folder_git_is_not_asked(home: Path) -> None:
+    def git(folder: Path) -> GitFacts:
+        raise AssertionError("git must not be asked")
+
+    record = collect_process_environment({}, home, HOST, git_facts=git)
+    assert record.folder is None and record.git_remote is None
+
+
+def test_collect_environment_passes_the_working_folder_on(home: Path, tmp_path: Path) -> None:
+    record = collect_environment({}, home, None, HOST, cwd=tmp_path)
+    assert record.folder == str(tmp_path)
 
 
 def test_the_vscode_extension_is_recognised_from_the_entrypoint(home: Path) -> None:

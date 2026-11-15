@@ -7,10 +7,14 @@ the table's rows for one session, written without the database's own ids (an eve
 the object and line it came from, never by ``event_id``), so two builds of the same transcript have
 the same fingerprints.
 
-What is rebuilt: events, thinking, model usage and cost, compactions, sub-agent runs, file changes,
-test runs, and the session's start time and branch. What is never touched: the session row itself,
-the environment record and the redaction log (they come from the capture client, not from the
-transcript).
+What is rebuilt: events, thinking, model usage and cost (with effort), compactions, sub-agent runs
+(with their Workflow run), file changes (with their role), test runs and their test cases, the
+corrections found by rule, the sessions the indexer inferred, and the session's start time, branch,
+title and empty flag. What is never touched: the session row itself, the environment record and the
+redaction log (they come from the capture client, not from the transcript), the Claude accounts and
+projects with their labels, decisions, the explorer's users and access log, and the sessions the
+capture client reported (``chat_session`` rows with a run key). The account and project of a chat
+are linked again by the indexer, not deleted.
 """
 
 from __future__ import annotations
@@ -72,6 +76,9 @@ _FINGERPRINTS: dict[str, str] = {
             "m.thinking_tokens",
             "m.cache_read_tokens",
             "m.cache_creation_tokens",
+            "m.effort",
+            "m.requested_model",
+            "m.thinking_ms",
         )
         + " FROM model_usage m JOIN event e USING (event_id) WHERE m.session_id = %s"
         " ORDER BY m.message_id"
@@ -123,6 +130,9 @@ _FINGERPRINTS: dict[str, str] = {
             "a.started_at",
             "a.ended_at",
             "a.event_count",
+            "a.effort",
+            "a.workflow_run_id",
+            "a.workflow_name",
         )
         + " FROM agent_run a LEFT JOIN event l ON l.event_id = a.launch_event_id"
         " WHERE a.session_id = %s ORDER BY a.agent_id"
@@ -143,6 +153,8 @@ _FINGERPRINTS: dict[str, str] = {
             "f.lines_added",
             "f.lines_removed",
             "f.hunks::text",
+            "f.file_role",
+            "f.tests_added",
         )
         + " FROM file_change f JOIN event e ON e.event_id = f.event_id"
         " LEFT JOIN event c ON c.event_id = f.call_event_id"
@@ -159,15 +171,69 @@ _FINGERPRINTS: dict[str, str] = {
             "t.framework",
             "t.passed",
             "t.exit_code",
+            "t.tests_passed",
+            "t.tests_failed",
+            "t.tests_skipped",
+            "t.output_source",
         )
         + " FROM test_run t JOIN event c ON c.event_id = t.call_event_id"
         " LEFT JOIN event r ON r.event_id = t.result_event_id"
         " WHERE t.session_id = %s ORDER BY c.raw_object_key, c.raw_line_number"
     ),
+    "test_case": (
+        "SELECT "  # noqa: S608
+        + _row(_event_key("c"), "k.position", "k.name", "k.outcome", "k.message")
+        + " FROM test_case k JOIN test_run t USING (test_run_id)"
+        " JOIN event c ON c.event_id = t.call_event_id"
+        " WHERE t.session_id = %s ORDER BY c.raw_object_key, c.raw_line_number, k.position"
+    ),
+    # Corrections found by rule. The ones the distillation found (detected_by 'ai') are not index
+    # data and are left out. The session is named by its number.
+    "correction": (
+        "SELECT "  # noqa: S608
+        + _row(
+            "k.kind",
+            "k.corrected_by",
+            _event_key("t"),
+            _event_key("f"),
+            "k.note",
+            "cs.seq",
+        )
+        + " FROM correction k JOIN event t ON t.event_id = k.trigger_event_id"
+        " LEFT JOIN event f ON f.event_id = k.fix_event_id"
+        " LEFT JOIN chat_session cs ON cs.chat_session_id = k.chat_session_id"
+        " WHERE k.session_id = %s AND k.detected_by = 'rule'"
+        " ORDER BY k.kind, t.raw_object_key, t.raw_line_number"
+    ),
+    "chat_session": (
+        "SELECT "  # noqa: S608
+        + _row(
+            "seq",
+            "start_source",
+            "started_at",
+            "ended_at",
+            "end_reason",
+            "start_commit",
+            "end_commit",
+            "run_key",
+        )
+        + " FROM chat_session WHERE session_id = %s ORDER BY seq"
+    ),
     "session": (
         "SELECT "  # noqa: S608
-        + _row("started_at", "branch")
-        + " FROM session WHERE session_id = %s"
+        + _row(
+            "s.started_at",
+            "s.branch",
+            "s.title",
+            "s.is_empty",
+            "s.git_user_name",
+            "s.git_user_email",
+            "a.account_uuid",
+            "lower(a.email)",
+            "p.project_key",
+        )
+        + " FROM session s LEFT JOIN claude_account a ON a.account_id = s.account_id"
+        " LEFT JOIN project p ON p.project_id = s.project_id WHERE s.session_id = %s"
     ),
 }
 
@@ -187,7 +253,16 @@ _RESET_STATEMENTS = (
     "DELETE FROM session_cost WHERE session_id = %s",
     "DELETE FROM session_model_cost WHERE session_id = %s",
     "DELETE FROM event WHERE session_id = %s",
-    "UPDATE session SET started_at = NULL, branch = NULL WHERE session_id = %s",
+    # The sessions the indexer inferred go; those the capture client reported (they have a run key)
+    # stay. Accounts, projects, labels, decisions and the explorer's users are not index data and
+    # are never touched.
+    "DELETE FROM chat_session WHERE session_id = %s AND run_key IS NULL",
+    # The start time goes back to what the session starts said (the transcript's first line replaces
+    # it again), so a chat without a transcript keeps the start time it had. The title and the
+    # empty flag are read from the transcript again.
+    "UPDATE session s SET branch = NULL, title = NULL, is_empty = FALSE,"
+    " started_at = (SELECT min(r.started_at) FROM chat_session r WHERE r.session_id = s.session_id)"
+    " WHERE s.session_id = %s",
 )
 
 

@@ -7,6 +7,10 @@ failing exit code as a reason to stop.
 
 The log file is ``<state folder>/hook.log`` (rotated at 1 MB, three old files kept). It contains
 event names, ids, counts and short reasons: never prompts, answers, file content, tokens or paths.
+
+Kill switch: when ``CCP_CAPTURE_DISABLED`` is ``1`` or ``true``, the hook does nothing at all (no
+upload, no log line, no output; exit code 0). Background Claude Code runs started by CCP itself set
+it, so that they are not captured.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ from pathlib import Path
 from ccp.capture.api import HttpApiClient
 from ccp.capture.client import CaptureClient
 from ccp.capture.environment import collect_environment
+from ccp.capture.gitinfo import read_head
 from ccp.capture.hooks import HookHandler, parse_payload
 from ccp.capture.process import spawn_detached
 from ccp.capture.snapshots.service import snapshot_service_from
@@ -30,6 +35,8 @@ from ccp.settings import ClientSettings, SettingsError, load_client_settings
 LOG_FILE_NAME = "hook.log"
 LOG_MAX_BYTES = 1_000_000
 LOG_BACKUPS = 3
+
+DISABLE_VARIABLE = "CCP_CAPTURE_DISABLED"
 
 logger = logging.getLogger("ccp.capture.hook")
 
@@ -44,26 +51,33 @@ def build_handler(settings: ClientSettings, env: Mapping[str, str], home: Path) 
     """
     state = StateStore(settings.state_dir)
     client = CaptureClient(
-        HttpApiClient(settings.api_url, settings.token, settings.timeout_seconds),
+        HttpApiClient(settings.api_url, settings.token, settings.timeout_seconds, fail_fast=True),
         state,
         chunk_bytes=settings.chunk_bytes,
         budget_seconds=settings.budget_seconds,
     )
 
-    def start_flush(session_id: str, transcript: Path, cwd: Path | None) -> None:
-        # The detached process uploads what is left and takes the final code snapshot.
+    def start_flush(session_id: str, transcript: Path | None, cwd: Path | None) -> None:
+        # The detached process sends the session end, uploads what is left and takes the final
+        # code snapshot.
         command = [sys.executable, "-m", "ccp.capture", "flush", "--session-id", session_id]
         if cwd is not None:
             command += ["--cwd", str(cwd)]
-        spawn_detached([*command, str(transcript)])
+        spawn_detached(command + ([str(transcript)] if transcript is not None else []))
 
     return HookHandler(
         client,
         state,
-        lambda transcript: collect_environment(env, home, transcript),
+        lambda transcript, cwd: collect_environment(env, home, transcript, cwd=cwd),
         start_flush,
         snapshot_service_from(settings, state),
+        read_commit=read_head,
     )
+
+
+def capture_disabled(env: Mapping[str, str]) -> bool:
+    """True if ``CCP_CAPTURE_DISABLED`` switches capture off (``1`` or ``true``, any case)."""
+    return env.get(DISABLE_VARIABLE, "").strip().lower() in ("1", "true")
 
 
 def run_hook(stdin_text: str, env: Mapping[str, str], home: Path) -> int:
@@ -77,6 +91,8 @@ def run_hook(stdin_text: str, env: Mapping[str, str], home: Path) -> int:
     Returns:
         Always 0.
     """
+    if capture_disabled(env):
+        return 0
     default_log_folder = home / ".ccp" / "capture"
     handler: logging.Handler | None = None
     try:

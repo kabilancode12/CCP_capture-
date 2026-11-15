@@ -5,7 +5,7 @@ Two levels of access, so that everybody can see usage and only a few people can 
 ========  ===========  ====================================================================
 Role      Default name What it may read
 ========  ===========  ====================================================================
-reader    ccp_reader   Only the dashboard views (``d_session``, ``d_usage`` and the others):
+reader    ccp_reader   Only the dashboard views (``d_session``, ``d_usage``, ``d_chat`` ...):
                        counts, tokens, costs and short labels. Never prompts, replies, e-mail
                        addresses or names of people and machines. Metabase connects with it,
                        so every developer can open the dashboards.
@@ -16,7 +16,10 @@ auditor   ccp_auditor  Every table and view, read-only: the full chat history, t
 
 Neither role can change anything. Running a command again is safe: it brings an existing role up to
 date (new password, current grants). Run ``ccp-db create-auditor`` again after a migration that adds
-tables, so that the auditor can read them too.
+tables, so that the auditor can read them too, and ``ccp-db create-reader`` again after a migration
+that adds or recreates a dashboard view. Migration 016 recreates ``d_usage`` and adds ``d_chat``: it
+passes the right to read ``d_usage`` on and grants ``d_chat`` to the same roles, but run both
+commands after it all the same.
 """
 
 from __future__ import annotations
@@ -25,7 +28,15 @@ import re
 
 import pg8000.dbapi
 
-DASHBOARD_VIEWS = ("d_session", "d_model_cost", "d_edit", "d_test_run", "d_fix_loop", "d_usage")
+DASHBOARD_VIEWS = (
+    "d_session",
+    "d_model_cost",
+    "d_edit",
+    "d_test_run",
+    "d_fix_loop",
+    "d_usage",
+    "d_chat",
+)
 DEFAULT_READER = "ccp_reader"
 DEFAULT_AUDITOR = "ccp_auditor"
 

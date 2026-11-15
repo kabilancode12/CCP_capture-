@@ -6,7 +6,8 @@
 #   docker compose --env-file .env -f infra/docker-compose.yml down -v     # deletes data
 #
 # Credentials come from `.env` (see `.env.example`); none are stored in this file.
-# Ports are bound to 127.0.0.1 so the services are reachable from this machine only.
+# Ports are bound to 127.0.0.1 so the services are reachable from this machine only (the server
+# can be opened to the network with CCP_SERVER_BIND, see docs/install.md).
 
 name: ccp
 
@@ -45,6 +46,35 @@ services:
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
+
+  # The always-on CCP server: ingestion API + indexer (+ plug-ins) in one process, started with the
+  # stack and restarted by Docker. It reads the same `.env` as everything else, but inside the
+  # Compose network PostgreSQL and MinIO are reached by service name, so those values are set below.
+  # Stop any `ccp-ingest` / `ccp-index` you started by hand first: both use port 8000.
+  # Plug-ins are off until CCP_CATALOG_ENABLED, CCP_DECISIONS_ENABLED or CCP_EXPLORER_ENABLED is true.
+  ccp-server:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    image: ccp-server:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    env_file:
+      - ../.env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_SECURE: "false"
+      CCP_API_HOST: 0.0.0.0
+      CCP_API_PORT: "8000"
+      CCP_SERVER_MIGRATE: "true"
+    ports:
+      - "${CCP_SERVER_BIND:-127.0.0.1}:8000:8000"
 
   # Dashboards (optional, so the normal stack does not start it):
   #   docker compose --env-file .env -f infra/docker-compose.yml --profile dashboards up -d

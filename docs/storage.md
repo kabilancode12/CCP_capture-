@@ -26,6 +26,8 @@ agent id) is validated, so a value such as `../other` cannot escape its folder.
 | --- | --- |
 | `sessions/<session_id>/main/<offset>.jsonl` | A chunk of the session transcript |
 | `sessions/<session_id>/agent-<agent_id>/<offset>.jsonl` | A chunk of a sub-agent transcript |
+| `sessions/<session_id>/tool-results/<name>` | A large tool output Claude Code kept in a file next to the transcript (redacted text). `tool-results` is never a stream name, and `<name>` never ends in `.jsonl` |
+| `sessions/<session_id>/tool-results/<name>@<hash>` | A later version of that file, if it changed (`<hash>`: the first 16 hex digits of the new content's SHA-256). Stored objects are never replaced |
 | `attachments/<first 2 hex>/<sha256>` | An attachment body, stored once |
 
 `<offset>` is the byte position in the source file where the chunk starts, zero-padded to 12

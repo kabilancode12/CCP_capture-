@@ -6,6 +6,33 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
 
 ### Added
 
+- Chat hierarchy (migration 016): Claude account (`claude_account`) -> project (`project`, keyed by the
+  normalised Git remote or the folder) -> chat (`session`, view `chat`) -> sessions of a chat (`chat_session`),
+  plus the tables later steps fill (`test_case`, `correction`, `decision`, `ui_user`, `ui_access_log`) and
+  the views `d_chat`, `v_slash_command` and `v_workflow_run`. Labels move from `account_label` and
+  `project_label` into `claude_account.label` and `project.label`; `ccp-db label project` accepts a project
+  name, key or folder; a folder labelled before any chat ran in it keeps its label when the first chat
+  arrives, and a folder project (with its chats and label) is merged into the Git project when the folder
+  gets a Git remote, so one repository is one project. A home folder is shown on dashboards as a neutral
+  `project-<hash>`, never by its last part (the login name). Decision evidence points at raw transcript lines (`decision.evidence_lines`), not event ids, so it
+  survives a rebuild. Windows folders are keyed with a lower-case drive letter and backslashes.
+  **After migrating, run `ccp-db create-reader` and `ccp-db create-auditor` again.** The migration keeps the
+  existing right to read `d_usage` and gives the same roles `d_chat`, but only re-running the commands brings
+  the roles exactly up to date (the auditor needs them for the new tables and views).
+- Capture client: the environment record adds the account uuid, full name and role, a hash of the machine id,
+  the folder, the Git remote (without credentials) and the Git identity; SessionStart and SessionEnd report
+  each session of a chat (`POST /v1/sessions/{id}/lifecycle`); tool-result files are redacted and uploaded
+  (`PUT /v1/sessions/{id}/tool-results/{name}`; a file holding JSON is redacted value by value, as transcript
+  lines are; a changed file is stored as a new version next to the first, never over it); Workflow sub-agent
+  descriptions carry their run id; and `CCP_CAPTURE_DISABLED=1` switches the hooks off. All of it works
+  against an older server (logged once); an environment record that an older server took only in part is
+  sent whole again an hour later. SessionEnd no longer waits for Git: the background flush adds the end
+  commit, and it takes no final code snapshot for a chat without a transcript. The hooks' API client fails
+  fast: once a request could not reach the API, the rest of that hook run does not wait for more timeouts
+  (SessionStart queues its start for the catch-up instead of sending it on its own); a refused token stops a
+  catch-up at once; the prompt hook leaves tool-result files for `Stop`. A start that arrives late
+  no longer reopens an ended chat, and a rebuild keeps the start time of a chat without a transcript.
+
 - Dashboards: five content-free dashboard views (migration 013), `ccp-db create-reader` (a read-only role that
   can read only those views), an optional Metabase service in the Compose file (`--profile dashboards`) and
   `ccp-dashboards setup`, which makes the 16-card dashboard through Metabase's API, repeatably (Step 3, task 3.3).

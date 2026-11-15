@@ -50,6 +50,8 @@ def test_an_edit_is_read_with_its_line_ranges_and_counts() -> None:
         lines_added=2,
         lines_removed=1,
         hunks=({"old_start": 10, "old_lines": 3, "new_start": 10, "new_lines": 4},),
+        file_role="code",
+        tests_added=0,
     )
 
 
@@ -231,3 +233,35 @@ def test_a_compaction_boundary_is_followed_through_its_logical_parent() -> None:
         _node(4, "edit", "b1"),
     ]
     assert nearest_prompts(nodes, [4], {}) == {4: 1}
+
+
+def test_a_new_test_file_has_its_role_and_the_tests_it_defines_counted() -> None:
+    write: dict[str, Any] = {
+        "type": "create",
+        "filePath": "/work/app/tests/test_a.py",
+        "content": "def test_one():\n    pass\n\nasync def test_two():\n    pass\n\ndef helper():\n    pass\n",
+        "structuredPatch": [],
+    }
+    change = extract_file_change(_result(write))
+
+    assert change is not None
+    assert (change.file_role, change.tests_added) == ("test", 2)
+
+
+def test_only_added_lines_count_as_tests_and_docs_never_do() -> None:
+    patch = [
+        {
+            "oldStart": 1,
+            "oldLines": 2,
+            "newStart": 1,
+            "newLines": 3,
+            "lines": [" def test_old():", "-def test_removed():", "+def test_new():", "+    pass"],
+        }
+    ]
+    edit: dict[str, Any] = {"filePath": "/work/app/tests/test_a.py", "structuredPatch": patch}
+    change = extract_file_change(_result(edit))
+    assert change is not None and change.tests_added == 1
+
+    edit["filePath"] = "/work/app/docs/guide.md"
+    doc = extract_file_change(_result(edit))
+    assert doc is not None and (doc.file_role, doc.tests_added) == ("docs", 0)

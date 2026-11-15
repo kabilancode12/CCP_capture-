@@ -4,8 +4,8 @@ One record per session (the `session_env` table) says **who ran it, with which C
 where**. The type and its validation are in [`src/ccp/environment.py`](../src/ccp/environment.py);
 collecting it is in [`src/ccp/capture/environment.py`](../src/ccp/capture/environment.py).
 
-> **This record is personal data.** It holds the user name, host name and the account's name and
-> e-mail address. It is collected on purpose (the plan asks for it) and, per the plan, it is **kept
+> **This record is personal data.** It holds the user name, host name, the account's name and
+> e-mail address, and the Git identity. It is collected on purpose (the plan asks for it) and, per the plan, it is **kept
 > in private mode too**: private mode keeps a minimal record of session, developer, account and
 > environment. Restrict access to the `session_env` table (task for Step 5), and tell developers
 > what is collected before the pilot.
@@ -21,6 +21,11 @@ collecting it is in [`src/ccp/capture/environment.py`](../src/ccp/capture/enviro
 | `os_name`, `os_version`, `cpu_architecture` | `Windows`, `11 10.0.26200`, `AMD64` | the operating system | start |
 | `os_user`, `hostname` | | the operating system | start |
 | `account_name`, `account_email`, `organisation_name`, `organisation_uuid` | | `~/.claude.json`, key `oauthAccount` | start |
+| `account_uuid`, `full_name`, `organisation_role` | | `~/.claude.json`, key `oauthAccount` (`accountUuid`, `fullName`, `organizationRole`; observed on Claude Code 2.1.325) | start |
+| `machine_key` | `3f9a1c0d5e7b2a46` | the first 16 hex digits of the SHA-256 hash of `machineID` in `~/.claude.json`; **the raw id is never sent** | start |
+| `folder` | `/home/dev/billing` | the hook payload's `cwd` | start |
+| `git_remote` | `https://github.com/acme/billing.git` | `git remote get-url origin` in that folder, with any user name and password removed; unknown without a remote or without Git (3-second limit) | start |
+| `git_user_name`, `git_user_email` | | `git config user.name` / `user.email` | start |
 | `auth_type` | `subscription`, `api_key` | `ANTHROPIC_API_KEY` set means `api_key` (only whether it is set, never the key); otherwise a login means `subscription` | start |
 | `claude_code_version` | `2.1.289` | the `version` key of transcript entries | transcript |
 | `tool_shell` | `PowerShell (primary); Bash tool also available ...` | the transcript's `environment` entry (prose, as Claude wrote it) | transcript |
@@ -53,6 +58,16 @@ stages, and any later correction, combine into one record, and repeating an upda
 
 The client remembers a hash of what it last sent successfully and sends again only when the record
 changes, so calling it at every hook costs nothing once the record is complete.
+
+The account uuid names the chat's **Claude account** and the Git remote (or, without one, the folder on its
+machine) names its **project**: the server links the chat to both each time a record arrives (see
+[database.md](database.md#the-chat-hierarchy-migration-016)).
+
+A server from before migration 016 does not know the newer fields and refuses the whole record (422). The
+client then sends the record again with only the older fields, so nothing else is lost. The hook notes that
+the record went out in part (marker `environment-done` = `partial <time>`) and sends the whole record again
+an hour later, so the newer fields arrive once the server is upgraded. (The markers were renamed in 016 so
+that records an older client marked as sent although only the older fields arrived are sent once more.)
 
 ## Validation on the server
 

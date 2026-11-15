@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ccp.index.fileroles import ROLE_CONFIG, ROLE_DOCS, count_tests_added, file_role
 from ccp.index.parser import content_blocks
 
 ADDED = "added"
@@ -38,6 +39,8 @@ class FileChange:
     lines_added: int
     lines_removed: int
     hunks: tuple[dict[str, int], ...]  # {old_start, old_lines, new_start, new_lines}
+    file_role: str  # test | code | docs | config | other (see fileroles.py)
+    tests_added: int  # added lines that define a test
 
 
 def extract_file_change(entry: dict[str, Any]) -> FileChange | None:
@@ -59,11 +62,13 @@ def extract_file_change(entry: dict[str, Any]) -> FileChange | None:
 
     hunks = tuple(h for h in (_hunk(item) for item in patch) if h is not None)
     added = removed = 0
+    added_text: list[str] = []
     for item in patch:
         lines = item.get("lines") if isinstance(item, dict) else None
         for line in lines if isinstance(lines, list) else ():
             if isinstance(line, str) and line.startswith("+"):
                 added += 1
+                added_text.append(line[1:])
             elif isinstance(line, str) and line.startswith("-"):
                 removed += 1
 
@@ -72,21 +77,27 @@ def extract_file_change(entry: dict[str, Any]) -> FileChange | None:
         # A new file has no patch: the whole content is the change.
         content = result.get("content")
         count = len(content.splitlines()) if isinstance(content, str) else 0
+        added_text = content.splitlines() if isinstance(content, str) else []
         if count:
             hunks = ({"old_start": 0, "old_lines": 0, "new_start": 1, "new_lines": count},)
         added = count
 
     user_modified = result.get("userModified")
     cwd = entry.get("cwd")
+    relative = _relative_path(path, cwd if isinstance(cwd, str) else None)
+    role = file_role(relative)
     return FileChange(
         tool_use_id=_tool_use_id(content_blocks(entry)),
-        path=_relative_path(path, cwd if isinstance(cwd, str) else None),
+        path=relative,
         absolute_path=path,
         change_type=ADDED if created else MODIFIED,
         user_modified=user_modified if isinstance(user_modified, bool) else None,
         lines_added=added,
         lines_removed=removed,
         hunks=hunks,
+        file_role=role,
+        # Tests in a documentation or configuration file are examples, not tests.
+        tests_added=0 if role in (ROLE_DOCS, ROLE_CONFIG) else count_tests_added(added_text),
     )
 
 

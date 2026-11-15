@@ -25,19 +25,30 @@ so even a Metabase user who writes their own SQL question can reach only the `d_
 
 ## Names on the dashboards: labels
 
-The usage cards show a project as the last part of its folder (`ccp_V2`) and a Claude account as a neutral name
+The usage cards show a project by its name (the last part of its Git remote or folder, `ccp_V2`; a home folder
+as a neutral `project-3f9a1c`, since its last part is a login name) and a Claude account as a neutral name
 (`account-3f9a1c`). Give them real names:
 
 ```bash
-ccp-db labels                                            # every account and folder seen, with its label
+ccp-db labels                                            # every account and project, with its label
 ccp-db label account someone@example.com claude1         # the account is shown as "claude1"
-ccp-db label project /home/dev/work/billing billing-api  # that folder is shown as "billing-api"
+ccp-db label account 6f1c2d3e-...-00000000abcd claude1   # or by its account uuid
+ccp-db label project billing billing-api                 # the project named "billing"
+ccp-db label project /home/dev/work/billing billing-api  # or by one of its folders, or its key
 ccp-db unlabel account someone@example.com               # back to the neutral name
 ```
 
+Labels are stored on the account and project rows (`claude_account.label`, `project.label`, migration 016). A
+project is chosen by its key or Git remote, by one of its folders, or by its name when only one project has that
+name. An account is chosen by its e-mail address or account uuid; one that matches no account yet is added
+(anything else is refused). A project with a Git remote is one project wherever it is cloned; a folder without a remote is a project of
+its own, and two such projects may share a label to be counted as one.
+
 `ccp-db labels` prints e-mail addresses and folder paths: it is for the administrator. A label is 1 to 40
-letters, digits, spaces, dots, dashes or underscores. Two folders may share a label, so a project checked out
-in different places (or on different machines) can be counted as one.
+letters, digits, spaces, dots, dashes or underscores.
+
+The dashboard reader cannot read `claude_account`, `project` or the view `chat` (they hold e-mail addresses and
+folders); it reads `d_chat` and `d_usage`, which show only labels or neutral names.
 
 ## Limits
 

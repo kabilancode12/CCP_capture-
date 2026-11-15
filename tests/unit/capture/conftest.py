@@ -1,12 +1,15 @@
 """Fakes and fixtures shared by the capture client tests."""
 
+import hashlib
 from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
+from ccp.capture.api import ToolResultReply
 from ccp.capture.state import StateStore
 from ccp.environment import EnvironmentRecord
+from ccp.lifecycle import LifecycleEvent
 from ccp.redaction.records import RedactionRecord
 
 
@@ -19,10 +22,16 @@ class FakeApi:
         self.attachments: dict[str, bytes] = {}
         self.redactions: list[RedactionRecord] = []
         self.environments: list[EnvironmentRecord] = []
+        self.lifecycle: list[LifecycleEvent] = []
+        self.tool_results: dict[str, bytes] = {}  # name -> latest content
+        self.first_tool_results: dict[str, bytes] = {}  # name -> first content (the file's key)
+        self.attempts = 0  # every request, including those that fail
         self.fail_with: Exception | None = None
-        self.fail_on: str | None = None  # a kind: "chunk", "attachment" or "redactions"
+        # A kind: "chunk", "attachment", "redactions", "environment", "lifecycle" or "tool-result".
+        self.fail_on: str | None = None
 
     def _maybe_fail(self, kind: str) -> None:
+        self.attempts += 1
         if self.fail_with is not None and self.fail_on in (None, kind):
             raise self.fail_with
 
@@ -49,6 +58,22 @@ class FakeApi:
         self._maybe_fail("redactions")
         self.calls.append(("redactions", str(len(records))))
         self.redactions.extend(records)
+
+    def post_lifecycle(self, session_id: str, event: LifecycleEvent) -> None:
+        self._maybe_fail("lifecycle")
+        self.calls.append(("lifecycle", event.kind))
+        self.lifecycle.append(event)
+
+    def put_tool_result(self, session_id: str, name: str, body: bytes) -> ToolResultReply:
+        # Like the server: the first content at the file's key, a changed one at <key>@<hash>.
+        self._maybe_fail("tool-result")
+        self.calls.append(("tool-result", name))
+        changed = self.tool_results.get(name) != body
+        self.tool_results[name] = body
+        key = f"sessions/{session_id}/tool-results/{name}"
+        if self.first_tool_results.setdefault(name, body) != body:
+            key += "@" + hashlib.sha256(body).hexdigest()[:16]
+        return ToolResultReply(changed, key)
 
 
 class Clock:

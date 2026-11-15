@@ -11,6 +11,12 @@ Errors are split by what the caller should do:
   the same request will not help.
 
 Neither error message contains the token or any transcript content.
+
+Fail fast: a client made with ``fail_fast=True`` (the hooks and the flush use it) stops trying once
+a request could not reach the server at all (no connection, or a timeout). Every later request of
+that client fails at once with :class:`ApiUnavailableError`, instead of waiting for its own timeout:
+one unreachable API costs a hook one timeout, not one per request. A server that answered (even with
+an error) does not trigger this.
 """
 
 from __future__ import annotations
@@ -19,9 +25,11 @@ import json
 import urllib.error
 import urllib.request
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from ccp.environment import EnvironmentRecord
+from ccp.lifecycle import LifecycleEvent
 from ccp.redaction.records import RedactionRecord
 from ccp.settings import Secret
 
@@ -47,6 +55,20 @@ class ApiRejectedError(ApiError):
         self.status = status
 
 
+@dataclass(frozen=True)
+class ToolResultReply:
+    """The API's answer to a tool-result upload.
+
+    Attributes:
+        stored: True if anything was written (the file is new, or a changed version of it).
+        key: The object key that holds this content (the file's key, or the key of a changed
+            version, ``<key>@<hash>``), or ``None`` if the answer did not say.
+    """
+
+    stored: bool
+    key: str | None = None
+
+
 class ApiPort(Protocol):
     """What the capture client needs from the API (a fake can stand in for tests)."""
 
@@ -61,6 +83,12 @@ class ApiPort(Protocol):
 
     def put_environment(self, session_id: str, record: EnvironmentRecord) -> None:
         """Store or merge the session's environment record."""
+
+    def post_lifecycle(self, session_id: str, event: LifecycleEvent) -> None:
+        """Report that a session of the chat started or ended."""
+
+    def put_tool_result(self, session_id: str, name: str, body: bytes) -> ToolResultReply:
+        """Upload a tool-result file (redacted); say whether it was stored, and under which key."""
 
 
 class _NoRedirects(urllib.request.HTTPRedirectHandler):
@@ -77,18 +105,29 @@ class _NoRedirects(urllib.request.HTTPRedirectHandler):
 class HttpApiClient:
     """:class:`ApiPort` over HTTP(S)."""
 
-    def __init__(self, base_url: str, token: Secret, timeout_seconds: float = 15.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        token: Secret,
+        timeout_seconds: float = 15.0,
+        *,
+        fail_fast: bool = False,
+    ) -> None:
         """Create a client.
 
         Args:
             base_url: The API address, for example ``http://127.0.0.1:8000``.
             token: The bearer token.
             timeout_seconds: Time limit for each request.
+            fail_fast: Stop trying once the server could not be reached (see the module
+                description). For short-lived processes such as a hook.
         """
         self._base_url = base_url.rstrip("/")
         self._token = token
         self._timeout = timeout_seconds
         self._opener = urllib.request.build_opener(_NoRedirects)
+        self._fail_fast = fail_fast
+        self._unreachable = False
 
     def put_chunk(self, session_id: str, stream: str, offset: int, body: bytes) -> bool:
         """Upload a chunk (``PUT .../chunks/{offset}``)."""
@@ -115,6 +154,18 @@ class HttpApiClient:
         body = json.dumps(record.to_payload()).encode("utf-8")
         self._send("PUT", f"/v1/sessions/{session_id}/environment", body, "application/json")
 
+    def post_lifecycle(self, session_id: str, event: LifecycleEvent) -> None:
+        """Report a session start or end (``POST /v1/sessions/{id}/lifecycle``)."""
+        body = json.dumps(event.to_payload()).encode("utf-8")
+        self._send("POST", f"/v1/sessions/{session_id}/lifecycle", body, "application/json")
+
+    def put_tool_result(self, session_id: str, name: str, body: bytes) -> ToolResultReply:
+        """Upload a tool-result file (``PUT /v1/sessions/{id}/tool-results/{name}``)."""
+        path = f"/v1/sessions/{session_id}/tool-results/{name}"
+        reply = self._send("PUT", path, body, "text/plain; charset=utf-8")
+        key = reply.get("key")
+        return ToolResultReply(_stored(reply), key if isinstance(key, str) else None)
+
     def _send(self, method: str, path: str, body: bytes, content_type: str) -> dict[str, Any]:
         """Send a request and return the decoded JSON response.
 
@@ -124,9 +175,12 @@ class HttpApiClient:
 
         Raises:
             ApiUnavailableError: On a network error, a timeout, a 5xx or 429 response, or a
-                success response whose body is not JSON (not the API's own answer).
+                success response whose body is not JSON (not the API's own answer); at once,
+                without trying, if the client fails fast and the server could not be reached before.
             ApiRejectedError: On any other error response.
         """
+        if self._unreachable:
+            raise ApiUnavailableError("cannot reach the API (not tried again in this run)")
         request = urllib.request.Request(  # noqa: S310  (scheme is validated in the settings)
             self._base_url + path,
             data=body,
@@ -145,6 +199,7 @@ class HttpApiClient:
                 raise ApiUnavailableError(f"server error ({error.code}): {message}") from error
             raise ApiRejectedError(error.code, message) from error
         except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as error:
+            self._unreachable = self._fail_fast
             raise ApiUnavailableError(f"cannot reach the API: {type(error).__name__}") from error
         return _decode_reply(raw)
 

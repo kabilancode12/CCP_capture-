@@ -56,6 +56,10 @@ Used by `ccp-db create-reader`, `ccp-dashboards setup` and the Metabase service 
 | `CCP_READER_PASSWORD` | **yes** for dashboards (secret) | | Password of the read-only database role (at least 12 characters). Set by `ccp-db create-reader`, used by Metabase |
 | `CCP_READER_USER` | no | `ccp_reader` | Name of that role (`ccp-db create-reader` takes `--name` instead) |
 | `CCP_AUDITOR_PASSWORD` | only for `ccp-db create-auditor` (secret) | | Password of the auditors' read-only role that can read everything (at least 12 characters); see [access.md](access.md) |
+| `CCP_CATALOG_ENABLED`, `CCP_DECISIONS_ENABLED`, `CCP_EXPLORER_ENABLED` | no | `false` | Turn on the readable catalog, the AI-written decisions and the Explorer website inside `ccp-server`; see [install.md](install.md) |
+| `CCP_EXPLORER_SECRET` | with the Explorer (secret) | | Signs the Explorer's cookies and forms (at least 16 characters); see [explorer.md](explorer.md) |
+| `CCP_SERVER_MIGRATE`, `CCP_SERVER_BIND` | no | `false`, `127.0.0.1` | Apply migrations when `ccp-server` starts; address the container publishes on; see [install.md](install.md) |
+| `CCP_DECISION_IDLE_MINUTES`, `CCP_DECISION_SWEEP_MINUTES` | no | `30`, `10` | A chat is given decisions after this many quiet minutes; how often the server looks; see [decisions.md](decisions.md) |
 | `CCP_METABASE_ADMIN_EMAIL` | **yes** for dashboards | | Address of the Metabase administrator that `ccp-dashboards setup` creates the first time. Use your own |
 | `CCP_METABASE_ADMIN_PASSWORD` | **yes** for dashboards (secret) | | That administrator's password, at least 12 characters |
 | `METABASE_PORT` | no | `3000` | Port on this machine where Metabase answers (bound to `127.0.0.1`) |
@@ -79,6 +83,7 @@ Read from **environment variables only**; a `.env` file is deliberately not read
 | `CCP_SNAPSHOT_REMOTE` | no | | Git URL of the capture project for the repository (see [snapshots.md](snapshots.md)) |
 | `CCP_SNAPSHOT_REMOTE_BASE` | no | | Or a group URL: the project is `<base>/<repository name>-capture.git` |
 | `CCP_SNAPSHOTS` | no | on if a remote is set, else off | `true` takes snapshots even without a remote (hidden refs stay in the local repository) |
+| `CCP_CAPTURE_DISABLED` | no | off | `1` or `true` switches the hooks off completely: no upload, no state, no log, no output (used for CCP's own background Claude runs; see [hooks.md](hooks.md#kill-switch)) |
 
 ## Using settings in code
 

@@ -33,6 +33,30 @@ Endpoints:
     sent in parts and repeated safely. 200 with ``{"recorded": n}``; 400 bad id, 401, 413,
     422 malformed, 503 database down. This is personal data: restrict access to it.
 
+``POST /v1/sessions/{session_id}/lifecycle``
+    Record that a session of the chat started or ended (SessionStart / SessionEnd hooks), as
+    ``{"kind": "start"|"end", "run_key", "at", "source" or "reason", "commit"}`` (see
+    ``ccp.lifecycle``). The run key makes it idempotent: the same event again changes nothing, and
+    a start and an end with the same key are one row of ``chat_session``, whichever comes first.
+    200 with ``{"recorded": true, "seq": n}`` (the session's number in the chat); 400 bad id, 401,
+    409 the run key belongs to another chat, 413 larger than 4 KB, 422 malformed, 503 database
+    down.
+
+``PUT /v1/sessions/{session_id}/tool-results/{name}``
+    Store one tool-result file: a large tool output that Claude Code keeps in
+    ``<chat folder>/tool-results/<name>`` instead of the transcript. The body is the file's text,
+    already redacted by the client (UTF-8). Stored at ``sessions/<id>/tool-results/<name>``; a
+    changed file is stored next to it as ``<name>@<first 16 hex of its SHA-256>``: nothing stored
+    is ever replaced.
+
+    * 201 stored for the first time; 200 already stored with identical content (nothing written)
+      or a changed version stored next to it.
+    * 400 bad id or name, 401, 413 too large, 422 not UTF-8 text, 503 storage down.
+
+    Every success returns ``{"stored": bool, "key": "<object key>"}``: ``stored`` is False if it
+    was already there unchanged; ``key`` is where this content is stored (the file's key or the key
+    of its changed version), so that the client can report its redactions against it.
+
 ``PUT /v1/attachments/{digest}``
     Upload one attachment body (compact JSON) under its SHA-256 digest. Large, repeated
     attachment values are stored once, by content (see ``ccp.storage.attachments``); developers'
@@ -51,6 +75,7 @@ different chunks for the same offset at the same moment is not supported.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import logging
@@ -67,15 +92,26 @@ from ccp.environment import EnvironmentRecordError, parse_environment
 from ccp.ingest.attachments import AttachmentError, validate_attachment
 from ccp.ingest.chunks import ChunkError, validate_chunk
 from ccp.ingest.redactions import RedactionReportError, parse_report
-from ccp.ingest.repository import RepositoryError, SessionRepository
+from ccp.ingest.repository import RepositoryError, RunKeyConflictError, SessionRepository
+from ccp.lifecycle import LifecycleEventError, parse_lifecycle
 from ccp.settings import Secret
 from ccp.storage import StorageError
-from ccp.storage.keys import attachment_key, session_prefix, transcript_chunk_key
+from ccp.storage.keys import (
+    attachment_key,
+    session_prefix,
+    tool_result_key,
+    tool_result_version_key,
+    transcript_chunk_key,
+)
 
 logger = logging.getLogger("ccp.ingest")
 
 CHUNK_CONTENT_TYPE = "application/x-ndjson"
 ATTACHMENT_CONTENT_TYPE = "application/json"
+TOOL_RESULT_CONTENT_TYPE = "text/plain; charset=utf-8"
+
+# Largest lifecycle event accepted (a few hundred bytes in practice).
+MAX_LIFECYCLE_BYTES = 4096
 
 
 class ChunkStore(Protocol):
@@ -146,6 +182,16 @@ class IngestService:
                     "/v1/sessions/{session_id}/redactions",
                     self.post_redactions,
                     methods=["POST"],
+                ),
+                Route(
+                    "/v1/sessions/{session_id}/lifecycle",
+                    self.post_lifecycle,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/sessions/{session_id}/tool-results/{name}",
+                    self.put_tool_result,
+                    methods=["PUT"],
                 ),
             ],
         )
@@ -281,6 +327,67 @@ class IngestService:
             return _error(503, "database temporarily unavailable")
         return JSONResponse({"recorded": len(records)})
 
+    async def post_lifecycle(self, request: Request) -> JSONResponse:
+        """Record a session start or end of a chat (see the module description)."""
+        if not self._is_authorised(request):
+            return await self._refuse(
+                request, 401, "missing or invalid token", {"WWW-Authenticate": "Bearer"}
+            )
+
+        session_id = request.path_params["session_id"]
+        try:
+            session_prefix(session_id)  # validates the id
+        except ValueError as error:
+            return await self._refuse(request, 400, str(error))
+
+        body = await self._read_body(request, MAX_LIFECYCLE_BYTES)
+        if isinstance(body, JSONResponse):
+            return body
+        try:
+            event = parse_lifecycle(json.loads(body))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return _error(422, "lifecycle event is not valid JSON")
+        except LifecycleEventError as error:
+            return _error(422, str(error))
+
+        try:
+            seq = await run_in_threadpool(self._repository.record_lifecycle, session_id, event)
+        except RunKeyConflictError as error:
+            return _error(409, str(error))
+        except RepositoryError as error:
+            logger.warning("lifecycle event for %s not saved: %s", session_id, error)
+            return _error(503, "database temporarily unavailable")
+        return JSONResponse({"recorded": True, "seq": seq})
+
+    async def put_tool_result(self, request: Request) -> JSONResponse:
+        """Store one redacted tool-result file (see the module description)."""
+        if not self._is_authorised(request):
+            return await self._refuse(
+                request, 401, "missing or invalid token", {"WWW-Authenticate": "Bearer"}
+            )
+
+        try:
+            key = tool_result_key(request.path_params["session_id"], request.path_params["name"])
+        except ValueError as error:
+            return await self._refuse(request, 400, str(error))
+
+        body = await self._read_body(request)
+        if isinstance(body, JSONResponse):
+            return body
+        try:
+            body.decode("utf-8")
+        except UnicodeDecodeError:
+            return _error(422, "a tool result must be UTF-8 text")
+
+        try:
+            created, changed, stored_at = await run_in_threadpool(self._save_tool_result, key, body)
+        except StorageError as error:
+            logger.warning("tool result %s not saved: %s", key, error)
+            return _error(503, "storage temporarily unavailable")
+        return JSONResponse(
+            {"stored": changed, "key": stored_at}, status_code=201 if created else 200
+        )
+
     # ------------------------------------------------------------ helpers
 
     async def _refuse(
@@ -299,17 +406,22 @@ class IngestService:
                 pass
         return _error(status, message, headers)
 
-    async def _read_body(self, request: Request) -> bytes | JSONResponse:
+    async def _read_body(self, request: Request, limit: int | None = None) -> bytes | JSONResponse:
         """Read the request body, or return a 413 response if it is larger than the limit.
 
         The announced Content-Length is checked first, so an oversized upload is refused before
         it is read.
+
+        Args:
+            request: The request.
+            limit: Largest body accepted; defaults to the largest chunk.
         """
-        too_large = _error(413, f"body is larger than {self._max_chunk_bytes} bytes")
-        if _declared_size(request) > self._max_chunk_bytes:
+        limit = self._max_chunk_bytes if limit is None else min(limit, self._max_chunk_bytes)
+        too_large = _error(413, f"body is larger than {limit} bytes")
+        if _declared_size(request) > limit:
             return too_large
         body = await request.body()
-        return too_large if len(body) > self._max_chunk_bytes else body
+        return too_large if len(body) > limit else body
 
     def _is_authorised(self, request: Request) -> bool:
         """Check the bearer token in constant time (so timing does not reveal it)."""
@@ -348,6 +460,27 @@ class IngestService:
             return False
         self._store.put(key, body, ATTACHMENT_CONTENT_TYPE)
         return True
+
+    def _save_tool_result(self, key: str, body: bytes) -> tuple[bool, bool, str]:
+        """Store a tool-result file unless the identical file is already there.
+
+        Raw data is never replaced: a file that changed is stored as a new version next to the
+        first one (:func:`ccp.storage.keys.tool_result_version_key`).
+
+        Returns:
+            ``(created, changed, stored_at)``: whether the file's key is new, whether anything was
+            written, and the key that holds this content.
+        """
+        if not self._store.exists(key):
+            self._store.put(key, body, TOOL_RESULT_CONTENT_TYPE)
+            return True, True, key
+        if self._store.get(key) == body:
+            return False, False, key
+        version = tool_result_version_key(key, hashlib.sha256(body).hexdigest())
+        if self._store.exists(version):
+            return False, False, version
+        self._store.put(version, body, TOOL_RESULT_CONTENT_TYPE)
+        return False, True, version
 
     def _check_database(self) -> bool:
         try:

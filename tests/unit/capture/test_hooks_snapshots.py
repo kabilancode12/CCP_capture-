@@ -56,13 +56,13 @@ def _handler(
     client: RecordingClient,
     snapshots: RecordingSnapshots | None,
     tmp_path: Path,
-    flushed: list[tuple[str, Path, Path | None]] | None = None,
+    flushed: list[tuple[str, Path | None, Path | None]] | None = None,
 ) -> HookHandler:
     flushes = flushed if flushed is not None else []
     return HookHandler(
         client,
         StateStore(tmp_path / "state"),
-        lambda transcript: EnvironmentRecord(surface="terminal"),
+        lambda transcript, cwd: EnvironmentRecord(surface="terminal"),
         lambda session_id, path, cwd: flushes.append((session_id, path, cwd)),
         snapshots,
     )
@@ -189,10 +189,10 @@ def test_session_end_passes_the_working_directory_to_the_background_flush(
     work_dir: Path,
     tmp_path: Path,
 ) -> None:
-    flushed: list[tuple[str, Path, Path | None]] = []
+    flushed: list[tuple[str, Path | None, Path | None]] = []
     outcome = _handler(client, snapshots, tmp_path, flushed).handle(
         _payload("SessionEnd", transcript, work_dir)
     )
     assert flushed == [(SESSION, transcript, work_dir)]  # the flush takes the final snapshot
     assert snapshots.calls == []  # nothing is done inline: SessionEnd has almost no time
-    assert outcome == "flush started in the background"
+    assert outcome == "end queued; flush started in the background"

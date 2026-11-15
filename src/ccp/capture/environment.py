@@ -3,8 +3,8 @@
 Two stages, because not everything is known at the start of a session (the transcript file does
 not exist yet at SessionStart):
 
-* :func:`collect_process_environment`: what this process, the operating system and the Claude Code
-  login files say. Available at SessionStart.
+* :func:`collect_process_environment`: what this process, the operating system, the Claude Code
+  login file and Git (for the working folder) say. Available at SessionStart.
 * :func:`collect_transcript_environment`: what Claude Code wrote into the transcript itself (its
   version and the shell it uses for tools). Available once the transcript exists.
 
@@ -15,21 +15,25 @@ The detection rules for surface, shell and access path live in
 :mod:`ccp.verify.environment_inspector`; they are guesses marked ``[verify]`` until each surface
 has been tested.
 
-Values are collected as they are (user name, host name, account e-mail): this is the purpose of
-the record, see :mod:`ccp.environment`. Nothing here reads or sends transcript content.
+Values are collected as they are (user name, host name, account e-mail, Git identity): this is the
+purpose of the record, see :mod:`ccp.environment`. Two values are never sent as they are: Claude
+Code's ``machineID`` (only the first 16 hex digits of its SHA-256 hash, ``machine_key``) and the Git
+remote (its user name and password are removed). Nothing here reads or sends transcript content.
 """
 
 from __future__ import annotations
 
 import getpass
+import hashlib
 import json
 import platform
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ccp.capture.gitinfo import GitFacts, read_git_facts
 from ccp.environment import MAX_VALUE_LENGTH, EnvironmentRecord
 from ccp.verify.environment_inspector import detect_access_path, detect_shell, detect_surface
 
@@ -74,21 +78,37 @@ def _clean(value: object) -> str | None:
     return text[:MAX_VALUE_LENGTH] or None
 
 
-def _read_account(home: Path) -> dict[str, Any]:
-    """Return the logged-in account from ``~/.claude.json`` (empty if there is none).
-
-    [verify] Claude Code appears to keep the account under the ``oauthAccount`` key.
-    """
+def _read_claude_config(home: Path) -> dict[str, Any]:
+    """Return the contents of ``~/.claude.json`` (empty if it is missing or not a JSON object)."""
     try:
         config = json.loads((home / ".claude.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    account = config.get("oauthAccount") if isinstance(config, dict) else None
+    return config if isinstance(config, dict) else {}
+
+
+def _account_of(config: dict[str, Any]) -> dict[str, Any]:
+    """Return the logged-in account (``oauthAccount``; observed on Claude Code 2.1.325)."""
+    account = config.get("oauthAccount")
     return account if isinstance(account, dict) else {}
 
 
+def machine_key(machine_id: object) -> str | None:
+    """Return the first 16 hex digits of the SHA-256 hash of Claude Code's ``machineID``.
+
+    The raw id is never sent: the hash tells machines apart without revealing the id itself.
+    """
+    if not isinstance(machine_id, str) or not machine_id.strip():
+        return None
+    return hashlib.sha256(machine_id.strip().encode("utf-8")).hexdigest()[:16]
+
+
 def collect_process_environment(
-    env: Mapping[str, str], home: Path, host: HostInfo | None = None
+    env: Mapping[str, str],
+    home: Path,
+    host: HostInfo | None = None,
+    cwd: Path | None = None,
+    git_facts: Callable[[Path], GitFacts] = read_git_facts,
 ) -> EnvironmentRecord:
     """Collect what is known at SessionStart.
 
@@ -97,9 +117,14 @@ def collect_process_environment(
             processes that Claude Code starts, so this must run inside a hook).
         home: The user's home directory (where ``.claude.json`` is).
         host: Facts about the machine; defaults to the machine this runs on.
+        cwd: The chat's working folder (the hook payload's ``cwd``); ``None`` if unknown, and then
+            Git is not asked.
+        git_facts: Reads the Git facts of a folder (replaced in tests).
     """
     host = host or HostInfo.current()
-    account = _read_account(home)
+    config = _read_claude_config(home)
+    account = _account_of(config)
+    git = git_facts(cwd) if cwd is not None else GitFacts()
     if env.get("ANTHROPIC_API_KEY"):  # only whether a key is set; never the key
         auth_type: str | None = "api_key"
     else:
@@ -119,6 +144,14 @@ def collect_process_environment(
         organisation_name=_clean(account.get("organizationName")),
         organisation_uuid=_clean(account.get("organizationUuid")),
         auth_type=auth_type,
+        account_uuid=_clean(account.get("accountUuid")),
+        full_name=_clean(account.get("fullName")),
+        organisation_role=_clean(account.get("organizationRole")),
+        machine_key=machine_key(config.get("machineID")),
+        folder=_clean(str(cwd)) if cwd is not None else None,
+        git_remote=_clean(git.remote),
+        git_user_name=_clean(git.user_name),
+        git_user_email=_clean(git.user_email),
     )
 
 
@@ -159,7 +192,11 @@ def collect_transcript_environment(transcript: Path) -> EnvironmentRecord:
 
 
 def collect_environment(
-    env: Mapping[str, str], home: Path, transcript: Path | None = None, host: HostInfo | None = None
+    env: Mapping[str, str],
+    home: Path,
+    transcript: Path | None = None,
+    host: HostInfo | None = None,
+    cwd: Path | None = None,
 ) -> EnvironmentRecord:
     """Collect the whole environment record.
 
@@ -170,8 +207,9 @@ def collect_environment(
         home: The user's home directory.
         transcript: The session transcript, or ``None`` if it does not exist yet.
         host: Facts about the machine; defaults to the machine this runs on.
+        cwd: The chat's working folder, or ``None`` if unknown.
     """
-    record = collect_process_environment(env, home, host)
+    record = collect_process_environment(env, home, host, cwd)
     if transcript is not None:
         record = record.merged_with(collect_transcript_environment(transcript))
     return record

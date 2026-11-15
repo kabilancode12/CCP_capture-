@@ -12,12 +12,12 @@ The capture client registers for six events and, for each, uploads what is new. 
 
 | Event | Action | Time limit given to Claude Code |
 | --- | --- | --- |
-| `SessionStart` | Record the environment; catch up on earlier sessions; sync this session if its transcript exists (resume, compact); baseline code snapshot and branch backup | 30 s (uploads use at most 8 s) |
-| `UserPromptSubmit` | Sync the session. Claude waits for this hook, so it gets the shortest upload budget (5 s) | 15 s |
+| `SessionStart` | Queue the session start (see below); record the environment; catch up on earlier sessions (this also sends the start); sync this session if its transcript exists (resume, compact); baseline code snapshot and branch backup | 30 s (uploads use at most 8 s) |
+| `UserPromptSubmit` | Sync the session, but not its tool-result files (one large file could take longer than the budget, which is checked only between files; `Stop` uploads them). Claude waits for this hook, so it gets the shortest upload budget (5 s) | 15 s |
 | `Stop` | Sync the session; complete the environment record; then take a [code snapshot](snapshots.md) if the working tree changed | 30 s (uploads use at most 15 s) |
 | `SubagentStop` | Sync the session, **except** for Claude's internal helpers (empty `agent_type`), which fire after almost every turn and have no transcript | 30 s |
 | `PreCompact` | Sync the session before it is compacted | 30 s |
-| `SessionEnd` | **Start a detached background flush and return at once**: it uploads what is left and takes the final code snapshot. Best effort only | 5 s |
+| `SessionEnd` | Queue the session end (see below), then **start a detached background flush and return at once**: it sends the end, uploads what is left and takes the final code snapshot. Best effort only. A chat without a transcript (opened and closed without a message) still gets its end sent | 5 s |
 
 Why these choices come from what we observed (see [verify/transcript-facts.md](verify/transcript-facts.md)):
 
@@ -31,6 +31,42 @@ Why these choices come from what we observed (see [verify/transcript-facts.md](v
 - `SessionEnd` fires on a normal exit, but Claude Code gives it very little time and may not wait.
   Nothing depends on it: the background flush is a bonus, and the **catch-up at the next
   SessionStart** is the safety net.
+
+## Sessions of a chat: start and end
+
+A chat (one conversation, one transcript) can be opened several times: started, resumed, continued after
+`/compact`. Each opening is a **session** (table `chat_session`, see [database.md](database.md#the-chat-hierarchy-migration-016)).
+
+- `SessionStart` makes a new **run key** (a UUID), remembers it in the state folder for this chat, and queues
+  `{"kind": "start", "run_key", "at", "source", "commit"}` for `POST /v1/sessions/{id}/lifecycle`. `source` is
+  the payload's `startup | resume | clear | compact`; `commit` is the Git HEAD of the working folder (read with
+  a 2-second limit; `null` outside a repository). The catch-up that follows sends it with the waiting events
+  of other chats; it is not sent on its own, so that an unreachable API costs the hook one timeout only.
+  The hooks' API client also **fails fast**: once one request could not reach the API (no connection or a
+  timeout, for example off VPN), every later request of that hook run fails at once instead of waiting for
+  its own timeout. A server that answers, even with an error, does not trigger this.
+- `SessionEnd` builds the end with the same run key and the payload's `reason`
+  (`clear | resume | logout | prompt_input_exit | other`, verified on Claude Code 2.1.325). It does not wait for
+  Git (Claude Code may stop the hook at any moment): it writes the end to the state folder and starts the
+  background flush at once. The flush reads HEAD, adds it to the end (`commit`) and sends it. If the flush
+  never runs, the next catch-up sends the end without a commit. Known gap (rare, accepted): if a catch-up
+  started by another chat sends the end before the flush added the commit, that session's `end_commit` stays
+  empty. An end without a known run key gets a fresh
+  key. For a chat without a transcript (opened and closed without a message) the flush only sends the end: no
+  upload and no final code snapshot.
+- Events wait in the state folder until the API has them (`lifecycle-<kind>-<run key>.marker`); every sync and
+  every catch-up sends what waits. Repeating one is harmless: the server keys rows by run key.
+- `/compact` runs no `SessionEnd`; the server ends the earlier open session when the next one starts
+  (`end_reason = inferred`). A session that never gets an end is ended by the idle closer (`idle_timeout`).
+- An older server answers 404: the client logs it once, keeps the events, and asks again an hour later.
+- On the server, a start that arrives late (it waited on the machine) and is older than the chat's last
+  activity or recorded end does not reopen the chat. A newer start reopens it and clears its end until the
+  next end (or the idle closer) sets it again. Start times are the developer machine's clock.
+
+## Kill switch
+
+If `CCP_CAPTURE_DISABLED` is `1` or `true`, the hook does nothing at all: no upload, no state, no log line, no
+output, exit code 0. CCP sets it for its own background Claude runs, so that they are not captured.
 
 ## The rules a hook must obey
 
@@ -67,7 +103,7 @@ three old files kept. One line per hook:
 ```text
 Stop session=4a64fad3-... 1 chunk(s), 0 attachment(s) uploaded; environment: sent (0.7s)
 SubagentStop session=4a64fad3-... skipped: internal helper (no agent type) (0.0s)
-SessionEnd session=4a64fad3-... flush started in the background (0.0s)
+SessionEnd session=4a64fad3-... end queued; flush started in the background (0.0s)
 ```
 
 If the settings are invalid (for example no token), the hook still exits 0 and logs

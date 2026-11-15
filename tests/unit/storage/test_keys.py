@@ -76,3 +76,34 @@ def test_the_stream_of_a_chunk_key_is_found(stream: str) -> None:
 def test_something_that_is_not_a_chunk_key_is_refused(key: str) -> None:
     with pytest.raises(ValueError, match="chunk key"):
         stream_of(key)
+
+
+def test_a_tool_result_is_stored_next_to_the_transcript_streams() -> None:
+    from ccp.storage.keys import tool_result_key
+
+    assert tool_result_key("s1", "bs12jynbi.txt") == "sessions/s1/tool-results/bs12jynbi.txt"
+
+
+@pytest.mark.parametrize(
+    "bad", ["", "..", "../x", "a/b", ".hidden", "a b.txt", "x.jsonl", "y" * 129]
+)
+def test_unsafe_tool_result_names_are_rejected(bad: str) -> None:
+    from ccp.storage.keys import tool_result_key
+
+    with pytest.raises(ValueError, match="Invalid"):
+        tool_result_key("s1", bad)
+
+
+def test_the_tool_results_folder_cannot_be_used_as_a_stream() -> None:
+    with pytest.raises(ValueError, match="reserved"):
+        transcript_chunk_key("s1", "tool-results", 0)
+
+
+def test_a_changed_tool_result_gets_its_own_key() -> None:
+    from ccp.storage.keys import tool_result_key, tool_result_version_key
+
+    key = tool_result_key("s1", "b1.txt")
+    digest = hashlib.sha256(b"new").hexdigest()
+    assert tool_result_version_key(key, digest) == f"{key}@{digest[:16]}"
+    with pytest.raises(ValueError, match="Invalid digest"):
+        tool_result_version_key(key, "not-a-digest")

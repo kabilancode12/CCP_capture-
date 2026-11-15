@@ -18,7 +18,8 @@ ccp-capture environment --session-id <id> [transcript]   # record where the sess
 ```
 
 `ccp-capture snapshot` takes a code snapshot now; `ccp-capture flush` is what the SessionEnd hook starts in the
-background (upload the rest, then snapshot). See [snapshots.md](snapshots.md).
+background (send the waiting session end, upload the rest if there is a transcript, then snapshot). See
+[snapshots.md](snapshots.md).
 
 Claude Code calls `ccp-capture hook` for each event: see [hooks.md](hooks.md). `ccp-capture hook-settings`
 prints the settings that register the hooks.
@@ -55,6 +56,33 @@ For each stream (the session transcript, plus every sub-agent file under
 
 Sub-agent transcripts are uploaded as the stream `agent-<id>` wherever they are found (agent ids
 are unique), and their `.meta.json` files (small, written once) as the stream `agent-<id>.meta`.
+The description of a sub-agent started by the Workflow tool does not name its run (observed on Claude
+Code 2.1.325); the folder does, so the client adds it as `"ccpWorkflowRunId": "<run id>"` to that
+uploaded line.
+
+After the transcripts, a sync also sends:
+
+- **Session starts and ends** waiting in the state folder (see [hooks.md](hooks.md#sessions-of-a-chat-start-and-end)).
+- **Tool-result files.** Claude Code keeps large tool outputs in `<session>/tool-results/<name>` (for
+  example `bs12jynbi.txt`) and only refers to them from the transcript. Each file is read as UTF-8 text,
+  **redacted as one piece of text** with the same rules as the transcript (a file that holds a JSON object
+  or list is first redacted value by value, as transcript lines are, because a secret inside a JSON string
+  is escaped; it is written out again as JSON only if that found something), and uploaded to
+  `PUT /v1/sessions/{id}/tool-results/{name}`; where rules fired is reported with the location
+  `<key>:0:`, where `<key>` is the object key the server answered (`sessions/<id>/tool-results/<name>`, or
+  `...<name>@<hash>` for a changed version). A file is remembered by its size and modification time, so it is
+  uploaded once, and again only if it changes. A file larger than 8 MiB, a name that is not safe, a name
+  ending in `.jsonl` (it would look like a transcript chunk) or a file the server refuses is skipped with a
+  log line, once. A refusal never counts as a refused chunk. If the redaction report fails after the file was
+  stored, the file is sent again at the next sync; the server stores nothing new and records each redaction
+  site once. The prompt hook (`UserPromptSubmit`) leaves tool-result files for a later sync.
+
+Both use endpoints an older server does not have. Its 404 or 405 is logged once; the client asks again an
+hour later (per session) and the transcript upload carries on.
+
+The environment record has fields an older server does not know; if such a server refuses the record
+(422), the client sends again with only the fields it knows, remembers the hash of what it sent (not of the
+whole record), and the hook sends the whole record again an hour later.
 
 When the API **refuses** an upload:
 
@@ -90,8 +118,14 @@ Only small files in `CCP_STATE_DIR` (default `~/.ccp/capture`), never transcript
 <state_dir>/<session_id>/<stream>.offset     a number: source bytes uploaded so far
 <state_dir>/<session_id>/<stream>.lock       exists while that stream is being uploaded
 <state_dir>/<session_id>/transcript_path     where the transcript is, so catch-up can find it
-<state_dir>/<session_id>/<name>.marker       a small value: the last environment record's hash,
-                                             or refused-<stream>: "<offset> <refusals in a row>"
+<state_dir>/<session_id>/<name>.marker       a small value: environment-sent: the hash of the last
+                                             environment record sent; environment-done: "1" once
+                                             complete, "partial <time>" if an older API took part,
+                                             refused-<stream>: "<offset> <refusals in a row>",
+                                             run-key: the current session's run key,
+                                             lifecycle-<kind>-<key>: a start or end waiting to be sent,
+                                             tool-result-<hash of name>: "<size>:<mtime>" once uploaded,
+                                             unsupported-<feature>: when an older API said 404
 ```
 
 A lock older than two minutes is assumed to belong to a crashed process and is taken over.
@@ -123,6 +157,9 @@ value, and the location uses the redacted form of any key. The server stores the
 
 - `tests/unit/capture/`: reader, state and locking, pipeline, HTTP client (against a local test
   server that can misbehave), sync logic with a fake API, and the command.
+- `tests/unit/capture/test_client_additions.py`: lifecycle events, tool-result files, the older-server
+  fallbacks and the Workflow run id.
+- `tests/integration/test_chat_hierarchy.py`: tool-result files and lifecycle events through the real API.
 - `tests/integration/test_capture_client.py`: the real client against the real API, PostgreSQL and
   MinIO: stored data is redacted, attachments are stored once, **killing the API mid-session loses
   nothing and duplicates nothing**, and losing the state folder creates no duplicates.

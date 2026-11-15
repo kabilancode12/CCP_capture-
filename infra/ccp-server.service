@@ -1,0 +1,33 @@
+# systemd USER unit: runs the CCP server without Docker (the alternative to the ccp-server
+# service in docker-compose.yml). PostgreSQL and MinIO must be reachable as set in `.env`.
+#
+# Install (as your normal user, no root needed):
+#   mkdir -p ~/.config/systemd/user
+#   cp infra/ccp-server.service ~/.config/systemd/user/
+#   # edit WorkingDirectory below to this repository's folder (it holds `.env` and db/migrations)
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now ccp-server
+#   loginctl enable-linger "$USER"        # keep it running when you are logged out
+#
+# Look at it:   systemctl --user status ccp-server     journalctl --user -u ccp-server -f
+#
+# The server reads `.env` in its working directory (the settings are not repeated here). The
+# Python environment needs the package installed with the server extra: pip install ".[server]".
+[Unit]
+Description=CCP server (ingestion API + indexer)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Edit these two lines: the repository folder, and the Python of the virtual environment.
+WorkingDirectory=%h/Downloads/ccp_V2
+ExecStart=%h/Downloads/ccp_V2/.venv/bin/python -m ccp.server --migrate
+Restart=on-failure
+RestartSec=5
+# SIGTERM (systemctl stop) makes the server finish its current indexing job and exit.
+TimeoutStopSec=45
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=default.target
