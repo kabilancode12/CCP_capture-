@@ -104,3 +104,17 @@ def test_the_outcome_follows_the_error_flag_and_exit_code(
     expected: tuple[bool | None, int | None],
 ) -> None:
     assert outcome(is_error=is_error, exit_code=exit_code, interrupted=interrupted) == expected
+
+
+def test_a_request_to_a_local_service_is_a_manual_check_and_a_download_is_not() -> None:
+    from ccp.index.testruns import MANUAL_CHECK, detect_test_runner
+
+    assert (
+        detect_test_runner("curl -s http://localhost:5000/api/files/parse -T big.csv")
+        == MANUAL_CHECK
+    )
+    assert detect_test_runner("cd app && curl -sf http://127.0.0.1:8080/health") == MANUAL_CHECK
+    assert detect_test_runner("Invoke-WebRequest http://localhost:3000") == MANUAL_CHECK
+    assert detect_test_runner("curl -O https://example.com/archive.tar.gz") is None
+    assert detect_test_runner("echo curl http://localhost:1") is None
+    assert detect_test_runner("pytest -q") == "pytest"

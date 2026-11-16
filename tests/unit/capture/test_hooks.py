@@ -152,7 +152,12 @@ def test_a_real_payload_is_parsed(tmp_path: Path) -> None:
     )
     payload = parse_payload(text)
     assert payload == HookPayload(
-        "SubagentStop", "abc", tmp_path / "abc.jsonl", agent_type="Explore", source="startup"
+        "SubagentStop",
+        "abc",
+        tmp_path / "abc.jsonl",
+        agent_type="Explore",
+        source="startup",
+        prompt="never used",  # kept: the snapshot's "why" falls back to it
     )
 
 

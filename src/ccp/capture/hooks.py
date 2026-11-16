@@ -58,9 +58,11 @@ from typing import Protocol
 from ccp.capture.client import ENVIRONMENT_PARTIAL, UNSUPPORTED_RETRY_SECONDS, StreamResult
 from ccp.capture.snapshots.context import (
     AI_OTHER,
+    EXCERPT_CHARS,
     HUMAN,
     SnapshotContext,
     actor_of_tool,
+    one_line,
     read_transcript_context,
     target_of,
 )
@@ -94,6 +96,7 @@ HOOK_TIMEOUTS = {
 # The tools whose calls may change files: only these get a hook (a read-only tool needs none).
 TOOL_MATCHER = "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell"
 HOOK_MATCHERS = {PRE_TOOL_USE: TOOL_MATCHER, POST_TOOL_USE: TOOL_MATCHER}
+LAST_PROMPT_MARKER = "last-prompt"  # the start of the newest prompt (the hook gets its text first)
 TOOL_BUSY_MARKER = "tool-busy"  # set while a tool runs, so the watcher leaves its changes alone
 
 # How long each hook may spend uploading. Hooks that hold Claude up (start, prompt) get less.
@@ -138,6 +141,7 @@ class HookPayload:
     tool_name: str | None = None
     tool_use_id: str | None = None
     tool_input: object = None
+    prompt: str | None = None
 
 
 def parse_payload(text: str) -> HookPayload | None:
@@ -174,6 +178,7 @@ def parse_payload(text: str) -> HookPayload | None:
         tool_name=tool_name if isinstance(tool_name, str) else None,
         tool_use_id=tool_use_id if isinstance(tool_use_id, str) else None,
         tool_input=data.get("tool_input"),
+        prompt=data.get("prompt") if isinstance(data.get("prompt"), str) else None,
     )
 
 
@@ -265,6 +270,10 @@ class HookHandler:
         if event == POST_TOOL_USE:
             return self._after_tool(payload)
         if event == USER_PROMPT_SUBMIT:  # tool results wait for Stop: one file could hold Claude up
+            if payload.prompt:
+                self._state.set_marker(
+                    payload.session_id, LAST_PROMPT_MARKER, one_line(payload.prompt, EXCERPT_CHARS)
+                )
             summary = self._sync(payload, PROMPT_BUDGET_SECONDS, tool_results=False)
             # Whatever changed since the last snapshot was not done by Claude: a person did it.
             return summary + self._code_note(payload, USER_PROMPT_SUBMIT, SnapshotContext(HUMAN))
@@ -332,11 +341,12 @@ class HookHandler:
     def _tool_context(self, payload: HookPayload, actor: str, tool: str | None) -> SnapshotContext:
         """What a snapshot should say: the tool, its call id, the model and the prompt behind it."""
         model, prompt_id, excerpt = read_transcript_context(payload.transcript)
+        excerpt = excerpt or self._state.get_marker(payload.session_id, LAST_PROMPT_MARKER)
         return SnapshotContext(
             actor=actor,
             model=model,
             tool=tool,
-            target=target_of(payload.tool_input),
+            target=target_of(payload.tool_input, payload.cwd),
             tool_use_id=payload.tool_use_id,
             prompt_id=prompt_id,
             prompt_excerpt=excerpt,

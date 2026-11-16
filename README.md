@@ -63,6 +63,7 @@ Something not working? [docs/troubleshooting.md](docs/troubleshooting.md).
 | --- | --- |
 | Get it running | [quickstart.md](docs/quickstart.md), then [troubleshooting.md](docs/troubleshooting.md) |
 | Run the one-week self-pilot | [pilot.md](docs/pilot.md) |
+| What is built, and what is left | [requirements.md](docs/requirements.md) |
 | Ask questions of the captured data (cost, file history, sub-agents, ...) | [queries.md](docs/queries.md), [audit.md](docs/audit.md) |
 | See usage and cost on a dashboard | [dashboards.md](docs/dashboards.md) |
 | Know every setting | [configuration.md](docs/configuration.md) |

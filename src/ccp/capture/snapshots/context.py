@@ -7,6 +7,7 @@ redacted, because it is written into a commit message that leaves the machine.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 from dataclasses import dataclass
@@ -15,7 +16,7 @@ from typing import Any
 
 from ccp.redaction.redactor import redact_string
 
-TAIL_BYTES = 262_144  # how much of the transcript's end is read
+TAIL_WINDOWS = (262_144, 1_048_576, 4_194_304, 16_777_216)  # how much of the end is read, widening
 EXCERPT_CHARS = 160
 _EDIT_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
 _SHELL_TOOLS = frozenset({"Bash", "PowerShell"})
@@ -67,33 +68,53 @@ def actor_of_tool(tool_name: str | None, agent: str | None = None) -> str:
 
 def one_line(text: str, limit: int) -> str:
     """Redacted, control-free, one line of at most ``limit`` characters."""
-    cleaned, _ = redact_string(_CONTROL.sub(" ", text).strip())
+    cleaned, _ = redact_string(" ".join(_CONTROL.sub(" ", text).split()))
     return cleaned if len(cleaned) <= limit else cleaned[: limit - 3].rstrip() + "..."
 
 
-def target_of(tool_input: Any) -> str | None:
-    """The file path or the start of the command a tool call worked on."""
+def target_of(tool_input: Any, root: Path | None = None) -> str | None:
+    """The file path or the start of the command a tool call worked on.
+
+    A path inside ``root`` (the repository) is shown relative to it.
+    """
     if not isinstance(tool_input, dict):
         return None
     for key in ("file_path", "notebook_path", "command"):
         value = tool_input.get(key)
         if isinstance(value, str) and value.strip():
+            if key != "command" and root is not None:
+                with contextlib.suppress(ValueError, OSError):
+                    value = Path(value).resolve().relative_to(root.resolve()).as_posix()
             return one_line(value, 80)
     return None
 
 
 def read_transcript_context(transcript: Path | None) -> tuple[str | None, str | None, str | None]:
-    """``(model, prompt uuid, prompt excerpt)`` from the end of a transcript; None where unknown."""
+    """``(model, prompt uuid, prompt excerpt)`` from the end of a transcript; None where unknown.
+
+    Real transcripts hold very large entries (attachments, tool output), so the window read from
+    the end widens until both the model and the prompt are found, or the limit is reached.
+    """
     if transcript is None:
         return None, None, None
-    try:
-        with transcript.open("rb") as handle:
-            handle.seek(0, 2)
-            size = handle.tell()
-            handle.seek(max(0, size - TAIL_BYTES))
-            tail = handle.read().decode("utf-8", errors="replace")
-    except OSError:
-        return None, None, None
+    model = prompt_id = excerpt = None
+    for window in TAIL_WINDOWS:
+        try:
+            with transcript.open("rb") as handle:
+                handle.seek(0, 2)
+                size = handle.tell()
+                handle.seek(max(0, size - window))
+                tail = handle.read().decode("utf-8", errors="replace")
+        except OSError:
+            return None, None, None
+        model, prompt_id, excerpt = _scan(tail)
+        if (model and prompt_id) or window >= size:
+            break
+    return model, prompt_id, excerpt
+
+
+def _scan(tail: str) -> tuple[str | None, str | None, str | None]:
+    """Find the newest model and the newest real prompt in text taken from a transcript's end."""
     model = prompt_id = excerpt = None
     for line in reversed(tail.splitlines()):
         try:

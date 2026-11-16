@@ -507,8 +507,10 @@ def _usage(data: ChatData) -> list[str]:
           r["cache_creation_tokens"], r["web_search_requests"], r["cost_usd"]] for r in doc["cost_by_model"]],
     )  # fmt: skip
     out += [
-        "The two tables come from different sources (per response, and Claude Code's cost "
-        "record), so their token totals can differ slightly.",
+        "The first table is the sum of what each API response reported, so it is complete. The second "
+        "is Claude Code's own cost record: a snapshot written at certain moments (for example when a "
+        "session is closed), so it can miss the last replies, and it counts input tokens differently. "
+        "The cost in the summary comes from that record, as of its last snapshot.",
         "",
     ]
     return out
