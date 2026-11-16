@@ -79,6 +79,10 @@ shell changes). The shell reader understands only clear cases (`>`, `>>`, `tee`,
 `touch`, `mkdir`, project scaffolds such as `dotnet new`), skips `/tmp` and `/dev`, and gives no file for a
 command it cannot read. Shell changes have no line counts.
 
+## How fast decisions appear
+
+Indexing and the catalog follow each reply within seconds (a new job waits a median of about 3 s and runs for about 5 s). Decisions take longer because they call a model twice, about 35 s per chat (24 s to write, 10 s to review). A chat is processed as soon as a session of it **ends**, or after **2 quiet minutes** if no end arrives; the server looks every **30 seconds**, and up to **3 chats** are sent to the model at the same time. A chat that is still in use is not processed again within **5 minutes**, so a long chat with many pauses does not spend tokens at every pause. All of this is set with `CCP_DECISION_IDLE_MINUTES`, `CCP_DECISION_SWEEP_SECONDS`, `CCP_DECISION_MIN_GAP_MINUTES` and `CCP_DECISION_WORKERS` ([configuration.md](configuration.md)). A faster model for the writing step (`CCP_DECISION_MODEL`) shortens each run at some cost in quality.
+
 ## When a chat is processed
 
 A chat is processed when it has no decisions yet, or when its last event is newer than its newest decision,
