@@ -723,25 +723,3 @@ def test_a_chat_without_decisions_is_not_asked_again_until_it_has_new_activity(c
     )
     conn.commit()
     assert CHAT in pending_chats(conn, False)  # new activity: it is pending again
-
-
-def test_a_busy_chat_waits_for_the_minimum_gap_but_a_session_end_does_not(
-    database: DatabaseSettings,
-) -> None:
-    from datetime import UTC, datetime, timedelta
-    import threading
-
-    from ccp.decisions import plugin
-
-    seen: list[str] = []
-    original = plugin.process_chat
-    plugin.process_chat = lambda connection, provider, settings, sid: seen.append(sid)  # type: ignore[assignment]
-    plugin._LAST_DONE.clear()
-    plugin._LAST_DONE["gap-chat"] = datetime.now(UTC)  # processed a moment ago
-    try:
-        assert plugin._LAST_DONE and not seen
-        assert datetime.now(UTC) - plugin._LAST_DONE["gap-chat"] < timedelta(minutes=5)
-    finally:
-        plugin.process_chat = original  # type: ignore[assignment]
-        plugin._LAST_DONE.clear()
-    assert isinstance(threading.Event(), threading.Event)

@@ -63,6 +63,20 @@ def session_ended(connection: Any, session_id: str) -> bool:
     return bool(row and row[0])
 
 
+def is_due(
+    *, quiet: bool, ended: bool, last_done: datetime | None, now: datetime, min_gap: timedelta
+) -> bool:
+    """Whether a pending chat is sent to the model now.
+
+    A chat is due when it has been quiet long enough or a session of it ended. One that was
+    processed less than ``min_gap`` ago waits, unless a session ended: a chat still in use is not
+    sent again at every pause, because each run costs tokens.
+    """
+    if not (quiet or ended):
+        return False
+    return ended or last_done is None or now - last_done >= min_gap
+
+
 def sweep_once(
     database: DatabaseSettings,
     idle: timedelta,
@@ -100,12 +114,9 @@ def sweep_once(
                 continue
             quiet = state.last_event_at is None or datetime.now(UTC) - state.last_event_at >= idle
             ended = session_ended(connection, session_id)
-            if not quiet and not ended:
-                continue
-            last = _LAST_DONE.get(session_id)
-            if not ended and last is not None and datetime.now(UTC) - last < min_gap:
-                continue  # still in use: wait before spending tokens on it again
-            due.append(session_id)
+            now, last = datetime.now(UTC), _LAST_DONE.get(session_id)
+            if is_due(quiet=quiet, ended=ended, last_done=last, now=now, min_gap=min_gap):
+                due.append(session_id)
     finally:
         connection.close()
 
