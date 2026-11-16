@@ -150,7 +150,7 @@ def test_chat_folder_has_every_file(story: ObjectStore, connection: Any) -> None
     assert catalog_chat(connection, story, SESSION) == CHAT
     names = {k.removeprefix(f"{CHAT}/") for k in story.list_keys(f"{CHAT}/")}
     assert names == {
-        "README.md", "report.md", "00_summary.json", "01_conversation.md", "02_sessions.json",
+        "README.md", "report.md", "report.html", "00_summary.json", "01_conversation.md", "02_sessions.json",
         "03_decisions.json", "04_tests.json", "05_code_changes.json", "06_corrections.json",
         "07_subagents_and_workflows.json", "08_usage.json", "transcript/main.json",
         "transcript/agents/explore__a1.json",
