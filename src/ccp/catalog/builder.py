@@ -230,10 +230,10 @@ def _write_index(connection: Any, store: CatalogStore, listing: _Listing) -> Non
                 "project_id": row["project_id"],
                 "name": row["project_label"] or row["project_name"],
                 "path": f"{ACCOUNTS_FOLDER}/{account_path}/projects/{project_name}",
-                "chats": {},
+                "sessions": {},
             },
         )
-        project["chats"][chat_name] = {
+        project["sessions"][chat_name] = {
             "chat_id": row["chat_id"],
             "title": row["title"],
             "started_at": row["started_at"],
@@ -242,7 +242,7 @@ def _write_index(connection: Any, store: CatalogStore, listing: _Listing) -> Non
         }
     tree = [
         {**account, "projects": [
-            {**project, "chats": [project["chats"][name] for name in sorted(project["chats"])]}
+            {**project, "sessions": [project["sessions"][name] for name in sorted(project["sessions"])]}
             for _, project in sorted(account["projects"].items())
         ]}
         for _, account in sorted(accounts.items())

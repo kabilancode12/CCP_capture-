@@ -25,7 +25,7 @@ from ccp.storage.keys import transcript_chunk_key
 pytestmark = pytest.mark.integration
 
 ACCOUNT_UUID = "11111111-2222-3333-4444-555555555555"
-BASE = "catalog/accounts/claude1__11111111/projects/billing/chats"
+BASE = "catalog/accounts/claude1__11111111/projects/billing/sessions"
 CHAT = f"{BASE}/2026-07-01__fix-the-bug__sess-sto"
 OTHER = "sess-stor2"  # starts with the same 8 characters as SESSION
 
@@ -216,7 +216,7 @@ def test_index_and_readmes(story: ObjectStore, connection: Any) -> None:
     (project,) = account["projects"]
     assert account["name"] == "claude1" and account["path"].endswith("claude1__11111111")
     assert project["name"] == "billing" and project["path"] == f"{account['path']}/projects/billing"
-    assert project["chats"][0]["chat_id"] == SESSION and project["chats"][0]["path"] == CHAT
+    assert project["sessions"][0]["chat_id"] == SESSION and project["sessions"][0]["path"] == CHAT
     assert "accounts/<account>__<id8>/" in story.get("catalog/README.md").decode()
     assert "01_conversation.md" in story.get(f"{CHAT}/README.md").decode()
     assert tree_lines(_catalog_keys(story), with_files=False)[-1].endswith("__sess-sto")
@@ -300,7 +300,7 @@ def test_catalog_all_with_chats_that_share_an_id_start_and_one_without_account(
         OTHER,
     )  # no account; the project is found by the folder
     result = catalog_all(connection, story)
-    other = "catalog/accounts/unknown-account__00000000/projects/billing/chats"
+    other = "catalog/accounts/unknown-account__00000000/projects/billing/sessions"
     assert sorted(result.built) == [CHAT, f"{other}/2026-07-03__other-chat__sess-sto"]
 
     # Renaming one chat must not remove the other, although both folders end in "__sess-sto".
