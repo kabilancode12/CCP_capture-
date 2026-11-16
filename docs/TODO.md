@@ -57,7 +57,7 @@ The design is in [architecture.md](architecture.md); the long-term phases are in
 - [x] **1.10** Code snapshots ported from the old proof of concept. *Done when:* the old checks pass
   (23 of the 27 apply and are ported one for one; 4 are superseded by design, see
   [snapshots.md](snapshots.md)).
-- [ ] **1.10b** Fewer false positives in the snapshot secret scan (an entropy check on generic
+- [x] **1.10b** (done: see `docs/snapshots.md`, 36 to about 14 of 375 files) Fewer false positives in the snapshot secret scan (an entropy check on generic
   assignments, a per-repository allowlist). 6 % of this repository's own files were excluded.
   *Done when:* the false-positive rate on real repositories is acceptable without letting a hard-coded
   password through.

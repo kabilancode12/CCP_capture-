@@ -3,7 +3,7 @@
 ``ccp-capture install --api-url URL --token TOKEN`` merges into ``~/.claude/settings.json``:
 
 * the environment variables ``CCP_API_URL``, ``CCP_INGEST_TOKEN`` and ``CCP_SNAPSHOTS``, and
-* the six capture hooks (see :data:`ccp.capture.hooks.HOOK_TIMEOUTS`), each running
+* the eight capture hooks (see :data:`ccp.capture.hooks.HOOK_TIMEOUTS`), each running
   ``"<this Python>" -m ccp.capture hook``.
 
 Rules this module keeps, because the file belongs to the developer:
@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from ccp.capture.hook_settings import hook_command
-from ccp.capture.hooks import HOOK_TIMEOUTS
+from ccp.capture.hooks import HOOK_MATCHERS, HOOK_TIMEOUTS
 from ccp.capture.state import StateStore
 from ccp.settings import MIN_TOKEN_LENGTH
 from ccp.storage.keys import MAIN_STREAM
@@ -176,7 +176,7 @@ def install(
     command: str | None = None,
     snapshots: bool = True,
 ) -> InstallResult:
-    """Add (or update) the capture environment variables and the six hooks.
+    """Add (or update) the capture environment variables and the eight hooks.
 
     Args:
         settings_path: Claude Code's ``settings.json`` (tests pass a temporary file).
@@ -205,12 +205,20 @@ def install(
         }
     )
     data["env"] = env
+    # Claude's reasoning is only written to the transcript when this is on; a value the developer
+    # chose is left alone.
+    data.setdefault("showThinkingSummaries", True)
 
     hooks = _hooks_block(data, settings_path)
     ours = command or hook_command()
     for event, timeout in HOOK_TIMEOUTS.items():
         groups = _without_our_hooks(hooks.get(event))
-        groups.append({"hooks": [{"type": "command", "command": ours, "timeout": timeout}]})
+        group: dict[str, Any] = {
+            "hooks": [{"type": "command", "command": ours, "timeout": timeout}]
+        }
+        if event in HOOK_MATCHERS:  # tool hooks only for the tools that can change files
+            group = {"matcher": HOOK_MATCHERS[event], **group}
+        groups.append(group)
         hooks[event] = groups
     data["hooks"] = hooks
 
