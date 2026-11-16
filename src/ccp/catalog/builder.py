@@ -242,7 +242,7 @@ def _write_index(connection: Any, store: CatalogStore, listing: _Listing) -> Non
         }
     tree = [
         {**account, "projects": [
-            {**project, "sessions": [project["sessions"][name] for name in sorted(project["sessions"])]}
+            {**project, "sessions": [project["sessions"][n] for n in sorted(project["sessions"])]}
             for _, project in sorted(account["projects"].items())
         ]}
         for _, account in sorted(accounts.items())
@@ -265,8 +265,8 @@ def catalog_chat(
             after every turn so that ``report.md`` follows the conversation cheaply).
 
     Returns:
-        The folder of the chat in the bucket (``catalog/accounts/.../sessions/<session>``, no trailing
-        slash), or None if the chat is empty (it has no folder; an old one is removed).
+        The folder of the session in the bucket (``catalog/accounts/.../sessions/<session>``, no
+        trailing slash), or None if the chat is empty (it has no folder; an old one is removed).
 
     Raises:
         CatalogError: If there is no such chat.
