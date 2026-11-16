@@ -36,7 +36,7 @@ _FAILED: dict[str, datetime] = {}
 # Chats whose decisions were written, and when: a chat that is still being used is not sent to the
 # model again at every pause (each run costs tokens); a session end always counts.
 _LAST_DONE: dict[str, datetime] = {}
-_RETRY_AFTER = timedelta(minutes=30)
+_RETRY_AFTER = timedelta(minutes=5)
 
 
 def _minutes(env: Mapping[str, str], name: str, default: int) -> int:
