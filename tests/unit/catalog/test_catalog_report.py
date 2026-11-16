@@ -221,6 +221,27 @@ def _data() -> ChatData:
                 "cost_usd": Decimal("0.01"),
             },
         ],  # fmt: skip
+        shadow_commits=[
+            {
+                "sha": "d" * 40,
+                "parent_sha": None,
+                "seq": 1,
+                "actor": "ai_command",
+                "developer": "dev@x.org",
+                "model": "m1",
+                "tool": "Bash",
+                "target": "make build",
+                "tool_use_id": "toolu_9",
+                "prompt_uuid": "p1",
+                "prompt_excerpt": "build it",
+                "agent": "main",
+                "event": "PostToolUse",
+                "chain": "ccp/dev/host/main",
+                "captured_at": T1,
+                "files": [{"path": "out.bin", "state": "A"}],
+                "files_total": 1,
+            }
+        ],
         cost_total={"total_cost_usd": Decimal("1.51"), "has_unknown_model_cost": False},
     )
 

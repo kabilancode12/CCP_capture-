@@ -114,7 +114,7 @@ def test_code_changes_summarise_roles_and_lines() -> None:
     changes = documents.build_code_changes(_data())
     assert changes["summary"] == {
         "changes": 3, "files": 2, "lines_added": 9, "lines_removed": 2, "tests_added": 2,
-        "changes_by_role": {"code": 1, "test": 1, "unknown": 1},
+        "changes_by_role": {"code": 1, "test": 1, "unknown": 1}, "capture_commits": 0,
     }  # fmt: skip
     assert changes["changes"][0]["raw"] == {"key": "k", "line": 2}
     assert "raw_object_key" not in changes["changes"][0]

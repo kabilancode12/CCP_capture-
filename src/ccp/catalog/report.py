@@ -402,6 +402,18 @@ def _code_changes(data: ChatData) -> list[str]:
           c.get("user_modified"), c.get("is_abandoned"), _ref_of(c.get("raw"))]
          for c in doc["changes"]],
     )  # fmt: skip
+    out += ["### Capture commits (every change, and who made it)", ""]
+    out += table(
+        ["When", "Who", "Developer", "Model", "Tool", "What", "Files", "Changed", "Commit", "Parent", "Chain", "Agent", "Prompt", "Prompt id", "Tool call", "#", "Event"],
+        [[c.get("captured_at"), c.get("actor"), c.get("developer"), c.get("model"), c.get("tool"),
+          c.get("target"), c.get("files_total"),
+          ", ".join(f"{f.get('state')} {f.get('path')}" for f in (c.get("files") or [])
+                    if isinstance(f, dict)),
+          c.get("sha"), c.get("parent_sha"), c.get("chain"), c.get("agent"),
+          c.get("prompt_excerpt"), c.get("prompt_uuid"), c.get("tool_use_id"), c.get("seq"),
+          c.get("event")]
+         for c in doc["capture_commits"]],
+    )  # fmt: skip
     out += ["### Commits linked to this chat", ""]
     out += table(["Commit", "Method", "Confidence", "Matched lines", "Total lines", "Committed"],
                  [[c.get("commit_sha"), c.get("method"), c.get("confidence"), c.get("matched_lines"),

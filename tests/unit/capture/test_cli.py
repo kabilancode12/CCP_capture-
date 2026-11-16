@@ -69,7 +69,7 @@ class _FakeSnapshots:
     def __init__(self) -> None:
         self.finished: list[Path] = []
 
-    def finish(self, session_id: str, cwd: Path) -> str:
+    def finish(self, session_id: str, cwd: Path, context: object = None) -> str:
         self.finished.append(cwd)
         return "final snapshot taken"
 

@@ -35,6 +35,7 @@ class ChatData:
     cost_by_model: list[Row] = field(default_factory=list)
     cost_total: Row | None = None
     events: list[Row] = field(default_factory=list)
+    shadow_commits: list[Row] = field(default_factory=list)
 
 
 def fetch(connection: Any, sql: str, session_id: str) -> list[Row]:
@@ -151,6 +152,12 @@ _COST_TOTAL = """
     SELECT total_cost_usd, has_unknown_model_cost FROM v_session_cost WHERE session_id = %s
 """
 
+_SHADOW_COMMITS = """
+    SELECT sha, parent_sha, seq, actor, developer, model, tool, target, tool_use_id, prompt_uuid,
+           prompt_excerpt, agent, event, chain, captured_at, files, files_total
+      FROM shadow_commit WHERE session_id = %s ORDER BY captured_at, seq
+"""
+
 # The event types the readable conversation is made of.
 _EVENTS = """
     SELECT event_id, event_type, actor, occurred_at, is_abandoned, raw_line_number,
@@ -194,6 +201,7 @@ def load_chat(connection: Any, session_id: str) -> ChatData | None:
         cost_by_model=fetch(connection, _COST, session_id),
         cost_total=totals[0] if totals else None,
         events=fetch(connection, _EVENTS, session_id),
+        shadow_commits=fetch(connection, _SHADOW_COMMITS, session_id),
     )
 
 

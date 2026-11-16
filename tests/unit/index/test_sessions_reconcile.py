@@ -22,5 +22,10 @@ def test_guessed_end_moves_to_the_last_message_and_a_late_burst_becomes_its_own_
 
 
 def test_no_messages_means_the_session_ends_where_it_started() -> None:
-    clients = [ClientSession(9, _at(5), None, None)]
+    clients = [ClientSession(9, _at(5), _at(500), "idle_timeout")]
     assert reconcile_client_sessions(clients, [], 30) == ({9: _at(5)}, [])
+
+
+def test_a_session_that_is_still_open_keeps_no_end() -> None:
+    clients = [ClientSession(9, _at(5), None, None)]
+    assert reconcile_client_sessions(clients, [_at(6)], 30) == ({}, [])

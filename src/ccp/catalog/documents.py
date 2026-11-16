@@ -26,7 +26,7 @@ FILES = {
     "02_sessions.json": "each time the chat was opened (start, resume, clear, compact)",
     "03_decisions.json": "the decisions found in the chat and who reviewed them",
     "04_tests.json": "test runs and the single test cases in them",
-    "05_code_changes.json": "every file change, with its role, and the commits linked to the chat",
+    "05_code_changes.json": "file changes, linked commits, capture commits (who made each)",
     "06_corrections.json": "things that had to be put right (failed tests fixed, retries, rework)",
     "07_subagents_and_workflows.json": "sub-agents, workflow runs and slash commands",
     "08_usage.json": "tokens, effort and cost per model",
@@ -247,9 +247,11 @@ def build_code_changes(data: ChatData) -> dict[str, Any]:
             "lines_removed": sum(_int(c["lines_removed"]) for c in data.file_changes),
             "tests_added": sum(_int(c["tests_added"]) for c in data.file_changes),
             "changes_by_role": dict(sorted(by_role.items())),
+            "capture_commits": len(data.shadow_commits),
         },
         "changes": changes,
         "commits": data.commits,
+        "capture_commits": data.shadow_commits,
     }
 
 

@@ -110,8 +110,9 @@ class ClientSession:
     end_reason: str | None
 
 
-# Ends that only guess when the session stopped; a real SessionEnd reason is never replaced.
-_GUESSED_ENDS = (None, "idle_timeout", "inferred")
+# Ends that only guess when the session stopped; a real SessionEnd reason is never replaced, and a
+# session that has no end at all is still open: its end stays empty.
+_GUESSED_ENDS = ("idle_timeout", "inferred")
 
 
 def reconcile_client_sessions(
