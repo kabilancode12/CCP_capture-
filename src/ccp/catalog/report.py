@@ -194,8 +194,14 @@ def _conversation(data: ChatData) -> list[str]:
         flag = " (rewound)" if event.get("is_abandoned") else ""
         if kind == "prompt" and event.get("actor") in ("human", "subagent"):
             prompts += 1
-            who = "Developer prompt" if event.get("actor") == "human" else "Instructions to the sub-agent"
-            turn = _Turn(f"Conversation {prompts} — {clock}{flag}", event.get("occurred_at"), bool(flag))
+            who = (
+                "Developer prompt"
+                if event.get("actor") == "human"
+                else "Instructions to the sub-agent"
+            )
+            turn = _Turn(
+                f"Conversation {prompts} — {clock}{flag}", event.get("occurred_at"), bool(flag)
+            )
             turn.body += [f"#### {who}", "", *quote(text_of(content))]
             turns.append(turn)
             continue
@@ -472,10 +478,15 @@ def _agents(data: ChatData) -> list[str]:
         own = [e for e in data.agent_events if e.get("stream") == f"agent-{a.get('agent_id')}"]
         if own:  # everything the sub-agent wrote and ran, in full (its shell commands included)
             body = _conversation(ChatData(chat=data.chat, events=own))
-            out += details(f"Full conversation of this sub-agent ({len(own)} entries)", [
-                line.replace("### Conversation", "##### Conversation", 1) if line.startswith("### ") else line
-                for line in body
-            ])
+            out += details(
+                f"Full conversation of this sub-agent ({len(own)} entries)",
+                [
+                    line.replace("### Conversation", "##### Conversation", 1)
+                    if line.startswith("### ")
+                    else line
+                    for line in body
+                ],
+            )
     out += ["### Workflow runs", ""]
     out += (
         table(list(data.workflows[0].keys()), [list(w.values()) for w in data.workflows])
@@ -531,9 +542,9 @@ def _about(data: ChatData, folder: str, agent_files: int) -> list[str]:
         f"(sub-agent transcripts: {agent_files}). References such as `key line N` point to line N of "
         "that raw object.",
         "",
-        "Words used: a **session** is one Claude Code conversation (one transcript); an **opening** is "
-        "each time it was started or resumed; a **turn** is one developer prompt with everything "
-        "Claude did in answer.",
+        "Words used: account → project → **session** (one Claude Code session, one transcript) → "
+        "**chat** (everything said in it) → **conversations** (one developer prompt and everything "
+        "Claude did in answer). An **opening** is each time the session was started or resumed.",
         "",
         "Where each section's data also lives in the catalog folder:",
         "",
@@ -575,7 +586,7 @@ def render_report(data: ChatData, folder: str, agent_files: int = 0) -> str:
     out = [
         f"# {title}",
         "",
-        f"> Account **{account}** → Project **{project}** → Session `{chat['chat_id']}` · Project **{project}** · Account **{account}** · "
+        f"> Account **{account}** → Project **{project}** → Session `{chat['chat_id']}` · "
         f"started {fmt_time(chat.get('started_at'))}",
         "",
         "## Contents",

@@ -259,7 +259,7 @@ def test_report_has_every_section_and_a_title() -> None:
     assert text.startswith("# Parser | demo\n")
     for number in range(1, 11):
         assert f"\n## {number}. " in text
-    assert "### Turn 1 — 05:08:03" in text and "### Turn 2 — 05:20:00" in text
+    assert "### Conversation 1 — 05:08:03" in text and "### Conversation 2 — 05:20:00" in text
 
 
 def test_every_value_of_every_catalog_document_is_in_the_report() -> None:
