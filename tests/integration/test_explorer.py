@@ -736,3 +736,68 @@ def test_the_command_line_creates_a_user_who_can_log_in(
     assert "already exists" in capsys.readouterr().err
     monkeypatch.setenv("CCP_EXPLORER_PASSWORD", "short")
     assert main(["create-user", "b@example.com", "--role", "lead"]) == 1
+
+
+# ---------------------------------------------------------------- approaches, capture activity, insights
+
+
+def _seed_library(database: DatabaseSettings) -> None:
+    _sql(
+        database,
+        "INSERT INTO decision (session_id, seq, title, goal, reason, status, lifecycle, files, thinking) "
+        "VALUES (%s, 9, 'Simple parser', 'parse small files', 'tiny inputs', 'approved', 'removed', "
+        '\'[{"path": "parser.py", "change": "created"}]\', \'[{"text": "private reasoning"}]\')',
+        CHAT_A,
+    )
+    _sql(
+        database,
+        "INSERT INTO shadow_commit (sha, session_id, actor, model, tool, target, captured_at, chain, files, files_total) "
+        "VALUES (%s, %s, 'ai_edit', 'claude-opus-5-5', 'Write', 'parser.py', now(), 'ccp/ana/host/main', "
+        '\'[{"path": "parser.py", "state": "A"}]\', 1)',
+        "c" * 40,
+        CHAT_A,
+    )
+
+
+@pytest.mark.parametrize(
+    "path", ["/approaches?q=parser", "/timeline", "/review", "/activity", "/insights", "/alerts"]
+)
+def test_the_library_pages_open_for_every_signed_in_user_and_not_for_visitors(
+    app: Starlette, database: DatabaseSettings, path: str
+) -> None:
+    _seed_library(database)
+    assert Browser(app).get(path).status_code == 303  # to the login page
+    for email in ("ana.dev@example.com", "lead@example.com"):
+        assert _as(app, email).get(path).status_code == 200
+
+
+def test_an_approach_shows_its_story_and_hides_the_thinking_from_developers(
+    app: Starlette, database: DatabaseSettings
+) -> None:
+    _seed_library(database)
+    (decision_id,) = _sql(
+        database, "SELECT decision_id FROM decision WHERE title = 'Simple parser'"
+    )[0]
+    found = _as(app, "ben.dev@example.com").get("/approaches?q=parser")
+    assert "Simple parser" in found.text and "Removed" in found.text
+    as_developer = _as(app, "ben.dev@example.com").get(f"/approach/{decision_id}")
+    assert "tiny inputs" in as_developer.text and "private reasoning" not in as_developer.text
+    assert "ccp-approaches restore" in as_developer.text
+    as_lead = _as(app, "lead@example.com").get(f"/approach/{decision_id}")
+    assert "private reasoning" in as_lead.text
+    assert _as(app, "lead@example.com").get("/approach/999999").status_code == 404
+    assert (
+        _as(app, "lead@example.com")
+        .get(f"/approaches/compare?a={decision_id}&b={decision_id}")
+        .status_code
+        == 200
+    )
+
+
+def test_the_changes_tab_lists_who_made_each_change(
+    app: Starlette, database: DatabaseSettings
+) -> None:
+    _seed_library(database)
+    page = _as(app, "ana.dev@example.com").get(f"/chat/{CHAT_A}?tab=changes")
+    assert page.status_code == 200 and "ai_edit" in page.text and "parser.py" in page.text
+    assert _as(app, "ana.dev@example.com").get(f"/chat/{CHAT_B}?tab=changes").status_code == 404
