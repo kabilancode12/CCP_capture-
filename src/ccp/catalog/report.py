@@ -403,8 +403,8 @@ def _code_changes(data: ChatData) -> list[str]:
     ]
     out += ["### Changes", ""]
     out += table(
-        ["When", "File", "Change", "Tool", "Actor", "Role", "+", "-", "Tests added", "User modified", "Rewound", "Raw"],
-        [[c.get("occurred_at"), c["path"], c.get("change_type"), c.get("tool"), c.get("actor_class"),
+        ["Id", "When", "File", "Change", "Tool", "Actor", "Role", "+", "-", "Tests added", "User modified", "Rewound", "Raw"],
+        [[c.get("file_change_id"), c.get("occurred_at"), c["path"], c.get("change_type"), c.get("tool"), c.get("actor_class"),
           c.get("file_role"), c.get("lines_added"), c.get("lines_removed"), c.get("tests_added"),
           c.get("user_modified"), c.get("is_abandoned"), _ref_of(c.get("raw"))]
          for c in doc["changes"]],
@@ -440,7 +440,7 @@ def _tests(data: ChatData) -> list[str]:
             ("Passed", run.get("passed")), ("Exit code", run.get("exit_code")),
             ("Tests passed", run.get("tests_passed")), ("Tests failed", run.get("tests_failed")),
             ("Tests skipped", run.get("tests_skipped")), ("Output source", run.get("output_source")),
-            ("Raw", _ref_of(run.get("raw"))),
+            ("Raw", _ref_of(run.get("raw"))), ("Run id", run.get("test_run_id")),
         ])  # fmt: skip
         out += table(["#", "Test case", "Outcome", "Message"],
                      [[c["position"], c["name"], c["outcome"], c["message"]] for c in run["cases"]])  # fmt: skip
