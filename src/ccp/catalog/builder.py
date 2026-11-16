@@ -159,14 +159,15 @@ def _build_chat(
     agent_streams = sorted(s for s in streams if s != MAIN_STREAM)
     agent_files = _agent_file_names(data, agent_streams)
     raw_main = read_lines(store, streams.get(MAIN_STREAM, []))  # the report holds every line
+    report_text = render_report(data, folder, len(agent_files), raw_main)
 
     files: dict[str, tuple[bytes, str]] = {
         "README.md": (
             documents.build_readme(data, folder.rsplit("/", 1)[-1], len(agent_files)).encode(),
             _MARKDOWN,
         ),
-        REPORT_FILE: (render_report(data, folder, len(agent_files), raw_main).encode(), _MARKDOWN),
-        REPORT_HTML: (report_page(data.chat.get("title"), render_report(data, folder, len(agent_files), raw_main)).encode(), _HTML),
+        REPORT_FILE: (report_text.encode(), _MARKDOWN),
+        REPORT_HTML: (report_page(data.chat.get("title"), report_text).encode(), _HTML),
         SUMMARY_FILE: (
             documents.to_json(documents.build_summary(data, folder), sort_keys=True),
             _JSON,
