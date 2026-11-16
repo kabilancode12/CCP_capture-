@@ -7,13 +7,13 @@ replaces the ones a model wrote earlier but never the ones a person reviewed.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 import pg8000.dbapi
 
-from ccp.decisions.digest import LineRef
+from ccp.decisions.digest import FileRef, LineRef
 
 HUMAN_STATUSES = ("approved", "rejected", "needs_review")
 MAX_REVIEWER = 100
@@ -52,9 +52,10 @@ _NEXT_SEQ = "SELECT COALESCE(max(seq), 0) FROM decision WHERE session_id = %s"
 _INSERT_DECISION = """
     INSERT INTO decision (session_id, seq, title, goal, options, chosen, reason, result,
                           tests_summary, commit_shas, evidence_lines, status, reviewed_by_kind,
-                          reviewer, review_note, review_history, model, prompt_version)
+                          reviewer, review_note, review_history, model, prompt_version,
+                          decided_by, files)
     VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s::text[], %s::jsonb, %s, 'ai', %s, %s,
-            %s::jsonb, %s, %s)
+            %s::jsonb, %s, %s, %s, %s::jsonb)
 """
 _DELETE_AI_CORRECTIONS = """
     DELETE FROM correction
@@ -117,6 +118,8 @@ class NewDecision:
     evidence: list[LineRef]
     status: str  # approved | needs_review
     review_note: str
+    decided_by: str | None = None  # developer | claude
+    files: list[FileRef] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -179,11 +182,13 @@ def save_decisions(
     developer_corrections: list[tuple[int, str]],
     model: str,
     prompt_version: str,
+    review_model: str | None = None,
 ) -> None:
     """Replace the chat's AI-written decisions and developer corrections, in one transaction.
 
     Decisions a person reviewed are kept (new ones are numbered after them). Developer corrections
-    are ``(trigger event id, note)`` pairs.
+    are ``(trigger event id, note)`` pairs. ``model`` wrote the decisions and ``review_model``
+    (default: the same) reviewed them.
     """
     cursor = connection.cursor()
     try:
@@ -191,13 +196,14 @@ def save_decisions(
         cursor.execute(_NEXT_SEQ, (session_id,))
         seq = int(cursor.fetchone()[0])
         now = datetime.now(UTC).isoformat()
+        reviewer = review_model or model
         for decision in decisions:
             seq += 1
             history = [
                 {
                     "at": now,
                     "by_kind": "ai",
-                    "reviewer": model,
+                    "reviewer": reviewer,
                     "status": decision.status,
                     "note": decision.review_note,
                 }
@@ -221,11 +227,18 @@ def save_decisions(
                     decision.commit_shas,
                     json.dumps(evidence),
                     decision.status,
-                    model,
+                    reviewer,
                     decision.review_note,
                     json.dumps(history, ensure_ascii=False),
                     model,
                     prompt_version,
+                    decision.decided_by,
+                    json.dumps(
+                        [
+                            {"path": item.path, "change": item.change, "via": item.via}
+                            for item in decision.files
+                        ]
+                    ),
                 ),
             )
         cursor.execute(_DELETE_AI_CORRECTIONS, (session_id,))

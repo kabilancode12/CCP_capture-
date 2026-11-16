@@ -148,9 +148,49 @@ def build_sessions(data: ChatData) -> list[Row]:
     return data.sessions
 
 
-def build_decisions(data: ChatData) -> list[Row]:
-    """``03_decisions.json``: decisions with their review state."""
-    return data.decisions
+def build_decisions(data: ChatData) -> list[dict[str, Any]]:
+    """``03_decisions.json``: one clear record per decision, in the order they were made.
+
+    The keys are plain words: what was wanted (``goal``), what else was possible (``options``),
+    what was done (``chosen``), why (``reason``), what came out (``result``), the tests
+    (``tests``), the files it changed (``files_changed``), who decided (``decided_by``) and who
+    checked it (``review``).
+    """
+    return [
+        {
+            "number": d["seq"],
+            "title": d["title"],
+            "goal": d["goal"],
+            "options": d["options"] or [],
+            "chosen": d["chosen"],
+            "reason": d["reason"],
+            "result": d["result"],
+            "tests": d["tests_summary"],
+            "files_changed": [
+                {"file": f.get("path"), "change": f.get("change"), "how": f.get("via")}
+                for f in (d["files"] or [])
+                if isinstance(f, dict)
+            ],
+            "decided_by": d["decided_by"],
+            "commits": d["commit_shas"] or [],
+            "review": {
+                "status": d["status"],
+                "checked_by": d["reviewed_by_kind"],
+                "reviewer": d["reviewer"],
+                "note": d["review_note"],
+                "history": d["review_history"],
+            },
+            "evidence": [
+                {"transcript_file": e.get("key"), "line": e.get("line")}
+                for e in (d["evidence_lines"] or [])
+                if isinstance(e, dict)
+            ],
+            "written_by": d["model"],
+            "decision_id": d["decision_id"],
+            "created_at": d["created_at"],
+        }
+        for d in data.decisions
+    ]
 
 
 def build_tests(data: ChatData) -> dict[str, Any]:

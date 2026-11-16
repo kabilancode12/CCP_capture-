@@ -18,7 +18,7 @@ catalog/
         00_summary.json           ids, account, project, title, start/end, models, tokens, cost, counts
         01_conversation.md        prompts, replies, tool calls (one line each), thinking notes
         02_sessions.json          each time the chat was opened
-        03_decisions.json         decisions and who reviewed them
+        03_decisions.json         the decisions: goal, options, chosen, reason, result, tests, files changed, who decided, who checked
         04_tests.json             test runs with their test cases
         05_code_changes.json      file changes with role, and the commits linked to the chat
         06_corrections.json       what had to be put right

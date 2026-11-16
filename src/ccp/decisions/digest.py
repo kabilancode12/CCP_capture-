@@ -22,6 +22,8 @@ from typing import Any
 
 import pg8000.dbapi
 
+from ccp.decisions.shellfiles import files_changed_by
+
 # How long a prompt or reply excerpt may be, tried in this order until the digest fits.
 EXCERPT_WIDTHS = (800, 400, 200, 100)
 
@@ -60,16 +62,29 @@ _COMMANDS = f"""
        AND split_part(e.raw_object_key, '/', 3) = '{_MAIN_STREAM}'
 """  # noqa: S608  (only constants are inserted)
 
-# One line per file: the first edit is the reference; counts cover all of the file's edits.
+# One line per file and prompt: the first edit is the reference; counts cover the edits that one
+# prompt of the developer led to, so a file that changed for two decisions is on two lines.
 _EDITS = """
     SELECT (array_agg(e.event_id ORDER BY e.occurred_at, e.event_id))[1],
            min(e.occurred_at),
            (array_agg(e.raw_object_key ORDER BY e.occurred_at, e.event_id))[1],
            (array_agg(e.raw_line_number ORDER BY e.occurred_at, e.event_id))[1],
-           f.path, count(*), sum(f.lines_added), sum(f.lines_removed), max(f.file_role)
+           f.path, count(*), sum(f.lines_added), sum(f.lines_removed), max(f.file_role),
+           bool_or(f.change_type = 'added'), bool_and(f.change_type = 'deleted')
       FROM file_change f JOIN event e ON e.event_id = f.event_id
      WHERE f.session_id = %s AND NOT e.is_abandoned
-     GROUP BY f.path
+     GROUP BY f.path, f.prompt_event_id
+"""
+
+# The Bash commands of each tool call (one call may hold several), for the shell file changes.
+_SHELL = """
+    SELECT e.event_id, e.occurred_at, e.raw_object_key, e.raw_line_number,
+           array(SELECT b -> 'input' ->> 'command'
+                   FROM jsonb_array_elements(e.payload #> '{message,content}') b
+                  WHERE b ->> 'type' = 'tool_use' AND b ->> 'name' = 'Bash')
+      FROM event e
+     WHERE e.session_id = %s AND e.event_type = 'tool_call' AND NOT e.is_abandoned
+       AND jsonb_typeof(e.payload #> '{message,content}') = 'array'
 """
 
 _TESTS = """
@@ -93,13 +108,23 @@ _COMMITS = """
 
 
 @dataclass(frozen=True)
+class FileRef:
+    """A file a digest line changed (read from the recorded data, never written by the model)."""
+
+    path: str
+    change: str  # created | modified | deleted
+    via: str  # edit (Edit/Write tool) | shell (a command)
+
+
+@dataclass(frozen=True)
 class LineRef:
     """Where one digest line comes from."""
 
     event_id: int
     raw_object_key: str
     raw_line_number: int
-    kind: str  # prompt | reply | command | edit | test | correction
+    kind: str  # prompt | reply | command | edit | shell | test | correction
+    files: tuple[FileRef, ...] = ()  # for edit and shell lines
 
 
 @dataclass(frozen=True)
@@ -121,7 +146,7 @@ class _Entry:
 
     at: datetime
     ref: LineRef
-    label: str  # PROMPT | REPLY | COMMAND | EDIT | TEST | CORRECTION
+    label: str  # PROMPT | REPLY | COMMAND | EDIT | SHELL | TEST | CORRECTION
     excerpt: str = ""  # shortened to the current width
     detail: str = ""  # fixed text that follows the label
 
@@ -256,11 +281,25 @@ def _entries(cursor: pg8000.dbapi.Cursor, session_id: str) -> list[_Entry]:
             _Entry(_when(at), ref, "COMMAND", detail=f"{name or '?'} {arguments or ''}".strip())
         )
     cursor.execute(_EDITS, (session_id,))
-    for event_id, at, key, line, path, count, added, removed, role in cursor.fetchall():
-        ref = LineRef(event_id, key, line, "edit")
+    for row in cursor.fetchall():
+        event_id, at, key, line, path, count, added, removed, role, created, deleted = row
+        change = "created" if created else ("deleted" if deleted else "modified")
+        ref = LineRef(event_id, key, line, "edit", (FileRef(str(path), change, "edit"),))
         role_text = f", {role}" if role else ""
-        detail = f"{path} ({count} edits, +{added}/-{removed}{role_text})"
+        detail = f"{path} ({change}, {count} edits, +{added}/-{removed}{role_text})"
         entries.append(_Entry(_when(at), ref, "EDIT", detail=detail))
+    cursor.execute(_SHELL, (session_id,))
+    for event_id, at, key, line, commands in cursor.fetchall():
+        for command in commands or []:  # one digest line per command: a decision cites only its own
+            files = tuple(
+                FileRef(item.path, item.change, "shell") for item in files_changed_by(command or "")
+            )
+            if not files:
+                continue
+            ref = LineRef(event_id, key, line, "shell", files)
+            shown = "; ".join(f"{item.change} {item.path}" for item in files[:12])
+            more = f"; and {len(files) - 12} more" if len(files) > 12 else ""
+            entries.append(_Entry(_when(at), ref, "SHELL", detail=f"by command: {shown}{more}"))
     cursor.execute(_TESTS, (session_id,))
     for row in cursor.fetchall():
         event_id, at, key, line, framework, passed, n_passed, n_failed, n_skipped, command = row

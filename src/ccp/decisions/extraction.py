@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, TypeGuard
 
-from ccp.decisions.digest import LineRef
+from ccp.decisions.digest import FileRef, LineRef
 
 MAX_TITLE = 200
 MAX_TEXT = 2000
@@ -19,6 +19,9 @@ MAX_NOTE = 300
 MAX_OPTIONS = 10
 MAX_EVIDENCE = 20
 MAX_REVIEW_NOTE = 300
+MAX_FILES = 60
+
+DECIDED_BY = ("developer", "claude")
 
 _SHA = re.compile(r"[0-9a-f]{7,40}")
 
@@ -43,6 +46,8 @@ class ExtractedDecision:
     tests_summary: str | None
     commit_shas: list[str]
     evidence: list[int]  # digest line numbers, all present in the digest
+    decided_by: str | None = None  # developer | claude
+    files: list[FileRef] = field(default_factory=list)  # read from the recorded data
 
     def as_prompt_dict(self) -> dict[str, Any]:
         """The decision as the reviewer sees it."""
@@ -53,7 +58,11 @@ class ExtractedDecision:
             "chosen": self.chosen,
             "reason": self.reason,
             "result": self.result,
-            "tests_summary": self.tests_summary,
+            "tests": self.tests_summary,
+            "decided_by": self.decided_by,
+            "files_changed": [
+                {"path": item.path, "change": item.change, "via": item.via} for item in self.files
+            ],
             "commit_shas": self.commit_shas,
             "evidence_lines": self.evidence,
         }
@@ -181,10 +190,29 @@ def _decision(
         chosen=chosen,
         reason=_text(item.get("reason"), MAX_TEXT) or "",
         result=_text(item.get("result"), MAX_TEXT) or "",
-        tests_summary=_text(item.get("tests_summary"), MAX_TEXT),
+        tests_summary=_text(item.get("tests", item.get("tests_summary")), MAX_TEXT),
         commit_shas=_commits(item.get("commit_shas"), known_commits),
         evidence=evidence,
+        decided_by=_decided_by(item.get("decided_by")),
+        files=_files(item.get("file_lines"), refs),
     )
+
+
+def _decided_by(value: Any) -> str | None:
+    text = value.strip().lower() if isinstance(value, str) else ""
+    return text if text in DECIDED_BY else None
+
+
+def _files(value: Any, refs: dict[int, LineRef]) -> list[FileRef]:
+    """The files of the cited EDIT and SHELL lines: names come from the data, one entry per file."""
+    found: dict[str, FileRef] = {}
+    for number in _ints(value):
+        ref = refs.get(number)
+        if ref is None:
+            continue
+        for item in ref.files:
+            found[item.path] = item  # a later change of the same file replaces the earlier one
+    return list(found.values())[:MAX_FILES]
 
 
 def _correction(item: Any, refs: dict[int, LineRef]) -> DeveloperCorrection | None:

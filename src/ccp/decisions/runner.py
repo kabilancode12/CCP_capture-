@@ -102,7 +102,13 @@ def process_chat(
     ]
     corrections = [(digest.refs[item.line].event_id, item.note) for item in extraction.corrections]
     save_decisions(
-        connection, session_id, decisions, corrections, settings.model, prompts.PROMPT_VERSION
+        connection,
+        session_id,
+        decisions,
+        corrections,
+        settings.model,
+        prompts.PROMPT_VERSION,
+        settings.review_model,
     )
     approved = sum(1 for decision in decisions if decision.status == "approved")
     return ChatResult(
@@ -135,7 +141,9 @@ def _review(
     asked = [item.as_prompt_dict() for item in extraction.decisions]
     try:
         answer = provider.complete(
-            prompts.REVIEW_SYSTEM, prompts.review_prompt(digest.text, asked), settings.model
+            prompts.REVIEW_SYSTEM,
+            prompts.review_prompt(digest.text, asked),
+            settings.review_model,
         )
         return parse_reviews(answer, len(asked))
     except (ProviderError, AnswerError) as error:
@@ -160,4 +168,6 @@ def _new_decision(item: ExtractedDecision, digest: Digest, review: Review | None
         evidence=[digest.refs[number] for number in item.evidence],
         status=status,
         review_note=note,
+        decided_by=item.decided_by,
+        files=item.files,
     )

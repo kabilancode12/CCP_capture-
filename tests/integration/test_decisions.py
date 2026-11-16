@@ -34,7 +34,7 @@ CHAT = "chat-decisions-1"
 KEY = f"sessions/{CHAT}/main/000000000000.jsonl"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 T0 = datetime(2026, 11, 1, 10, 0, tzinfo=UTC)
-SETTINGS = DecisionSettings(model="test-model", max_chars=80_000)
+SETTINGS = DecisionSettings(model="test-model", review_model="test-reviewer", max_chars=80_000)
 
 
 class FakeProvider:
@@ -91,7 +91,9 @@ def default_extraction(prompt: str) -> dict[str, Any]:
                 "chosen": "queue",
                 "reason": "simple and testable",
                 "result": "works",
-                "tests_summary": "2 passed after one failure",
+                "tests": "2 passed after one failure",
+                "decided_by": "claude",
+                "file_lines": [edit],
                 "commit_shas": [SHA[:8]],
                 "evidence_lines": [first, edit, test],
             },
@@ -102,7 +104,9 @@ def default_extraction(prompt: str) -> dict[str, Any]:
                 "chosen": "tabs",
                 "reason": "the developer asked",
                 "result": "done",
-                "tests_summary": None,
+                "tests": None,
+                "decided_by": "developer",
+                "file_lines": [9999],
                 "commit_shas": [],
                 "evidence_lines": [fix, 9999],
             },
@@ -206,7 +210,7 @@ def test_the_digest_lists_what_happened_with_numbered_lines(conn: Any) -> None:
     assert text.splitlines()[0].startswith("CHAT chat-dec; title: Queue work")
     assert "PROMPT Add a queue to the sender" in text
     assert "REPLY I will add a queue." in text
-    assert "EDIT src/queue.py (1 edits, +20/-0, code)" in text
+    assert "EDIT src/queue.py (created, 1 edits, +20/-0, code)" in text
     assert "TEST pytest PASSED (2 passed, 0 failed, 0 skipped) `pytest -q`" in text
     assert f"COMMIT {SHA}" in text and "explained 18/20 lines" in text
     # the numbers point at the raw transcript
@@ -285,7 +289,7 @@ def test_decisions_are_extracted_reviewed_and_stored(conn: Any) -> None:
         "Use a queue",
         "approved",
         "ai",
-        "test-model",
+        "test-reviewer",
         "supported",
         "test-model",
         prompts.PROMPT_VERSION,
@@ -301,7 +305,7 @@ def test_decisions_are_extracted_reviewed_and_stored(conn: Any) -> None:
     assert len(history) == 1
     assert (history[0]["by_kind"], history[0]["reviewer"], history[0]["status"]) == (
         "ai",
-        "test-model",
+        "test-reviewer",
         "approved",
     )
     assert datetime.fromisoformat(history[0]["at"]).tzinfo is not None
@@ -311,7 +315,7 @@ def test_the_review_is_a_separate_call_with_its_own_instructions(conn: Any) -> N
     provider = FakeProvider()
     run(conn, provider)
     assert [call[0] for call in provider.calls] == [prompts.EXTRACT_SYSTEM, prompts.REVIEW_SYSTEM]
-    assert [call[2] for call in provider.calls] == ["test-model", "test-model"]
+    assert [call[2] for call in provider.calls] == ["test-model", "test-reviewer"]  # two models
     extract_prompt, review_prompt = provider.calls[0][1], provider.calls[1][1]
     assert "Decisions to review" not in extract_prompt
     assert "Decisions to review" in review_prompt and '"index": 0' in review_prompt
@@ -450,7 +454,7 @@ def test_a_person_overrides_a_decision_and_the_history_grows(conn: Any) -> None:
     )
     assert row[:4] == ("approved", "human", "Dana Lead", "checked the diff")
     assert [(h["by_kind"], h["reviewer"], h["status"]) for h in row[4]] == [
-        ("ai", "test-model", "needs_review"),
+        ("ai", "test-reviewer", "needs_review"),
         ("human", "Dana Lead", "approved"),
     ]
     assert row[4][1]["note"] == "checked the diff"
@@ -528,6 +532,7 @@ def cli_env(database: DatabaseSettings, monkeypatch: pytest.MonkeyPatch) -> Data
     for name in ("CCP_DECISION_MODEL", "CCP_DECISION_MAX_CHARS", "CCP_DECISION_TIMEOUT_SECONDS"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("CCP_DECISION_MODEL", "test-model")
+    monkeypatch.setenv("CCP_REVIEW_MODEL", "test-reviewer")
     return database
 
 
@@ -542,7 +547,7 @@ def test_the_command_runs_lists_and_reviews(
 
     assert decisions_main(["list", "--chat", CHAT]) == 0
     listing = capsys.readouterr().out
-    assert "[approved] Use a queue" in listing and "reviewed by ai: test-model" in listing
+    assert "[approved] Use a queue" in listing and "reviewed by ai: test-reviewer" in listing
     [(decision_id,)] = rows(conn, "SELECT decision_id FROM decision WHERE seq = 2")
 
     assert (
@@ -605,3 +610,48 @@ def test_a_chat_whose_session_ended_after_its_last_message_is_finished(conn: Any
     )
     conn.commit()
     assert session_ended(conn, CHAT) is False
+
+
+# ----------------------------------------------------------- who decided, files, shell changes
+
+
+def test_a_decision_stores_who_decided_and_the_files_it_changed(conn: Any) -> None:
+    process_chat(conn, FakeProvider(), SETTINGS, CHAT)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT decided_by, files FROM decision WHERE session_id = %s ORDER BY seq", (CHAT,)
+    )
+    (first, second) = cursor.fetchall()
+    assert first[0] == "claude" and first[1] == [
+        {"path": "src/queue.py", "change": "created", "via": "edit"}
+    ]
+    assert second[0] == "developer" and second[1] == []  # an unknown line number names no file
+
+
+def test_files_changed_by_a_shell_command_are_in_the_digest_and_the_decision(conn: Any) -> None:
+    cursor = conn.cursor()
+    command = (
+        "cd /w && cat > Uploads.cs <<'EOF'\nclass A {}\nEOF\nrm -f old.http && dotnet new webapi"
+    )
+    add_event(
+        cursor, 30, "tool_call", "ai", 40,
+        {"message": {"content": [{"type": "tool_use", "name": "Bash", "input": {"command": command}}]}},
+    )  # fmt: skip
+    conn.commit()
+    digest = build_digest(conn, CHAT, 80_000)
+    shell = line_of(digest.text, "SHELL")
+    assert (
+        "created Uploads.cs; deleted old.http; created (project files from dotnet new webapi)"
+        in (digest.text)
+    )
+    answer = default_extraction(digest.text)
+    answer["decisions"][0]["file_lines"] = [line_of(digest.text, "EDIT"), shell]
+    process_chat(conn, FakeProvider(extract=answer), SETTINGS, CHAT)
+    cursor.execute("SELECT files FROM decision WHERE session_id = %s AND seq = 1", (CHAT,))
+    paths = [(f["path"], f["via"]) for f in cursor.fetchone()[0]]
+    assert paths == [
+        ("src/queue.py", "edit"),
+        ("Uploads.cs", "shell"),
+        ("old.http", "shell"),
+        ("(project files from dotnet new webapi)", "shell"),
+    ]

@@ -170,7 +170,8 @@ def test_summary_and_fact_files_match_the_database(story: ObjectStore, connectio
 
     assert [s["seq"] for s in _json(story, f"{CHAT}/02_sessions.json")] == [1, 2]
     (decision,) = _json(story, f"{CHAT}/03_decisions.json")
-    assert decision["options"] == ["a", "b"] and decision["reviewed_by_kind"] == "ai"
+    assert decision["options"] == ["a", "b"] and decision["review"]["checked_by"] == "ai"
+    assert decision["number"] == 1 and decision["files_changed"] == []
     runs = _json(story, f"{CHAT}/04_tests.json")["runs"]
     assert runs[0]["passed"] is False and runs[0]["cases"][0]["name"] == "test_login"
     assert runs[1]["passed"] is True and runs[1]["cases"] == []

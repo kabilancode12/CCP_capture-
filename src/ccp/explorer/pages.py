@@ -550,12 +550,22 @@ def decisions_tab(view: View, chat_id: str, rows: list[Row], may_review: bool) -
             if isinstance(h, dict)
         )
         fields = [
-            ("Goal", d["goal"]), ("Chosen", d["chosen"]), ("Why", d["reason"]),
+            ("Goal", d["goal"]), ("Chosen", d["chosen"]), ("Reason", d["reason"]),
             ("Result", d["result"]), ("Tests", d["tests_summary"]),
+            ("Decided by", d["decided_by"]),
         ]  # fmt: skip
         body = "".join(f"<p><strong>{k}:</strong> {esc(v)}</p>" for k, v in fields if v)
         if options:
             body += f"<p><strong>Options considered:</strong></p><ul>{options}</ul>"
+        files = [f for f in as_json_list(d["files"]) if isinstance(f, dict)]
+        if files:
+            items = "".join(
+                f"<li><code>{esc(f.get('path'))}</code> &ndash; {esc(f.get('change'))} "
+                f'<span class="muted">({"by command" if f.get("via") == "shell" else "by edit"})'
+                "</span></li>"
+                for f in files
+            )
+            body += f"<p><strong>Files changed:</strong></p><ul>{items}</ul>"
         if d["commit_shas"]:
             body += (
                 "<p><strong>Commits:</strong> "

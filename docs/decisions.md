@@ -23,20 +23,22 @@ chat. `list` prints the decision titles, status and who reviewed them.
 ## How it works
 
 1. **Digest.** A compact text of the chat is built from the index: the developer's prompts and short
-   excerpts of Claude's replies, slash commands, edits (one line per file, with its role), test runs with
+   excerpts of Claude's replies, slash commands, edits (one line per file and prompt, with the change and its role), file changes made by shell commands (`cat > file`, `sed -i`, `rm`, `mv`, `mkdir`, `dotnet new`; see below), test runs with
    their pass and fail counts, corrections found by the indexer, and the commits linked to the chat. Every
    line has a number (`[L12]`). The digest is cut to `CCP_DECISION_MAX_CHARS`: excerpts get shorter first,
    then replies are dropped, then the middle of the chat is left out. Rewound (abandoned) work is not listed.
 2. **Extraction call.** The model returns strict JSON: `decisions` (title, goal, options, chosen, reason,
-   result, tests summary, commit ids, evidence line numbers) and `developer_corrections` (prompt lines
+   result, tests, who decided, the numbers of the edit lines it changed, commit ids, evidence line numbers)
+   and `developer_corrections` (prompt lines
    where the developer corrected Claude). The answer is checked: an invalid item is dropped; evidence
    numbers that are not in the digest are removed; commit ids that match no commit linked to the chat are
    removed; a correction must point at a developer prompt.
-3. **Review call.** A separate call, with its own instructions ("you did not write these"), gets the digest
+3. **Review call.** A separate call to a **different model** (`CCP_REVIEW_MODEL`), with its own
+   instructions ("you did not write these"), gets the digest
    and the extracted decisions and answers `approve` or `needs_review` with a short note for each. A
    decision the reviewer gives no verdict for is stored as `needs_review`, never approved by default.
 4. **Store.** Each decision gets `status` `approved` or `needs_review`, `reviewed_by_kind = 'ai'`,
-   `reviewer` = the model, the review note, `prompt_version`, and one entry in `review_history`. Evidence is
+   `reviewer` = the review model, `model` = the writing model, the review note, `decided_by`, `files`, `prompt_version`, and one entry in `review_history`. Evidence is
    kept as `evidence_lines`: `[{"key": "<raw object key>", "line": <line number>}]`, a pointer into the raw
    transcript in MinIO, which a rebuild of the index does not change. The developer corrections become
    `correction` rows (`kind` `developer_correction`, `corrected_by` `developer`, `detected_by` `ai`).
@@ -49,6 +51,33 @@ A person can set a decision to `approved`, `rejected` or `needs_review` with a c
 shows `reviewed_by_kind = 'human'` and the person's name, and the review is appended to `review_history`, a
 list of `{at, by_kind, reviewer, status, note}` that is only ever added to. In code:
 `ccp.decisions.set_decision_status(connection, decision_id, status, reviewer, note)`.
+
+## What a decision looks like
+
+Each decision is short and has the same fields. The instructions (prompt version 2) ask for:
+
+| Field | Meaning |
+| --- | --- |
+| `title` | 2 to 6 words, a technical name, for example "Streaming CSV parser" |
+| `goal` | one sentence: what was to be achieved |
+| `options` | the alternatives that were really named in the chat, each as "name: main trade-off"; `[]` if none |
+| `chosen` | one sentence naming the technique or tool chosen |
+| `reason` | one or two sentences with the reason given in the chat |
+| `result` | what worked, what failed, measured numbers, known limits |
+| `tests` | for example "pytest: 12 passed, 0 failed"; "No tests run"; or what Claude reported, marked "(reported by Claude, not a recorded test run)" |
+| `decided_by` | `developer` when the developer's own words set the direction, `claude` when Claude chose |
+| `files` | the files the decision changed: `[{"path", "change": created/modified/deleted, "via": edit/shell}]` |
+
+Routine and operational steps (a port fix, a restart, a failed cleanup) are not decisions. Anything the
+model would have to infer is written as "not stated", and the reviewer sends a decision with an inferred
+field to a person (`needs_review`). Review notes are plain words and never cite digest line numbers.
+
+**Files are never written by the model.** The model only names the EDIT and SHELL digest lines that belong
+to a decision; the file names, the kind of change and how it was made are read from the recorded data
+(`file_change` for Claude's Edit and Write tools, and the commands read by `ccp.decisions.shellfiles` for
+shell changes). The shell reader understands only clear cases (`>`, `>>`, `tee`, `sed -i`, `rm`, `mv`, `cp`,
+`touch`, `mkdir`, project scaffolds such as `dotnet new`), skips `/tmp` and `/dev`, and gives no file for a
+command it cannot read. Shell changes have no line counts.
 
 ## When a chat is processed
 
@@ -65,7 +94,8 @@ A chat for which the model finds no decision at all has none stored, so `--pendi
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `CCP_DECISION_MODEL` | `claude-opus-5-5` | the model for both calls |
+| `CCP_DECISION_MODEL` | `claude-opus-5-5` | the model that writes the decisions |
+| `CCP_REVIEW_MODEL` | `claude-sonnet-5-5` | a different model that reviews them (it checks the work with other blind spots) |
 | `CCP_DECISION_TIMEOUT_SECONDS` | `600` | longest wait for one call |
 | `CCP_DECISION_MAX_CHARS` | `80000` | largest digest sent to the model |
 
