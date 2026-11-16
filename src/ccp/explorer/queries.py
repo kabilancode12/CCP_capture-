@@ -50,8 +50,8 @@ _HOME = """
            max(c.folder) AS folder,
            count(*) FILTER (WHERE NOT c.is_empty) AS chats,
            count(*) FILTER (WHERE c.is_empty) AS empty_chats,
-           COALESCE(sum((SELECT sum(d.total_tokens) FROM d_usage d
-                          WHERE d.session_id = c.chat_id)), 0)::bigint AS tokens,
+           COALESCE(sum((SELECT sum(COALESCE(d.input_tokens, 0) + COALESCE(d.output_tokens, 0))
+                           FROM d_usage d WHERE d.session_id = c.chat_id)), 0)::bigint AS tokens,
            max(c.last_activity_at) AS last_activity_at
       FROM chat c
      GROUP BY c.account_id, c.project_id
@@ -67,8 +67,8 @@ _CHAT_LIST = f"""
            (SELECT count(*) FROM event e
              WHERE e.session_id = c.chat_id AND e.event_type = 'prompt' AND e.actor = 'human'
                AND NOT e.is_abandoned AND {_MAIN}) AS prompts,
-           (SELECT COALESCE(sum(d.total_tokens), 0)::bigint FROM d_usage d
-             WHERE d.session_id = c.chat_id) AS tokens,
+           (SELECT COALESCE(sum(COALESCE(d.input_tokens, 0) + COALESCE(d.output_tokens, 0)), 0)
+                   ::bigint FROM d_usage d WHERE d.session_id = c.chat_id) AS tokens,
            (SELECT COALESCE(sum(r.tests_passed), 0)::bigint FROM test_run r
              WHERE r.session_id = c.chat_id) AS tests_passed,
            (SELECT COALESCE(sum(r.tests_failed), 0)::bigint FROM test_run r

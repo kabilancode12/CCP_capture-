@@ -155,7 +155,9 @@ def test_an_unreachable_api_stops_the_run_and_reports_it(
     api.fail_with = ApiUnavailableError("down")
     report = backfill(client, state, projects)
     assert not report.ok and report.stopped is not None
-    assert api.attempts == 1  # the second chat was not even tried
+    # The first chat tried its environment record and its chunk (the real client fails fast after the
+    # first); the second chat was not even tried.
+    assert api.attempts == 2
     api.fail_with = None
     assert backfill(client, state, projects).ok  # nothing was lost: the next run uploads it all
     assert [c for c in api.calls if c[0] == "chunk"] == [("chunk", "main@0")] * 2

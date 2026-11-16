@@ -13,12 +13,14 @@ uploaded is skipped).
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from ccp.capture.client import CaptureClient, StreamResult
+from ccp.capture.environment import collect_environment
 from ccp.capture.state import StateStore
 from ccp.storage.keys import MAIN_STREAM, TOOL_RESULTS_FOLDER, check_id
 
@@ -165,6 +167,11 @@ def backfill(
             else:
                 project.unchanged += 1
             continue
+        # The chat's account and machine facts: without them an old chat has no Claude account.
+        client.report_environment(
+            transcript.session_id,
+            collect_environment(os.environ, Path.home(), transcript.path),
+        )
         results = client.sync_session(
             transcript.session_id, transcript.path, SESSION_BUDGET_SECONDS
         )

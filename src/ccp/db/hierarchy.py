@@ -215,7 +215,8 @@ def normalise_folder(folder: str) -> str:
 
 def folder_name(folder: str) -> str:
     """Return the last part of a folder (``/home/dev/ccp_V2`` gives ``ccp_V2``), or the folder."""
-    return re.sub(r"^.*[/\\]", "", folder.rstrip("/\\")) or folder
+    name = re.sub(r"^.*[/\\]", "", folder.rstrip("/\\")) or folder
+    return re.sub(r"\s+", " ", name).strip() or name
 
 
 def project_key(

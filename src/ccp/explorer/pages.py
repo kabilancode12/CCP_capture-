@@ -261,6 +261,14 @@ def home_page(view: View, rows: list[Row]) -> str:
     for row in rows:
         groups.setdefault(row["account_id"], []).append(row)
     parts = ["<h1>Claude accounts and projects</h1>"]
+    # Only projects that have chats with messages are listed; the empty ones (VS Code opens and
+    # closes chats without a prompt) are counted in a note.
+    hidden = sum(int(r["empty_chats"]) for r in rows)
+    groups = {
+        a: [r for r in members if int(r["chats"]) > 0]
+        for a, members in groups.items()
+        if any(int(r["chats"]) > 0 for r in members)
+    }
     if not groups:
         parts.append('<p class="muted">Nothing has been captured yet.</p>')
     for account_id, members in groups.items():
@@ -287,7 +295,16 @@ def home_page(view: View, rows: list[Row]) -> str:
                 ]
             )
         parts.append(
-            table(["Project", "Chats", "Empty", "Tokens", "Last activity"], lines, {1, 2, 3})
+            table(
+                ["Project", "Chats", "Empty", "Tokens (in + out)", "Last activity"],
+                lines,
+                {1, 2, 3},
+            )
+        )
+    if hidden:
+        parts.append(
+            f'<p class="muted">{hidden} chat(s) without any message are hidden. '
+            "Tokens count what was sent and written; cache reads are on each chat's Usage tab.</p>"
         )
     return layout(view, "Home", "".join(parts))
 
@@ -341,7 +358,7 @@ def project_page(
         "Chat",
         "Sessions",
         "Prompts",
-        "Tokens",
+        "Tokens (in + out)",
         "Tests ok / failed",
         "Decisions",
         "Corrections",
@@ -371,7 +388,7 @@ def chat_header(view: View, chat: Row, tab: str) -> str:
         )
         + f'">{esc(project_title(chat))}</a> &middot; {when(chat["started_at"])} to {when(chat["last_activity_at"])}'
         f" &middot; {num(chat['sessions'])} sessions &middot; {num(chat['prompts'])} prompts"
-        f" &middot; {num(chat['tokens'])} tokens"
+        f" &middot; {num(chat['tokens'])} tokens (in + out)"
     )
     tabs = "".join(
         f'<a href="{view.url("/chat/" + quote(str(chat["chat_id"])), tab=key)}"'
@@ -448,12 +465,11 @@ def conversation_tab(view: View, chat_id: str, events: list[Row], total: int, pa
         if kind == "tool_call":
             parts.extend(f'<div class="msg tool {css}">{esc(c)}</div>' for c in calls)
         elif kind == "tool_result":
-            label = (
-                "refused: " + str(e["denial"])
-                if e["denial"]
-                else ("failed" if e["is_error"] else "ok")
-            )
-            parts.append(f'<div class="msg tool {css}">tool result: {esc(label)}</div>')
+            if (
+                e["denial"] or e["is_error"]
+            ):  # a result that worked adds nothing: only problems show
+                label = "refused: " + str(e["denial"]) if e["denial"] else "failed"
+                parts.append(f'<div class="msg tool {css}">tool result: {esc(label)}</div>')
         elif kind in (
             "slash_command",
             "command_output",
