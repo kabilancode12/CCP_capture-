@@ -87,16 +87,16 @@ setup_capture() { # setup_capture <server address> <ingest token>: Claude Code o
     CURRENT_REMOTE="$(ask "GitHub capture repo (SSH form, e.g. git@github.com:org/repo.git; empty = keep local)" "")"
   fi
   "$PY" - "$SETTINGS" "$CURRENT_REMOTE" <<'EOF'
-  import json, sys
-  path, remote = sys.argv[1], sys.argv[2]
-  data = json.load(open(path))
-  env = data.setdefault("env", {})
-  env["CCP_SNAPSHOTS"] = "true"
-  if remote:
-      env["CCP_SNAPSHOT_REMOTE"] = remote
-  json.dump(data, open(path, "w"), indent=2)
-  open(path, "a").write("\n")
-  EOF
+import json, sys
+path, remote = sys.argv[1], sys.argv[2]
+data = json.load(open(path))
+env = data.setdefault("env", {})
+env["CCP_SNAPSHOTS"] = "true"
+if remote:
+    env["CCP_SNAPSHOT_REMOTE"] = remote
+json.dump(data, open(path, "w"), indent=2)
+open(path, "a").write("\n")
+EOF
   if [[ "$CURRENT_REMOTE" == git@* ]]; then
     [[ -f "$HOME/.ssh/id_ed25519" ]] || ssh-keygen -q -t ed25519 -N "" -C "ccp-capture@$(hostname)" -f "$HOME/.ssh/id_ed25519"
     if GIT_TERMINAL_PROMPT=0 timeout 20 git ls-remote "$CURRENT_REMOTE" >/dev/null 2>&1; then
