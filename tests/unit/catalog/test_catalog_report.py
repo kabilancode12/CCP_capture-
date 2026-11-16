@@ -315,3 +315,18 @@ def test_empty_chat_says_none_recorded_in_each_section() -> None:
     empty = ChatData(chat=data.chat)
     text = render_report(empty, "catalog/x", 0)
     assert text.count("*None recorded.*") >= 8
+
+
+def test_a_sub_agents_conversation_and_shell_commands_are_in_full() -> None:
+    data = _data()
+    data.agent_events = [
+        {**_event("prompt", "find the slow query", T0, "subagent"), "stream": "agent-a1"},
+        {**_event("tool_call", [{"type": "tool_use", "id": "s1", "name": "Bash",
+                                 "input": {"command": "grep -rn SELECT src/"}}], T0), "stream": "agent-a1"},
+        {**_event("tool_result", [{"type": "tool_result", "tool_use_id": "s1", "content": "src/db.py:12: SELECT *"}], T0),
+         "stream": "agent-a1"},
+    ]  # fmt: skip
+    text = render_report(data, "catalog/x", 1)
+    assert "Full conversation of this sub-agent (3 entries)" in text
+    assert "Instructions to the sub-agent" in text and "grep -rn SELECT src/" in text
+    assert "src/db.py:12: SELECT *" in text
