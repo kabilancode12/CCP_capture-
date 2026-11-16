@@ -192,10 +192,11 @@ def _conversation(data: ChatData) -> list[str]:
         kind, clock, content = event["event_type"], _clock(event.get("occurred_at")), None
         content = event.get("content")
         flag = " (rewound)" if event.get("is_abandoned") else ""
-        if kind == "prompt" and event.get("actor") == "human":
+        if kind == "prompt" and event.get("actor") in ("human", "subagent"):
             prompts += 1
-            turn = _Turn(f"Turn {prompts} — {clock}{flag}", event.get("occurred_at"), bool(flag))
-            turn.body += ["#### Developer prompt", "", *quote(text_of(content))]
+            who = "Developer prompt" if event.get("actor") == "human" else "Instructions to the sub-agent"
+            turn = _Turn(f"Conversation {prompts} — {clock}{flag}", event.get("occurred_at"), bool(flag))
+            turn.body += [f"#### {who}", "", *quote(text_of(content))]
             turns.append(turn)
             continue
         if kind == "slash_command":
@@ -468,6 +469,13 @@ def _agents(data: ChatData) -> list[str]:
             *(quote(a["instructions"]) if a.get("instructions") else [NONE, ""]),
         ]
         out += ["**Result**", "", *(quote(a["result"]) if a.get("result") else [NONE, ""])]
+        own = [e for e in data.agent_events if e.get("stream") == f"agent-{a.get('agent_id')}"]
+        if own:  # everything the sub-agent wrote and ran, in full (its shell commands included)
+            body = _conversation(ChatData(chat=data.chat, events=own))
+            out += details(f"Full conversation of this sub-agent ({len(own)} entries)", [
+                line.replace("### Conversation", "##### Conversation", 1) if line.startswith("### ") else line
+                for line in body
+            ])
     out += ["### Workflow runs", ""]
     out += (
         table(list(data.workflows[0].keys()), [list(w.values()) for w in data.workflows])
@@ -555,7 +563,7 @@ def render_report(data: ChatData, folder: str, agent_files: int = 0) -> str:
     sections = [
         ("1. Summary", _summary(data, folder)),
         ("2. Openings of the session", _openings(data)),
-        ("3. Conversation", _conversation(data)),
+        ("3. Chat: every conversation, in full", _conversation(data)),
         ("4. Decisions", _decisions(data)),
         ("5. Code changes", _code_changes(data)),
         ("6. Tests and checks", _tests(data)),
@@ -567,7 +575,7 @@ def render_report(data: ChatData, folder: str, agent_files: int = 0) -> str:
     out = [
         f"# {title}",
         "",
-        f"> Session `{chat['chat_id']}` · Project **{project}** · Account **{account}** · "
+        f"> Account **{account}** → Project **{project}** → Session `{chat['chat_id']}` · Project **{project}** · Account **{account}** · "
         f"started {fmt_time(chat.get('started_at'))}",
         "",
         "## Contents",

@@ -36,6 +36,7 @@ class ChatData:
     cost_total: Row | None = None
     events: list[Row] = field(default_factory=list)
     shadow_commits: list[Row] = field(default_factory=list)
+    agent_events: list[Row] = field(default_factory=list)
 
 
 def fetch(connection: Any, sql: str, session_id: str) -> list[Row]:
@@ -170,6 +171,19 @@ _EVENTS = """
      ORDER BY raw_object_key, raw_line_number
 """
 
+# The same entries in the sub-agent streams (``agent-<id>``), with the stream name.
+_AGENT_EVENTS = """
+    SELECT event_id, event_type, actor, occurred_at, is_abandoned, raw_line_number,
+           payload #> '{message,content}' AS content,
+           payload #> '{compactMetadata}' AS compact,
+           split_part(raw_object_key, '/', 3) AS stream
+      FROM event
+     WHERE session_id = %s AND split_part(raw_object_key, '/', 3) <> 'main'
+       AND event_type IN ('prompt', 'response', 'tool_call', 'thinking', 'tool_result',
+                          'agent_message', 'command_output')
+     ORDER BY raw_object_key, raw_line_number
+"""
+
 
 def load_chat(connection: Any, session_id: str) -> ChatData | None:
     """Read everything the catalog shows about a chat.
@@ -202,6 +216,7 @@ def load_chat(connection: Any, session_id: str) -> ChatData | None:
         cost_total=totals[0] if totals else None,
         events=fetch(connection, _EVENTS, session_id),
         shadow_commits=fetch(connection, _SHADOW_COMMITS, session_id),
+        agent_events=fetch(connection, _AGENT_EVENTS, session_id),
     )
 
 
