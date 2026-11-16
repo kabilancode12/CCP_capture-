@@ -36,6 +36,7 @@ DASHBOARD_VIEWS = (
     "d_fix_loop",
     "d_usage",
     "d_chat",
+    "d_change",
 )
 DEFAULT_READER = "ccp_reader"
 DEFAULT_AUDITOR = "ccp_auditor"
