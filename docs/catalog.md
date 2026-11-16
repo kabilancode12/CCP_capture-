@@ -92,3 +92,14 @@ copied; the report gives its object keys and line numbers.
 
 A test (`tests/unit/catalog/test_catalog_report.py`) walks every value of the JSON documents and fails if
 one is missing from the report.
+
+### When `report.md` is refreshed (nothing to run by hand)
+
+`ccp-server` rewrites a chat's folder, `report.md` included, **after every turn**: each reply uploads the new
+transcript lines, the indexer processes them, and the catalog step runs right after. That step is *light*: it
+rewrites the report and the readable files but does not copy the raw transcript again (the copy in
+`transcript/` is refreshed by a full build). A **full** build runs when the decisions of the chat are written
+(at the end of a session, or after quiet time) and with `ccp-catalog build`. A person's approval or rejection of
+a decision in the Explorer queues the chat for a refresh too. The report also lists the capture commits of the
+chat (who made each change). The server process must run the current code: restart `ccp-server` after an
+upgrade, or the old process keeps writing the old files.
