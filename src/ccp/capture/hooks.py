@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -55,6 +56,14 @@ from pathlib import Path
 from typing import Protocol
 
 from ccp.capture.client import ENVIRONMENT_PARTIAL, UNSUPPORTED_RETRY_SECONDS, StreamResult
+from ccp.capture.snapshots.context import (
+    AI_OTHER,
+    HUMAN,
+    SnapshotContext,
+    actor_of_tool,
+    read_transcript_context,
+    target_of,
+)
 from ccp.capture.state import StateStore
 from ccp.environment import EnvironmentRecord
 from ccp.lifecycle import END, START, LifecycleEvent, now
@@ -67,6 +76,8 @@ STOP = "Stop"
 SUBAGENT_STOP = "SubagentStop"
 PRE_COMPACT = "PreCompact"
 SESSION_END = "SessionEnd"
+PRE_TOOL_USE = "PreToolUse"
+POST_TOOL_USE = "PostToolUse"
 
 # The events the client registers for, with the time limit (seconds) given to Claude Code for each.
 HOOK_TIMEOUTS = {
@@ -76,7 +87,14 @@ HOOK_TIMEOUTS = {
     SUBAGENT_STOP: 30,
     PRE_COMPACT: 30,
     SESSION_END: 5,
+    PRE_TOOL_USE: 5,
+    POST_TOOL_USE: 20,
 }
+
+# The tools whose calls may change files: only these get a hook (a read-only tool needs none).
+TOOL_MATCHER = "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell"
+HOOK_MATCHERS = {PRE_TOOL_USE: TOOL_MATCHER, POST_TOOL_USE: TOOL_MATCHER}
+TOOL_BUSY_MARKER = "tool-busy"  # set while a tool runs, so the watcher leaves its changes alone
 
 # How long each hook may spend uploading. Hooks that hold Claude up (start, prompt) get less.
 START_BUDGET_SECONDS = 8.0
@@ -117,6 +135,9 @@ class HookPayload:
     source: str | None
     cwd: Path | None = None
     reason: str | None = None
+    tool_name: str | None = None
+    tool_use_id: str | None = None
+    tool_input: object = None
 
 
 def parse_payload(text: str) -> HookPayload | None:
@@ -141,6 +162,7 @@ def parse_payload(text: str) -> HookPayload | None:
     )
     agent_type, source, cwd = data.get("agent_type"), data.get("source"), data.get("cwd")
     reason = data.get("reason")
+    tool_name, tool_use_id = data.get("tool_name"), data.get("tool_use_id")
     return HookPayload(
         event=event,
         session_id=session_id,
@@ -149,6 +171,9 @@ def parse_payload(text: str) -> HookPayload | None:
         source=source if isinstance(source, str) else None,
         cwd=Path(cwd) if isinstance(cwd, str) and cwd else None,
         reason=reason if isinstance(reason, str) else None,
+        tool_name=tool_name if isinstance(tool_name, str) else None,
+        tool_use_id=tool_use_id if isinstance(tool_use_id, str) else None,
+        tool_input=data.get("tool_input"),
     )
 
 
@@ -178,10 +203,14 @@ class ClientPort(Protocol):
 class SnapshotPort(Protocol):
     """What the handler needs from the code-snapshot service (``None`` result = disabled)."""
 
-    def start(self, session_id: str, cwd: Path) -> str | None:
+    def start(
+        self, session_id: str, cwd: Path, context: SnapshotContext | None = None
+    ) -> str | None:
         """At session start: retry queued pushes, baseline snapshot, branch backup."""
 
-    def snapshot(self, session_id: str, cwd: Path, event: str) -> str | None:
+    def snapshot(
+        self, session_id: str, cwd: Path, event: str, context: SnapshotContext | None = None
+    ) -> str | None:
         """After a response: snapshot the working tree if it changed, and push it."""
 
 
@@ -230,8 +259,15 @@ class HookHandler:
         event = payload.event
         if event == SESSION_START:
             return self._session_start(payload)
+        if event == PRE_TOOL_USE:
+            self._state.set_marker(payload.session_id, TOOL_BUSY_MARKER, str(time.time()))
+            return "tool started"
+        if event == POST_TOOL_USE:
+            return self._after_tool(payload)
         if event == USER_PROMPT_SUBMIT:  # tool results wait for Stop: one file could hold Claude up
-            return self._sync(payload, PROMPT_BUDGET_SECONDS, tool_results=False)
+            summary = self._sync(payload, PROMPT_BUDGET_SECONDS, tool_results=False)
+            # Whatever changed since the last snapshot was not done by Claude: a person did it.
+            return summary + self._code_note(payload, USER_PROMPT_SUBMIT, SnapshotContext(HUMAN))
         if event == STOP:
             return self._stop(payload)
         if event == PRE_COMPACT:
@@ -270,7 +306,7 @@ class HookHandler:
         if self._transcript_exists(payload):  # a resumed or compacted session already has a file
             parts.append(self._sync(payload, START_BUDGET_SECONDS))
         if self._snapshots is not None and payload.cwd is not None:
-            note = self._snapshots.start(payload.session_id, payload.cwd)
+            note = self._snapshots.start(payload.session_id, payload.cwd, SnapshotContext(HUMAN))
             if note is not None:  # None means snapshots are switched off: say nothing
                 parts.append(f"code: {note}")
         return "; ".join(parts)
@@ -279,10 +315,40 @@ class HookHandler:
         """After a response: upload first (it matters most), then snapshot the code."""
         summary = self._sync(payload, STOP_BUDGET_SECONDS)
         if self._snapshots is not None and payload.cwd is not None:
-            note = self._snapshots.snapshot(payload.session_id, payload.cwd, STOP)
+            context = self._tool_context(payload, AI_OTHER, None)
+            note = self._snapshots.snapshot(payload.session_id, payload.cwd, STOP, context)
             if note is not None:
                 summary += f"; code: {note}"
         return summary
+
+    def _after_tool(self, payload: HookPayload) -> str:
+        """After a tool call: one snapshot of what it changed, labelled with who and why."""
+        self._state.remove_marker(payload.session_id, TOOL_BUSY_MARKER)
+        context = self._tool_context(
+            payload, actor_of_tool(payload.tool_name, payload.agent_type), payload.tool_name
+        )
+        return self._code_note(payload, POST_TOOL_USE, context) or "code: snapshots are off"
+
+    def _tool_context(self, payload: HookPayload, actor: str, tool: str | None) -> SnapshotContext:
+        """What a snapshot should say: the tool, its call id, the model and the prompt behind it."""
+        model, prompt_id, excerpt = read_transcript_context(payload.transcript)
+        return SnapshotContext(
+            actor=actor,
+            model=model,
+            tool=tool,
+            target=target_of(payload.tool_input),
+            tool_use_id=payload.tool_use_id,
+            prompt_id=prompt_id,
+            prompt_excerpt=excerpt,
+            agent=payload.agent_type or "main",
+        )
+
+    def _code_note(self, payload: HookPayload, event: str, context: SnapshotContext) -> str:
+        """Take a snapshot for the log line; empty when snapshots are not wired in or off."""
+        if self._snapshots is None or payload.cwd is None:
+            return ""
+        note = self._snapshots.snapshot(payload.session_id, payload.cwd, event, context)
+        return "" if note is None else f"; code: {note}"
 
     def _sync(
         self, payload: HookPayload, budget_seconds: float, *, tool_results: bool = True

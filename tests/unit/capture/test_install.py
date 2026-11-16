@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from ccp.capture import cli
-from ccp.capture.hooks import HOOK_TIMEOUTS
+from ccp.capture.hooks import HOOK_MATCHERS, HOOK_TIMEOUTS
 from ccp.capture.install import (
     InstallError,
     collect_status,
@@ -53,9 +53,12 @@ def test_install_creates_the_file_with_env_and_six_hooks(settings: Path) -> None
     }
     assert set(data["hooks"]) == set(HOOK_TIMEOUTS)
     for event, timeout in HOOK_TIMEOUTS.items():
-        assert data["hooks"][event] == [
-            {"hooks": [{"type": "command", "command": COMMAND, "timeout": timeout}]}
-        ]
+        group: dict[str, object] = {
+            "hooks": [{"type": "command", "command": COMMAND, "timeout": timeout}]
+        }
+        if event in HOOK_MATCHERS:
+            group = {"matcher": HOOK_MATCHERS[event], **group}
+        assert data["hooks"][event] == [group]
 
 
 def test_the_command_defaults_to_the_current_python(settings: Path) -> None:
@@ -78,7 +81,7 @@ def test_install_keeps_every_other_setting_and_other_hooks(settings: Path) -> No
                 "env": {"MINE": "1"},
                 "hooks": {
                     "Stop": [{"matcher": "*", "hooks": [other]}],
-                    "PostToolUse": [{"hooks": [other]}],
+                    "Notification": [{"hooks": [other]}],
                 },
             }
         ),
@@ -88,7 +91,7 @@ def test_install_keeps_every_other_setting_and_other_hooks(settings: Path) -> No
     data = read(settings)
     assert data["model"] == "x" and data["theme"] == "dark"
     assert data["env"]["MINE"] == "1" and data["env"]["CCP_INGEST_TOKEN"] == TOKEN
-    assert data["hooks"]["PostToolUse"] == [{"hooks": [other]}]
+    assert data["hooks"]["Notification"] == [{"hooks": [other]}]
     stop = data["hooks"]["Stop"]
     assert stop[0] == {"matcher": "*", "hooks": [other]}
     assert stop[1]["hooks"][0]["command"] == COMMAND
@@ -178,6 +181,7 @@ def test_uninstall_removes_only_our_hooks_and_env_keys(settings: Path) -> None:
         "theme": "dark",
         "env": {"MINE": "1"},
         "hooks": {"Stop": [{"hooks": [other]}]},
+        "showThinkingSummaries": True,  # left on by uninstall: it is useful on its own
     }
 
 
@@ -186,7 +190,7 @@ def test_uninstall_leaves_no_empty_blocks(settings: Path) -> None:
     settings.write_text('{"theme": "dark"}', encoding="utf-8")
     install(settings, URL, TOKEN, command=COMMAND)
     uninstall(settings)
-    assert read(settings) == {"theme": "dark"}
+    assert read(settings) == {"theme": "dark", "showThinkingSummaries": True}
 
 
 def test_uninstall_without_a_file_or_without_our_settings_changes_nothing(settings: Path) -> None:
@@ -269,7 +273,7 @@ def test_status_when_nothing_is_installed_and_the_api_is_down(
 ) -> None:
     env = {"CCP_API_URL": "http://127.0.0.1:1", "CCP_STATE_DIR": str(tmp_path / "s")}
     status = collect_status(settings, env)
-    assert not status.installed and len(status.missing_events) == 6
+    assert not status.installed and len(status.missing_events) == 8
     assert status.reachable is False and status.token_valid is None
 
 
@@ -343,3 +347,25 @@ def test_cli_install_without_any_token_fails(
     monkeypatch.delenv("CCP_INGEST_TOKEN", raising=False)
     assert cli.main(["install", "--api-url", URL, "--settings-path", str(settings)]) == 1
     assert "token" in capsys.readouterr().err
+
+
+def test_install_limits_the_tool_hooks_to_tools_that_change_files_and_turns_on_thinking(
+    tmp_path: Path,
+) -> None:
+    settings = tmp_path / "settings.json"
+    install(settings, URL, TOKEN, command=COMMAND)
+    data = read(settings)
+    for event in ("PreToolUse", "PostToolUse"):
+        assert (
+            data["hooks"][event][0]["matcher"]
+            == "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell"
+        )
+    assert "matcher" not in data["hooks"]["Stop"][0]
+    assert data["showThinkingSummaries"] is True
+
+
+def test_install_keeps_the_developers_own_thinking_choice(tmp_path: Path) -> None:
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"showThinkingSummaries": False}), encoding="utf-8")
+    install(settings, URL, TOKEN, command=COMMAND)
+    assert read(settings)["showThinkingSummaries"] is False

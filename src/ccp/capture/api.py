@@ -87,6 +87,9 @@ class ApiPort(Protocol):
     def post_lifecycle(self, session_id: str, event: LifecycleEvent) -> None:
         """Report that a session of the chat started or ended."""
 
+    def post_snapshot(self, session_id: str, record: dict[str, Any]) -> None:
+        """Report one snapshot commit of the capture repository."""
+
     def put_tool_result(self, session_id: str, name: str, body: bytes) -> ToolResultReply:
         """Upload a tool-result file (redacted); say whether it was stored, and under which key."""
 
@@ -158,6 +161,11 @@ class HttpApiClient:
         """Report a session start or end (``POST /v1/sessions/{id}/lifecycle``)."""
         body = json.dumps(event.to_payload()).encode("utf-8")
         self._send("POST", f"/v1/sessions/{session_id}/lifecycle", body, "application/json")
+
+    def post_snapshot(self, session_id: str, record: dict[str, Any]) -> None:
+        """Report a snapshot commit (``POST /v1/sessions/{id}/snapshots``)."""
+        body = json.dumps(record).encode("utf-8")
+        self._send("POST", f"/v1/sessions/{session_id}/snapshots", body, "application/json")
 
     def put_tool_result(self, session_id: str, name: str, body: bytes) -> ToolResultReply:
         """Upload a tool-result file (``PUT /v1/sessions/{id}/tool-results/{name}``)."""

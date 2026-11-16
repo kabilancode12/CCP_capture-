@@ -60,7 +60,7 @@ _CHAT = """
 _SESSIONS = """
     SELECT seq, start_source, started_at, ended_at, end_reason, start_commit, end_commit,
            run_key IS NOT NULL AS reported_by_client
-      FROM chat_session WHERE session_id = %s ORDER BY seq
+      FROM chat_session WHERE session_id = %s ORDER BY started_at NULLS LAST, seq
 """
 
 _DECISIONS = """

@@ -50,8 +50,9 @@ def build_handler(settings: ClientSettings, env: Mapping[str, str], home: Path) 
         home: The user's home directory.
     """
     state = StateStore(settings.state_dir)
+    api = HttpApiClient(settings.api_url, settings.token, settings.timeout_seconds, fail_fast=True)
     client = CaptureClient(
-        HttpApiClient(settings.api_url, settings.token, settings.timeout_seconds, fail_fast=True),
+        api,
         state,
         chunk_bytes=settings.chunk_bytes,
         budget_seconds=settings.budget_seconds,
@@ -70,7 +71,7 @@ def build_handler(settings: ClientSettings, env: Mapping[str, str], home: Path) 
         state,
         lambda transcript, cwd: collect_environment(env, home, transcript, cwd=cwd),
         start_flush,
-        snapshot_service_from(settings, state),
+        snapshot_service_from(settings, state, api),
         read_commit=read_head,
     )
 

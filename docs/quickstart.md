@@ -137,7 +137,7 @@ Open `~\.claude\settings.json` (create it if it does not exist; it must be one J
 block into it:
 
 - add the `env` entries to an existing `env` object, or add the whole `env` object;
-- add the six events under `hooks`, next to any hooks you already have;
+- add the eight events under `hooks`, next to any hooks you already have;
 - replace `REPLACE_WITH_THE_INGEST_TOKEN` with the real `CCP_INGEST_TOKEN` from part A2.
 
 Keep the file valid JSON. (To try it on one project first, put the same content in that project's

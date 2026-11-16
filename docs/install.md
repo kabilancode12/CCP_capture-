@@ -13,7 +13,7 @@ ccp-capture install --api-url http://SERVER:8000 --token THE_INGEST_TOKEN
 `ccp-capture install` merges into `~/.claude/settings.json`:
 
 - the variables `CCP_API_URL`, `CCP_INGEST_TOKEN` and `CCP_SNAPSHOTS=true`;
-- the six hooks (`SessionStart`, `UserPromptSubmit`, `Stop`, `SubagentStop`, `PreCompact`,
+- the eight hooks (`SessionStart`, `UserPromptSubmit`, `Stop`, `SubagentStop`, `PreCompact`,
   `SessionEnd`), each running `"<full path to this Python>" -m ccp.capture hook`.
 
 It keeps every other setting and every hook of other tools, makes a copy

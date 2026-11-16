@@ -66,10 +66,16 @@ _DELETE_AI_CORRECTIONS = """
      WHERE session_id = %s AND kind = 'developer_correction' AND detected_by = 'ai'
 """
 _INSERT_CORRECTION = """
-    INSERT INTO correction (session_id, kind, corrected_by, trigger_event_id, detected_by, note)
-    VALUES (%s, 'developer_correction', 'developer', %s, 'ai', %s)
+    INSERT INTO correction (session_id, chat_session_id, kind, corrected_by, trigger_event_id,
+                            detected_by, note)
+    SELECT %s, (SELECT s.chat_session_id FROM chat_session s
+                 JOIN event t ON t.event_id = %s
+                WHERE s.session_id = t.session_id AND s.started_at <= t.occurred_at
+                ORDER BY s.started_at DESC, s.seq DESC LIMIT 1),
+           'developer_correction', 'developer', %s, 'ai', %s
     ON CONFLICT (session_id, kind, trigger_event_id) DO UPDATE
-        SET note = EXCLUDED.note, detected_by = 'ai', corrected_by = 'developer'
+        SET note = EXCLUDED.note, detected_by = 'ai', corrected_by = 'developer',
+            chat_session_id = EXCLUDED.chat_session_id
 """
 _COMMITS = "SELECT commit_sha FROM commit_link WHERE session_id = %s ORDER BY commit_sha"
 
@@ -270,7 +276,7 @@ def save_decisions(
             )
         cursor.execute(_DELETE_AI_CORRECTIONS, (session_id,))
         for event_id, note in developer_corrections:
-            cursor.execute(_INSERT_CORRECTION, (session_id, event_id, note))
+            cursor.execute(_INSERT_CORRECTION, (session_id, event_id, event_id, note))
         connection.commit()
     except pg8000.dbapi.DatabaseError as error:
         connection.rollback()

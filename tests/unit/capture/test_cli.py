@@ -80,7 +80,7 @@ def snapshots(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _FakeSnapshots
     monkeypatch.setenv("CCP_INGEST_TOKEN", "x" * 20)
     monkeypatch.setenv("CCP_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(cli, "CaptureClient", _FakeClient)
-    monkeypatch.setattr(cli, "snapshot_service_from", lambda settings, state: fake)
+    monkeypatch.setattr(cli, "snapshot_service_from", lambda settings, state, api=None: fake)
     monkeypatch.setattr(cli, "read_head", lambda folder: "ab" * 20)
     return fake
 

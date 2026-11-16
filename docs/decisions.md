@@ -74,7 +74,7 @@ field to a person (`needs_review`). Review notes are plain words and never cite 
 
 **Files are never written by the model.** The model only names the EDIT and SHELL digest lines that belong
 to a decision; the file names, the kind of change and how it was made are read from the recorded data
-(`file_change` for Claude's Edit and Write tools, and the commands read by `ccp.decisions.shellfiles` for
+(`file_change` for Claude's Edit and Write tools, and the commands read by `ccp.index.shellfiles` for
 shell changes). The shell reader understands only clear cases (`>`, `>>`, `tee`, `sed -i`, `rm`, `mv`, `cp`,
 `touch`, `mkdir`, project scaffolds such as `dotnet new`), skips `/tmp` and `/dev`, and gives no file for a
 command it cannot read. Shell changes have no line counts.

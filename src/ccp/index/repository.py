@@ -17,9 +17,11 @@ from ccp.db.connection import connect
 from ccp.index.agents import AgentMeta
 from ccp.index.corrections import refresh_corrections
 from ccp.index.filechanges import extract_file_change
+from ccp.index.fileroles import file_role
 from ccp.index.identity import refresh_identity
 from ccp.index.parser import ParsedEntry
 from ccp.index.sessions import idle_minutes_from_environment, refresh_chat_sessions
+from ccp.index.shellfiles import files_changed_by
 from ccp.index.testoutputs import MISSING, OutputStore, read_test_output
 from ccp.index.testparsers import parse_test_output
 from ccp.index.testruns import detect_test_runner, exit_code_of, outcome
@@ -411,7 +413,7 @@ _INSERT_FILE_CHANGE = """
                              user_modified, lines_added, lines_removed, hunks, file_role,
                              tests_added)
     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
-    ON CONFLICT (event_id) DO UPDATE SET
+    ON CONFLICT (event_id, path) DO UPDATE SET
         file_role = EXCLUDED.file_role, tests_added = EXCLUDED.tests_added
 """
 
@@ -468,6 +470,60 @@ _NEW_SHELL_CALLS = """
        AND NOT EXISTS (SELECT 1 FROM test_run t WHERE t.call_event_id = c.event_id)
      ORDER BY c.event_id
 """
+
+# Shell calls whose result has no file_change row yet: the files a command writes, changes or
+# removes are read from its text (see ccp.index.shellfiles). A call that changes no file is looked
+# at again at every refresh, like a call that is no test run. Refused calls never ran. The call's
+# working directory is cut off the paths.
+_NEW_SHELL_FILE_CALLS = """
+    SELECT c.event_id, c.payload #> '{message,content}', r.event_id, c.payload ->> 'cwd',
+           r.payload ? 'toolDenialKind'
+      FROM event c
+      JOIN event r ON r.session_id = c.session_id AND r.event_type = 'tool_result'
+                  AND r.tool_use_ids && c.tool_use_ids
+     WHERE c.session_id = %s AND c.event_type = 'tool_call'
+       AND jsonb_path_exists(c.payload,
+               '$.message.content[*] ? (@.type == "tool_use"
+                   && (@.name == "Bash" || @.name == "PowerShell"))')
+       AND NOT EXISTS (SELECT 1 FROM file_change f WHERE f.event_id = r.event_id)
+     ORDER BY c.event_id
+"""
+
+_INSERT_SHELL_FILE_CHANGE = """
+    INSERT INTO file_change (session_id, event_id, tool_use_id, call_event_id, tool, path,
+                             absolute_path, change_type, actor_class, file_role)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'ai_command', %s)
+    ON CONFLICT (event_id, path) DO NOTHING
+"""
+
+_SHELL_CHANGE_TYPES = {"created": "added", "modified": "modified", "deleted": "deleted"}
+
+
+def _shell_file_rows(blocks: object, cwd: str | None) -> list[tuple[str, str, str, str, str]]:
+    """For each file a shell call changes: tool use id, tool, path, absolute path, change type."""
+    rows: list[tuple[str, str, str, str, str]] = []
+    for block in blocks if isinstance(blocks, list) else ():
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        arguments = block.get("input")
+        command = arguments.get("command") if isinstance(arguments, dict) else None
+        tool_use_id = block.get("id")
+        if not isinstance(command, str) or not isinstance(tool_use_id, str):
+            continue
+        base = (cwd or "").rstrip("/")
+        for item in files_changed_by(command):
+            if item.path.startswith("("):  # a project scaffold names no file
+                continue
+            absolute = item.path if item.path.startswith("/") else f"{base}/{item.path}"
+            relative = (
+                absolute[len(base) + 1 :] if base and absolute.startswith(base + "/") else item.path
+            )
+            rows.append(
+                (tool_use_id, str(block.get("name", "Bash")), relative, absolute,
+                 _SHELL_CHANGE_TYPES[item.change])
+            )  # fmt: skip
+    return rows
+
 
 _INSERT_TEST_RUN = """
     INSERT INTO test_run (session_id, call_event_id, result_event_id, tool_use_id, command,
@@ -825,6 +881,16 @@ class IndexRepository:
                     change.tests_added,
                 ),
             )
+        cursor.execute(_NEW_SHELL_FILE_CALLS, (session_id,))
+        for call_id, blocks, result_id, cwd, denied in cursor.fetchall():
+            if denied:
+                continue
+            for tool_use_id, tool, path, absolute, change_type in _shell_file_rows(blocks, cwd):
+                cursor.execute(
+                    _INSERT_SHELL_FILE_CHANGE,
+                    (session_id, result_id, tool_use_id, call_id, tool, path, absolute,
+                     change_type, file_role(path)),
+                )  # fmt: skip
         cursor.execute(_LINK_FILE_CHANGE_CALLS, (session_id,))
 
         cursor.execute(_FILE_CHANGE_EVENTS, (session_id,))

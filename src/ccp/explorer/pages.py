@@ -84,6 +84,7 @@ TABS = (
     ("decisions", "Decisions"),
     ("tests", "Tests"),
     ("code", "Code changes"),
+    ("changes", "Changes by cause"),
     ("corrections", "Corrections"),
     ("agents", "Sub-agents and workflows"),
     ("thinking", "Thinking notes"),
@@ -174,6 +175,11 @@ def layout(view: View, title: str, body: str, flash: str = "", error: bool = Fal
     nav = ""
     if user is not None:
         links = [f'<a href="{view.url("/")}">Home</a>']
+        for path, label in (
+            ("/approaches", "Approaches"), ("/timeline", "Timeline"), ("/review", "Review"),
+            ("/activity", "Activity"), ("/insights", "Insights"), ("/alerts", "Alerts"),
+        ):  # fmt: skip
+            links.append(f'<a href="{view.url(path)}">{label}</a>')
         if user.is_admin:
             links.append(f'<a href="{view.url("/admin/users")}">Users</a>')
             links.append(f'<a href="{view.url("/admin/labels")}">Labels</a>')

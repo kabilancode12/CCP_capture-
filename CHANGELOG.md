@@ -6,6 +6,19 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
 
 ### Added
 
+- **Capture chain:** a snapshot after every tool call (PreToolUse/PostToolUse) and at every prompt, one linear branch per
+  developer, machine and branch (`ccp/<user>/<host>/<branch>` in the capture project), each commit labelled with who
+  made it (person, edit tool, shell command, sub-agent), the model, the prompt and the tool call; reported to the server
+  (`POST /v1/sessions/{id}/snapshots`, table `shadow_commit`, migration 021). `ccp-capture watch` and global Git hooks
+  catch uncommitted and unpushed work. See `docs/snapshots.md`.
+- **Exact tracing:** `ccp-audit trace` (git blame on the chain, then the prompt, thinking and decisions) and
+  `ccp-audit snapshots`.
+- **Approach library:** decision lineage (migration 022), `ccp-approaches` (search, show, compare, restore, refresh), the
+  Explorer pages (approaches, timeline, review, activity, insights, alerts, *Changes by cause*) and the `ccp-mcp` server.
+- Shell-written files are recorded as `ai_command` file changes (migration 020); the install turns on
+  `showThinkingSummaries` unless the developer set it.
+- Session times follow the transcript: a reported opening that was never ended ends at its last message, and conversation
+  after a long gap with no reported start becomes its own inferred session.
 - Single-file chat report: `report.md` in every catalog folder, `ccp-catalog export --chat <id> [--out file]`, and a
   download link on each Explorer chat page. All catalog data as readable Markdown, nothing cut, with a
   completeness test (see `docs/catalog.md`).

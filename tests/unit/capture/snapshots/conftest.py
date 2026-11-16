@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from ccp.capture.snapshots.reports import SnapshotReporter
 from ccp.capture.snapshots.service import SnapshotService
 from ccp.capture.state import StateStore
 
@@ -66,6 +67,7 @@ def make_service(
     remote: Path | str | None = None,
     remote_base: Path | str | None = None,
     enabled: bool = True,
+    reporter: SnapshotReporter | None = None,
 ) -> SnapshotService:
     """Create a snapshot service that pushes to ``remote`` (a path or URL) if given."""
     return SnapshotService(
@@ -76,6 +78,7 @@ def make_service(
         remote_base=_as_url(remote_base),
         git_timeout_seconds=30,
         push_timeout_seconds=30,
+        reporter=reporter,
     )
 
 
