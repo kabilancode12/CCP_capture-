@@ -46,12 +46,20 @@ def detect_surface(env: Mapping[str, str]) -> dict[str, str]:
         return detect("vscode", "CLAUDE_CODE_ENTRYPOINT=claude-vscode")
     if entrypoint == "cli":
         return detect("terminal", "CLAUDE_CODE_ENTRYPOINT=cli")
+    if "desktop" in entrypoint:  # the Claude desktop app ([verify] the exact value)
+        return detect("desktop", f"CLAUDE_CODE_ENTRYPOINT={entrypoint}")
+    if entrypoint.startswith("sdk"):  # claude -p and the Agent SDK
+        return detect("sdk", f"CLAUDE_CODE_ENTRYPOINT={entrypoint}")
+    if "jetbrains" in entrypoint or "intellij" in entrypoint:
+        return detect("jetbrains", f"CLAUDE_CODE_ENTRYPOINT={entrypoint}")
     if env.get("CLAUDE_CODE_REMOTE"):
         return detect("web-or-remote", "CLAUDE_CODE_REMOTE is set")
     if env.get("TERM_PROGRAM") == "vscode":
         return detect("vscode", "TERM_PROGRAM=vscode")
     if env.get("TERMINAL_EMULATOR", "").startswith("JetBrains"):
         return detect("jetbrains", "TERMINAL_EMULATOR starts with JetBrains")
+    if entrypoint:  # a value not known yet: keep it rather than guess "terminal"
+        return detect(entrypoint, f"CLAUDE_CODE_ENTRYPOINT={entrypoint} (not known yet)")
     return detect("terminal", "no IDE or remote marker found")
 
 
