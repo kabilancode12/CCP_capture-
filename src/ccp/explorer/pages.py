@@ -566,6 +566,23 @@ def decisions_tab(view: View, chat_id: str, rows: list[Row], may_review: bool) -
                 for f in files
             )
             body += f"<p><strong>Files changed:</strong></p><ul>{items}</ul>"
+        notes = [t for t in as_json_list(d["thinking"]) if isinstance(t, dict) and t.get("text")]
+        if notes:
+            items = "".join(f"<li>{esc(t.get('text'))}</li>" for t in notes)
+            body += f"<details><summary>Claude's thinking notes</summary><ul>{items}</ul></details>"
+        usage = d["llm_usage"] if isinstance(d["llm_usage"], dict) else {}
+        if usage:
+            parts = []
+            for step, label in (("write", "written"), ("review", "reviewed")):
+                u = usage.get(step)
+                if isinstance(u, dict):
+                    cost = f", ${u['cost_usd']:.4f}" if isinstance(u.get("cost_usd"), float) else ""
+                    parts.append(
+                        f"{label} by {esc(u.get('model'))}: {num(u.get('input_tokens'))} in / "
+                        f"{num(u.get('output_tokens'))} out{cost}"
+                    )
+            if parts:
+                body += f'<p class="muted">Model calls: {"; ".join(parts)}</p>'
         if d["commit_shas"]:
             body += (
                 "<p><strong>Commits:</strong> "

@@ -7,7 +7,10 @@ A decision the reviewer does not answer for is stored as ``needs_review``, never
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
+from typing import Any
 
 import pg8000.dbapi
 
@@ -30,6 +33,8 @@ from ccp.decisions.repository import (
     save_decisions,
 )
 from ccp.decisions.settings import DecisionSettings
+
+logger = logging.getLogger("ccp.decisions")
 
 # Outcomes of process_chat.
 DONE = "done"
@@ -91,11 +96,14 @@ def process_chat(
         raise DecisionError("no model provider is available")
 
     commits = linked_commits(connection, session_id)
+    usage: dict[str, Any] = {}
     extraction = _extract(provider, settings, digest, commits)
+    _note_usage(usage, "write", provider)
     if not extraction.decisions:
         # Nothing valid came back: keep what is stored rather than wipe it.
         return ChatResult(session_id, NO_DECISIONS, digest.chars, dropped=extraction.dropped)
     reviews = _review(provider, settings, digest, extraction)
+    _note_usage(usage, "review", provider)
     decisions = [
         _new_decision(item, digest, reviews.get(index))
         for index, item in enumerate(extraction.decisions)
@@ -109,7 +117,9 @@ def process_chat(
         settings.model,
         prompts.PROMPT_VERSION,
         settings.review_model,
+        usage,
     )
+    logger.info("decisions of one chat: %s", json.dumps(usage))  # tokens and cost, no chat text
     approved = sum(1 for decision in decisions if decision.status == "approved")
     return ChatResult(
         session_id,
@@ -121,6 +131,13 @@ def process_chat(
         corrections=len(corrections),
         dropped=extraction.dropped,
     )
+
+
+def _note_usage(usage: dict[str, Any], step: str, provider: Provider) -> None:
+    """Remember what the latest call used (providers that cannot tell leave it out)."""
+    used = getattr(provider, "last_usage", None)
+    if used is not None:
+        usage[step] = used.as_dict()
 
 
 def _extract(
@@ -170,4 +187,5 @@ def _new_decision(item: ExtractedDecision, digest: Digest, review: Review | None
         review_note=note,
         decided_by=item.decided_by,
         files=item.files,
+        thinking=item.thinking,
     )

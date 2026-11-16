@@ -20,6 +20,7 @@ MAX_OPTIONS = 10
 MAX_EVIDENCE = 20
 MAX_REVIEW_NOTE = 300
 MAX_FILES = 60
+MAX_THINKING = 5
 
 DECIDED_BY = ("developer", "claude")
 
@@ -48,6 +49,7 @@ class ExtractedDecision:
     evidence: list[int]  # digest line numbers, all present in the digest
     decided_by: str | None = None  # developer | claude
     files: list[FileRef] = field(default_factory=list)  # read from the recorded data
+    thinking: list[LineRef] = field(default_factory=list)  # Claude's thinking notes, as recorded
 
     def as_prompt_dict(self) -> dict[str, Any]:
         """The decision as the reviewer sees it."""
@@ -63,6 +65,7 @@ class ExtractedDecision:
             "files_changed": [
                 {"path": item.path, "change": item.change, "via": item.via} for item in self.files
             ],
+            "thinking_notes": [ref.note for ref in self.thinking],
             "commit_shas": self.commit_shas,
             "evidence_lines": self.evidence,
         }
@@ -195,6 +198,7 @@ def _decision(
         evidence=evidence,
         decided_by=_decided_by(item.get("decided_by")),
         files=_files(item.get("file_lines"), refs),
+        thinking=_thinking(item.get("thinking_lines"), refs),
     )
 
 
@@ -213,6 +217,13 @@ def _files(value: Any, refs: dict[int, LineRef]) -> list[FileRef]:
         for item in ref.files:
             found[item.path] = item  # a later change of the same file replaces the earlier one
     return list(found.values())[:MAX_FILES]
+
+
+def _thinking(value: Any, refs: dict[int, LineRef]) -> list[LineRef]:
+    """The cited THINK lines: the notes come from the data, at most a few, each once."""
+    cited = [refs[n] for n in _ints(value) if n in refs and refs[n].kind == "think"]
+    unique = {(ref.raw_object_key, ref.raw_line_number): ref for ref in cited}
+    return list(unique.values())[:MAX_THINKING]
 
 
 def _correction(item: Any, refs: dict[int, LineRef]) -> DeveloperCorrection | None:

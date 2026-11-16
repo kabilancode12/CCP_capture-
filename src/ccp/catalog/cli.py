@@ -80,7 +80,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _build(connection: Any, store: Any, args: argparse.Namespace) -> int:
     if args.all:
         result = catalog_all(connection, store)
-        print(f"{len(result.built)} chat(s) written, {result.removed_empty} empty chat(s) removed.")
+        print(
+            f"{len(result.built)} chat(s) written, {result.removed_empty} empty chat(s) removed, "
+            f"{result.removed_deleted} deleted chat(s) removed."
+        )
         for session_id, reason in result.failed.items():
             print(f"failed: {session_id} ({reason})", file=sys.stderr)
         return 1 if result.failed else 0

@@ -116,7 +116,7 @@ _SESSIONS = f"""
 
 _DECISIONS = """
     SELECT decision_id, seq, title, goal, options, chosen, reason, result, tests_summary,
-           decided_by, files,
+           decided_by, files, thinking, llm_usage,
            commit_shas, evidence_lines, status, reviewed_by_kind, reviewer, review_note,
            review_history, model, prompt_version, created_at, updated_at
       FROM decision WHERE session_id = %s ORDER BY seq

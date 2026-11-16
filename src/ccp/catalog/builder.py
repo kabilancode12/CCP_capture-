@@ -62,6 +62,7 @@ class CatalogResult:
 
     built: list[str] = field(default_factory=list)  # folders written
     removed_empty: int = 0  # empty chats whose folder was removed
+    removed_deleted: int = 0  # folders of chats that no longer exist in the index
     failed: dict[str, str] = field(default_factory=dict)  # chat id -> reason (no content)
 
 
@@ -257,7 +258,7 @@ def catalog_chat(connection: Any, store: CatalogStore, session_id: str) -> str |
 
 
 def catalog_all(connection: Any, store: CatalogStore) -> CatalogResult:
-    """Write the catalog of every chat, remove the folders of empty chats, write the index.
+    """Write every chat's catalog; remove the folders of empty and deleted chats; write the index.
 
     One chat that cannot be catalogued (its raw data is unreadable) does not stop the others; it
     is reported in the result.
@@ -278,5 +279,10 @@ def catalog_all(connection: Any, store: CatalogStore) -> CatalogResult:
         if listing.folders_of(session_id):
             _build_chat(connection, store, listing, session_id)
             result.removed_empty += 1
+    known = {short_id(session_id) for session_id in (*filled, *empty)}
+    for folder in list(listing.folders):
+        if chat_id8_of_folder(folder.rsplit("/", 1)[-1]) not in known:
+            _remove_folder(store, listing, folder)  # its chat was deleted: nothing to describe
+            result.removed_deleted += 1
     _write_index(connection, store, listing)
     return result

@@ -23,6 +23,8 @@ Type=simple
 # Edit these two lines: the repository folder, and the Python of the virtual environment.
 WorkingDirectory=%h/Downloads/ccp_V2
 ExecStart=%h/Downloads/ccp_V2/.venv/bin/python -m ccp.server --migrate
+# A service has a short PATH: add the places where `claude` (used for the decisions) is installed.
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
 Restart=on-failure
 RestartSec=5
 # SIGTERM (systemctl stop) makes the server finish its current indexing job and exit.

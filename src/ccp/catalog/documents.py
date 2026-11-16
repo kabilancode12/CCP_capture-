@@ -172,6 +172,11 @@ def build_decisions(data: ChatData) -> list[dict[str, Any]]:
                 if isinstance(f, dict)
             ],
             "decided_by": d["decided_by"],
+            "thinking_notes": [
+                {"note": t.get("text"), "transcript_file": t.get("key"), "line": t.get("line")}
+                for t in (d["thinking"] or [])
+                if isinstance(t, dict)
+            ],
             "commits": d["commit_shas"] or [],
             "review": {
                 "status": d["status"],
@@ -186,6 +191,7 @@ def build_decisions(data: ChatData) -> list[dict[str, Any]]:
                 if isinstance(e, dict)
             ],
             "written_by": d["model"],
+            "llm_usage": d["llm_usage"] or {},
             "decision_id": d["decision_id"],
             "created_at": d["created_at"],
         }

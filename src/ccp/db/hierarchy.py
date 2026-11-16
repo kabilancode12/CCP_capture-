@@ -143,6 +143,16 @@ _PROJECT_OF_FOLDER = """
     SELECT project_id FROM project WHERE %s = ANY (folders)
      ORDER BY key_kind = 'git_remote' DESC, project_id LIMIT 1
 """
+# A Git project that already has a chat of this machine in this folder: a chat in the same folder
+# that records no remote (it was made before the remote was set) belongs to that project too.
+_GIT_PROJECT_OF_FOLDER = """
+    SELECT p.project_id FROM project p
+     WHERE p.key_kind = 'git_remote' AND %s = ANY (p.folders)
+       AND EXISTS (SELECT 1 FROM session s JOIN session_env e ON e.session_id = s.session_id
+                    WHERE s.project_id = p.project_id AND e.folder = %s
+                      AND lower(btrim(e.hostname)) = %s)
+     ORDER BY p.project_id LIMIT 1
+"""
 _MOVE_CHATS = "UPDATE session SET project_id = %s WHERE project_id = %s"
 _DELETE_PROJECT = "DELETE FROM project WHERE project_id = %s"
 
@@ -300,6 +310,14 @@ def link_chat(
         cursor.execute(_PROJECT_OF_FOLDER, (folder,))
         project_id = _first_value(cursor)
         key = None if project_id is not None else key
+    if key is not None and key.kind == "folder" and hostname and folder:
+        # No remote recorded, but this machine's chats in this folder already have a Git project
+        # (the remote was set later): the chat joins it instead of making a folder project again.
+        cursor.execute(_GIT_PROJECT_OF_FOLDER, (folder, folder, hostname.strip().lower()))
+        project_id = _first_value(cursor)
+        if project_id is not None:
+            _merge_folder_projects(cursor, project_id, folder_keys(hostname, folder))
+            key = None
     if key is not None:
         remote = strip_credentials(git_remote) if key.kind == "git_remote" and git_remote else None
         cursor.execute(_UPSERT_PROJECT, (key.key, key.kind, key.name, remote, folder, folder))

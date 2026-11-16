@@ -83,7 +83,9 @@ def sweep_once(
                     after_chat(session_id)  # e.g. rebuild the chat's catalog with its decisions
             except Exception as error:  # noqa: BLE001  (one chat must not stop the sweep)
                 connection.rollback()
-                logger.warning("decisions for one chat failed (%s)", type(error).__name__)
+                logger.warning(
+                    "decisions for one chat failed: %s", error
+                )  # a safe message, no chat text
     finally:
         connection.close()
     return done

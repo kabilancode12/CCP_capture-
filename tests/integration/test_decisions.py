@@ -655,3 +655,52 @@ def test_files_changed_by_a_shell_command_are_in_the_digest_and_the_decision(con
         ("old.http", "shell"),
         ("(project files from dotnet new webapi)", "shell"),
     ]
+
+
+def test_thinking_notes_are_listed_cited_and_copied_from_the_data(conn: Any) -> None:
+    cursor = conn.cursor()
+    think = add_event(cursor, 40, "thinking", "ai", 50, {})
+    cursor.execute(
+        "INSERT INTO thinking (event_id, block_index, text) VALUES (%s, 0, %s)",
+        (think, "I will use a queue because it is simple to test."),
+    )
+    empty = add_event(cursor, 41, "thinking", "ai", 51, {})
+    cursor.execute(
+        "INSERT INTO thinking (event_id, block_index, text) VALUES (%s, 0, '')", (empty,)
+    )
+    conn.commit()
+    digest = build_digest(conn, CHAT, 80_000)
+    note = line_of(digest.text, "THINK")
+    assert "I will use a queue because it is simple to test." in digest.text
+    assert digest.text.count("THINK") == 1  # the block without text is not listed
+
+    answer = default_extraction(digest.text)
+    answer["decisions"][0]["thinking_lines"] = [note, 9999, line_of(digest.text, "PROMPT")]
+    process_chat(conn, FakeProvider(extract=answer), SETTINGS, CHAT)
+    cursor.execute("SELECT thinking FROM decision WHERE session_id = %s AND seq = 1", (CHAT,))
+    (stored,) = cursor.fetchone()
+    # Only the THINK line counts; a made-up or non-thinking line number adds nothing.
+    assert [t["text"] for t in stored] == ["I will use a queue because it is simple to test."]
+    assert stored[0]["key"].startswith("sessions/") and stored[0]["line"] == 40
+
+
+def test_the_usage_of_both_calls_is_stored_with_the_decisions(conn: Any) -> None:
+    from ccp.decisions.provider import CallUsage
+
+    class Metered(FakeProvider):
+        last_usage: CallUsage | None = None
+
+        def complete(self, system: str, prompt: str, model: str) -> str:
+            answer = super().complete(system, prompt, model)
+            wrote = system == prompts.EXTRACT_SYSTEM
+            self.last_usage = CallUsage(
+                model, 1000 if wrote else 2000, 300 if wrote else 50, cost_usd=0.5
+            )
+            return answer
+
+    process_chat(conn, Metered(), SETTINGS, CHAT)
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT llm_usage FROM decision WHERE session_id = %s", (CHAT,))
+    (usage,) = [row[0] for row in cursor.fetchall()]
+    assert usage["write"]["input_tokens"] == 1000 and usage["write"]["model"] == "test-model"
+    assert usage["review"]["output_tokens"] == 50 and usage["review"]["model"] == "test-reviewer"

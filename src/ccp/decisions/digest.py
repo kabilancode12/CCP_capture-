@@ -76,6 +76,18 @@ _EDITS = """
      GROUP BY f.path, f.prompt_event_id
 """
 
+# Claude's own thinking notes (the thinking summaries Claude Code saves when showThinkingSummaries
+# is on). Most thinking blocks have no text; only those that have are listed.
+_THINKING = f"""
+    SELECT e.event_id, e.occurred_at, e.raw_object_key, e.raw_line_number, t.text
+      FROM thinking t JOIN event e ON e.event_id = t.event_id
+     WHERE e.session_id = %s AND NOT e.is_abandoned AND length(btrim(COALESCE(t.text, ''))) > 0
+       AND split_part(e.raw_object_key, '/', 3) = '{_MAIN_STREAM}'
+"""  # noqa: S608  (only constants are inserted)
+
+# How much of one thinking note is kept (the note is copied from the data, not rewritten).
+_NOTE_CHARS = 600
+
 # The Bash commands of each tool call (one call may hold several), for the shell file changes.
 _SHELL = """
     SELECT e.event_id, e.occurred_at, e.raw_object_key, e.raw_line_number,
@@ -123,8 +135,9 @@ class LineRef:
     event_id: int
     raw_object_key: str
     raw_line_number: int
-    kind: str  # prompt | reply | command | edit | shell | test | correction
+    kind: str  # prompt | reply | command | edit | shell | think | test | correction
     files: tuple[FileRef, ...] = ()  # for edit and shell lines
+    note: str = ""  # for think lines: the thinking note as recorded
 
 
 @dataclass(frozen=True)
@@ -146,7 +159,7 @@ class _Entry:
 
     at: datetime
     ref: LineRef
-    label: str  # PROMPT | REPLY | COMMAND | EDIT | SHELL | TEST | CORRECTION
+    label: str  # PROMPT | REPLY | COMMAND | EDIT | SHELL | THINK | TEST | CORRECTION
     excerpt: str = ""  # shortened to the current width
     detail: str = ""  # fixed text that follows the label
 
@@ -185,7 +198,11 @@ def _fit(header: str, entries: list[_Entry], footer: str, max_chars: int) -> Dig
         digest = _write(header, entries, footer, width)
         if digest.chars <= max_chars:
             return digest
-    without_replies = [entry for entry in entries if entry.ref.kind != "reply"]
+    without_thinking = [entry for entry in entries if entry.ref.kind != "think"]
+    digest = _write(header, without_thinking, footer, EXCERPT_WIDTHS[-1])
+    if digest.chars <= max_chars:
+        return digest
+    without_replies = [entry for entry in without_thinking if entry.ref.kind != "reply"]
     digest = _write(header, without_replies, footer, EXCERPT_WIDTHS[-1])
     if digest.chars <= max_chars:
         return digest
@@ -300,6 +317,11 @@ def _entries(cursor: pg8000.dbapi.Cursor, session_id: str) -> list[_Entry]:
             shown = "; ".join(f"{item.change} {item.path}" for item in files[:12])
             more = f"; and {len(files) - 12} more" if len(files) > 12 else ""
             entries.append(_Entry(_when(at), ref, "SHELL", detail=f"by command: {shown}{more}"))
+    cursor.execute(_THINKING, (session_id,))
+    for event_id, at, key, line, text in cursor.fetchall():
+        note = " ".join(str(text).split())[:_NOTE_CHARS]
+        ref = LineRef(event_id, key, line, "think", note=note)
+        entries.append(_Entry(_when(at), ref, "THINK", excerpt=note))
     cursor.execute(_TESTS, (session_id,))
     for row in cursor.fetchall():
         event_id, at, key, line, framework, passed, n_passed, n_failed, n_skipped, command = row

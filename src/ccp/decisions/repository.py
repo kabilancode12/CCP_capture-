@@ -53,9 +53,9 @@ _INSERT_DECISION = """
     INSERT INTO decision (session_id, seq, title, goal, options, chosen, reason, result,
                           tests_summary, commit_shas, evidence_lines, status, reviewed_by_kind,
                           reviewer, review_note, review_history, model, prompt_version,
-                          decided_by, files)
+                          decided_by, files, thinking, llm_usage)
     VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s::text[], %s::jsonb, %s, 'ai', %s, %s,
-            %s::jsonb, %s, %s, %s, %s::jsonb)
+            %s::jsonb, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
 """
 _DELETE_AI_CORRECTIONS = """
     DELETE FROM correction
@@ -120,6 +120,7 @@ class NewDecision:
     review_note: str
     decided_by: str | None = None  # developer | claude
     files: list[FileRef] = field(default_factory=list)
+    thinking: list[LineRef] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -183,6 +184,7 @@ def save_decisions(
     model: str,
     prompt_version: str,
     review_model: str | None = None,
+    llm_usage: dict[str, Any] | None = None,
 ) -> None:
     """Replace the chat's AI-written decisions and developer corrections, in one transaction.
 
@@ -239,6 +241,18 @@ def save_decisions(
                             for item in decision.files
                         ]
                     ),
+                    json.dumps(
+                        [
+                            {
+                                "text": ref.note,
+                                "key": ref.raw_object_key,
+                                "line": ref.raw_line_number,
+                            }
+                            for ref in decision.thinking
+                        ],
+                        ensure_ascii=False,
+                    ),
+                    json.dumps(llm_usage or {}),
                 ),
             )
         cursor.execute(_DELETE_AI_CORRECTIONS, (session_id,))

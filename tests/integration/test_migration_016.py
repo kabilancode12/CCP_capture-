@@ -92,7 +92,7 @@ def test_the_rollback_restores_the_label_tables_and_the_old_usage_view(at_015: A
     migrate(at_015, migrations)
     _run(at_015, "UPDATE project SET label = 'renamed' WHERE name = 'ccp_V2'")
 
-    rollback(at_015, migrations, steps=2)  # 017 (decision files), then 016
+    rollback(at_015, migrations, steps=3)  # 018, 017, then 016
 
     assert _rows(at_015, "SELECT * FROM account_label") == [(EMAIL, "claude1")]
     assert _rows(at_015, "SELECT * FROM project_label ORDER BY 1") == [
@@ -223,7 +223,7 @@ def test_a_reader_of_d_usage_keeps_it_and_can_read_d_chat(
         assert _can_read(temp_database, reader_role, "d_chat")
         assert not _can_read(temp_database, reader_role, "chat")  # not a dashboard view
 
-        rollback(connection, discover_migrations(REAL_MIGRATIONS), steps=2)  # 017, then 016
+        rollback(connection, discover_migrations(REAL_MIGRATIONS), steps=3)  # 018, 017, then 016
         assert _can_read(temp_database, reader_role, "d_usage")
     finally:
         connection.close()

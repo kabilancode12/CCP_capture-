@@ -6,6 +6,7 @@ files; and the views built on them (``chat``, ``d_chat``, ``v_slash_command``, `
 """
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -191,6 +192,24 @@ def test_a_folder_that_gets_a_git_remote_brings_its_chats_and_label_to_the_git_p
         ("chat-1", "billing-api"),
         ("chat-2", "billing-api"),
     ]
+
+
+def test_an_old_chat_without_a_remote_stays_in_the_git_project_of_its_folder(
+    http: HttpApiClient, database: DatabaseSettings
+) -> None:
+    """The chat was made before the remote was set; indexing it again must not split the project."""
+    folder_only = EnvironmentRecord(hostname="Laptop-1", folder="/home/dev/billing")
+    http.put_environment("chat-1", folder_only)
+    http.put_environment("chat-2", _environment())  # the remote is set: one Git project
+
+    http.put_environment("chat-1", replace(folder_only, git_user_name="Dev"))  # linked again
+    http.put_environment("chat-3", folder_only)  # a new chat of a client without the remote
+
+    assert _rows(database, "SELECT project_key, key_kind FROM project") == [
+        ("github.com/acme/billing", "git_remote")
+    ]
+    assert {r[0] for r in _rows(database, "SELECT project_id FROM session")} != {None}
+    assert len(_rows(database, "SELECT DISTINCT project_id FROM session")) == 1
 
 
 def test_a_git_project_with_a_label_of_its_own_keeps_it_when_a_folder_project_joins(

@@ -152,3 +152,63 @@ def test_the_api_provider_asks_for_adaptive_thinking(monkeypatch: pytest.MonkeyP
     assert isinstance(
         choose_provider(DecisionSettings(), {"ANTHROPIC_API_KEY": "k"}), AnthropicProvider
     )
+
+
+def test_claude_is_found_in_the_users_own_bin_folder_when_the_path_is_short(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A background service has a short PATH; ~/.local/bin is searched as well."""
+    from ccp.decisions.provider import find_command
+
+    bin_folder = tmp_path / ".local" / "bin"
+    bin_folder.mkdir(parents=True)
+    tool = bin_folder / "claude"
+    tool.write_text("#!/bin/sh\n")
+    tool.chmod(0o755)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.delenv("CCP_CLAUDE_COMMAND", raising=False)
+    assert find_command("claude") == str(tool)
+    assert find_command("no-such-command-ccp") is None
+    monkeypatch.setenv("CCP_CLAUDE_COMMAND", str(tool))
+    assert find_command("claude") == str(tool)
+
+
+def test_the_tokens_cost_and_time_are_read_from_the_cli_output() -> None:
+    from ccp.decisions.provider import parse_cli_usage
+
+    output = json.dumps(
+        {
+            "result": "{}",
+            "total_cost_usd": 0.0421,
+            "duration_ms": 41234,
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 850,
+                "cache_read_input_tokens": 100,
+                "cache_creation_input_tokens": 7000,
+            },
+        }
+    )
+    used = parse_cli_usage(output, "m")
+    assert used is not None and used.as_dict() == {
+        "model": "m",
+        "input_tokens": 12,
+        "output_tokens": 850,
+        "cache_read_tokens": 100,
+        "cache_creation_tokens": 7000,
+        "cost_usd": 0.0421,
+        "seconds": 41.2,
+    }
+    assert parse_cli_usage("not json", "m") is None
+    assert parse_cli_usage(json.dumps({"result": "x"}), "m") is None
+
+
+def test_the_command_leaves_out_connectors_skills_and_tools() -> None:
+    """The call loads nothing but the instructions: no tools, connectors or skills."""
+    arguments = ClaudeCliProvider(60, command=sys.executable).arguments("system text", "model-x")
+    assert arguments[arguments.index("--tools") + 1] == ""
+    for flag in ("--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"):
+        assert flag in arguments
+    assert arguments[arguments.index("--model") + 1] == "model-x"
+    assert arguments[arguments.index("--system-prompt") + 1] == "system text"

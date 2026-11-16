@@ -316,3 +316,19 @@ def test_catalog_all_with_chats_that_share_an_id_start_and_one_without_account(
         "claude1__11111111",
         "unknown-account__00000000",
     ]
+
+
+def test_the_folder_of_a_chat_that_no_longer_exists_is_removed(
+    story: ObjectStore, database: DatabaseSettings
+) -> None:
+    """A chat deleted from the index (test debris, a purge) leaves no folder in the catalog."""
+    store = story  # the fixture of the chat tests: an object store with the catalog built
+    ghost = "catalog/accounts/account__00000099/projects/x/chats/2026-01-01__old__zzzzzzzz"
+    store.put(f"{ghost}/00_summary.json", b"{}")
+    connection = connect(database)
+    try:
+        result = catalog_all(connection, store)
+    finally:
+        connection.close()
+    assert result.removed_deleted == 1
+    assert not [k for k in store.list_keys("catalog/accounts/") if "zzzzzzzz" in k]
