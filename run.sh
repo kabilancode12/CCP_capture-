@@ -5,6 +5,7 @@
 #   ./run.sh            later: checks everything and starts what is not running (safe to repeat)
 #   ./run.sh developer  on a developer's machine: only the capture (asks for the server's address and token)
 #   ./run.sh status     only show what is running
+#   ./run.sh check      the latest captured sessions: which app, report.md, changes, decisions
 #   ./run.sh stop       stop the CCP server and the containers (data is kept)
 #
 # What it does, in order:
@@ -63,6 +64,33 @@ load_env() { set -a; # shellcheck disable=SC1090
 health() { curl -s -m 3 "http://127.0.0.1:${CCP_API_PORT:-8000}/health" 2>/dev/null | grep -q '"status":"ok"'; }
 
 # ---------------------------------------------------------------------------------- small commands
+if [[ "${1:-}" == "check" ]]; then
+  [[ -f .env ]] || fail "no .env yet: run ./run.sh first"
+  load_env
+  health && ok "CCP server is answering" || warn "CCP server is NOT answering: run ./run.sh"
+  "$PY" - <<'PYCHECK'
+from ccp.db.connection import connect
+from ccp.settings import load_database_settings, load_storage_settings
+from ccp.storage import connect_store
+c = connect(load_database_settings()); k = c.cursor()
+store = connect_store(load_storage_settings())
+keys = set(store.list_keys("catalog/accounts/"))
+k.execute("""
+  SELECT s.session_id, COALESCE(e.surface, '?'), COALESCE(e.entrypoint, '?'), s.last_activity_at,
+         (SELECT count(*) FROM shadow_commit x WHERE x.session_id = s.session_id),
+         (SELECT count(*) FROM file_change f WHERE f.session_id = s.session_id),
+         (SELECT count(*) FROM decision d WHERE d.session_id = s.session_id)
+    FROM session s LEFT JOIN session_env e USING (session_id)
+   WHERE NOT s.is_empty ORDER BY s.last_activity_at DESC NULLS LAST LIMIT 8""")
+print(f"  {'session':10} {'app':10} {'entrypoint':16} {'last activity (UTC)':20} {'report':7} {'commits':>7} {'changes':>7} {'decisions':>9}")
+for sid, surface, entry, last, commits, changes, decisions in k.fetchall():
+    report = any(key.endswith(f"__{sid[:8]}/report.md") for key in keys)
+    when = last.strftime("%Y-%m-%d %H:%M") if last else "-"
+    print(f"  {sid[:8]:10} {surface:10} {entry:16} {when:20} {'yes' if report else 'NO':7} {commits:>7} {changes:>7} {decisions:>9}")
+PYCHECK
+  exit 0
+fi
+
 if [[ "${1:-}" == "status" || "${1:-}" == "stop" ]]; then
   [[ -f .env ]] || fail "no .env yet: run ./run.sh first"
   load_env
