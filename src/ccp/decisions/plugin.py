@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -55,7 +55,11 @@ def session_ended(connection: Any, session_id: str) -> bool:
 
 
 def sweep_once(
-    database: DatabaseSettings, idle: timedelta, stop: threading.Event, env: Mapping[str, str]
+    database: DatabaseSettings,
+    idle: timedelta,
+    stop: threading.Event,
+    env: Mapping[str, str],
+    after_chat: Callable[[str], None] | None = None,
 ) -> int:
     """Process every pending chat that has been quiet for ``idle``; returns how many were done."""
     settings = load_decision_settings(env)
@@ -75,6 +79,8 @@ def sweep_once(
             try:
                 process_chat(connection, provider, settings, session_id)
                 done += 1
+                if after_chat is not None:
+                    after_chat(session_id)  # e.g. rebuild the chat's catalog with its decisions
             except Exception as error:  # noqa: BLE001  (one chat must not stop the sweep)
                 connection.rollback()
                 logger.warning("decisions for one chat failed (%s)", type(error).__name__)
@@ -89,11 +95,27 @@ def register(registry: PluginRegistry, context: PluginContext) -> None:
     idle = timedelta(minutes=_minutes(env, "CCP_DECISION_IDLE_MINUTES", 15))
     every = _minutes(env, "CCP_DECISION_SWEEP_MINUTES", 2) * 60
     stop = threading.Event()
+    # The catalog is built right after indexing, before the decisions exist: rebuild a chat's
+    # catalog once its decisions are written, so the readable files are complete.
+    catalog_on = "catalog" in registry.loaded
+
+    def rebuild_catalog(session_id: str) -> None:
+        if not catalog_on:
+            return
+        from ccp.catalog.builder import catalog_chat
+
+        connection = connect(context.settings.database)
+        try:
+            catalog_chat(connection, context.store, session_id)
+        except Exception as error:  # noqa: BLE001  (the decisions are stored; the catalog can wait)
+            logger.warning("catalog after decisions failed (%s)", type(error).__name__)
+        finally:
+            connection.close()
 
     def loop() -> None:
         while not stop.wait(every):
             try:
-                sweep_once(context.settings.database, idle, stop, env)
+                sweep_once(context.settings.database, idle, stop, env, rebuild_catalog)
             except Exception as error:  # noqa: BLE001
                 logger.warning("decision sweep failed (%s)", type(error).__name__)
 
