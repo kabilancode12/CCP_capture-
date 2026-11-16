@@ -129,7 +129,12 @@ def _snapshots(repository: AuditRepository, session: str) -> int:
         return 0
     print(f"{len(rows)} capture commit(s) of chat {rows[0][7][:8]}, oldest first:\n")
     for when, actor, tool, target, model, files, sha, _ in rows:
-        what = f"{tool or ''} {target or ''}".strip() or "changes outside Claude"
+        idle = (
+            "changes made outside Claude"
+            if actor == "human"
+            else "changes seen at the end of a reply"
+        )
+        what = f"{tool or ''} {target or ''}".strip() or idle
         print(
             f"  {when:%Y-%m-%d %H:%M:%S}  {sha[:10]}  {actor:<10} {files:>3} file(s)  {what}"
             + (f"  [{model}]" if model else "")
