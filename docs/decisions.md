@@ -88,7 +88,9 @@ ones are numbered after them); the AI's earlier developer corrections are replac
 rules (`detected_by = 'rule'`) are never touched. Nothing is changed if a model call fails or its answer is
 unusable, and if a run returns no valid decision the stored ones are kept.
 
-A chat for which the model finds no decision at all has none stored, so `--pending` asks again each time.
+A chat for which the model finds no decision at all has none stored, but it is marked as checked
+(`session.decisions_checked_at`, migration 019): it is not sent to the model again until it has new activity.
+A chat whose run failed is left alone by the server for 30 minutes, because every try costs tokens.
 
 ## The model
 

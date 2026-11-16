@@ -28,7 +28,11 @@ _LAST_EVENT = """
     (SELECT max(e.occurred_at) FROM event e
       WHERE e.session_id = s.session_id AND NOT e.is_abandoned)
 """
-_NEWEST_DECISION = "(SELECT max(d.created_at) FROM decision d WHERE d.session_id = s.session_id)"
+# The last time the chat was handled: its newest decision, or the last run that found none.
+_NEWEST_DECISION = (
+    "GREATEST((SELECT max(d.created_at) FROM decision d WHERE d.session_id = s.session_id), "
+    "s.decisions_checked_at)"
+)
 
 _STATE = f"""
     SELECT s.is_empty, {_HAS_PROMPT}, {_LAST_EVENT}, {_NEWEST_DECISION}
@@ -165,6 +169,15 @@ def pending_chats(connection: pg8000.dbapi.Connection, force: bool) -> list[str]
     chats = [row[0] for row in cursor.fetchall()]
     connection.rollback()
     return chats
+
+
+def mark_checked(connection: pg8000.dbapi.Connection, session_id: str) -> None:
+    """Remember that the chat was given to the decisions run (also when it found no decision)."""
+    cursor = connection.cursor()
+    cursor.execute(
+        "UPDATE session SET decisions_checked_at = now() WHERE session_id = %s", (session_id,)
+    )
+    connection.commit()
 
 
 def linked_commits(connection: pg8000.dbapi.Connection, session_id: str) -> list[str]:

@@ -704,3 +704,22 @@ def test_the_usage_of_both_calls_is_stored_with_the_decisions(conn: Any) -> None
     (usage,) = [row[0] for row in cursor.fetchall()]
     assert usage["write"]["input_tokens"] == 1000 and usage["write"]["model"] == "test-model"
     assert usage["review"]["output_tokens"] == 50 and usage["review"]["model"] == "test-reviewer"
+
+
+def test_a_chat_without_decisions_is_not_asked_again_until_it_has_new_activity(conn: Any) -> None:
+    from ccp.decisions.repository import pending_chats
+
+    nothing = FakeProvider(extract={"decisions": [], "developer_corrections": []})
+    result = process_chat(conn, nothing, SETTINGS, CHAT)
+    assert result.outcome == "no_decisions"
+    assert CHAT not in pending_chats(conn, False)  # checked: no second call at the next sweep
+    assert process_chat(conn, nothing, SETTINGS, CHAT).outcome == "up_to_date"
+    assert len(nothing.calls) == 1
+
+    cursor = conn.cursor()
+    add_event(cursor, 60, "prompt", "human", 90, {"message": {"content": "one more thing"}})
+    cursor.execute(
+        "UPDATE event SET occurred_at = now() + interval '1 hour' WHERE raw_line_number = 60"
+    )
+    conn.commit()
+    assert CHAT in pending_chats(conn, False)  # new activity: it is pending again

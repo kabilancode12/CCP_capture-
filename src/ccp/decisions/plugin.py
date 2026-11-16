@@ -30,6 +30,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger("ccp.decisions")
 
 
+# Chats whose last run failed, and when: they are left alone for a while.
+_FAILED: dict[str, datetime] = {}
+_RETRY_AFTER = timedelta(minutes=30)
+
+
 def _minutes(env: Mapping[str, str], name: str, default: int) -> int:
     value = env.get(name, "").strip()
     return int(value) if value.isdigit() and int(value) > 0 else default
@@ -70,6 +75,9 @@ def sweep_once(
         for session_id in pending_chats(connection, False):
             if stop.is_set():
                 break
+            failed_at = _FAILED.get(session_id)
+            if failed_at is not None and datetime.now(UTC) - failed_at < _RETRY_AFTER:
+                continue  # a failed chat is not tried at every sweep: each try costs tokens
             state = chat_state(connection, session_id)
             if state is None or state.is_empty or not state.has_prompt:
                 continue
@@ -83,6 +91,7 @@ def sweep_once(
                     after_chat(session_id)  # e.g. rebuild the chat's catalog with its decisions
             except Exception as error:  # noqa: BLE001  (one chat must not stop the sweep)
                 connection.rollback()
+                _FAILED[session_id] = datetime.now(UTC)
                 logger.warning(
                     "decisions for one chat failed: %s", error
                 )  # a safe message, no chat text

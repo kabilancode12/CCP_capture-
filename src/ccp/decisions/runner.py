@@ -30,6 +30,7 @@ from ccp.decisions.repository import (
     NewDecision,
     chat_state,
     linked_commits,
+    mark_checked,
     save_decisions,
 )
 from ccp.decisions.settings import DecisionSettings
@@ -100,7 +101,9 @@ def process_chat(
     extraction = _extract(provider, settings, digest, commits)
     _note_usage(usage, "write", provider)
     if not extraction.decisions:
-        # Nothing valid came back: keep what is stored rather than wipe it.
+        # Nothing valid came back: keep what is stored rather than wipe it, and remember that the
+        # chat was looked at, so it is not sent to the model again until it has new activity.
+        mark_checked(connection, session_id)
         return ChatResult(session_id, NO_DECISIONS, digest.chars, dropped=extraction.dropped)
     reviews = _review(provider, settings, digest, extraction)
     _note_usage(usage, "review", provider)

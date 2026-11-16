@@ -87,12 +87,17 @@ def test_accounts_projects_and_labels_are_moved(at_015: Any) -> None:
     assert not tables & {"account_label", "project_label"}
 
 
+def _steps_back_to_015(migrations: Any) -> int:
+    """How many migrations to roll back to be at 015 again (later migrations are added over time)."""
+    return sum(1 for migration in migrations if migration.version > 15)
+
+
 def test_the_rollback_restores_the_label_tables_and_the_old_usage_view(at_015: Any) -> None:
     migrations = discover_migrations(REAL_MIGRATIONS)
     migrate(at_015, migrations)
     _run(at_015, "UPDATE project SET label = 'renamed' WHERE name = 'ccp_V2'")
 
-    rollback(at_015, migrations, steps=3)  # 018, 017, then 016
+    rollback(at_015, migrations, steps=_steps_back_to_015(migrations))
 
     assert _rows(at_015, "SELECT * FROM account_label") == [(EMAIL, "claude1")]
     assert _rows(at_015, "SELECT * FROM project_label ORDER BY 1") == [
@@ -223,7 +228,8 @@ def test_a_reader_of_d_usage_keeps_it_and_can_read_d_chat(
         assert _can_read(temp_database, reader_role, "d_chat")
         assert not _can_read(temp_database, reader_role, "chat")  # not a dashboard view
 
-        rollback(connection, discover_migrations(REAL_MIGRATIONS), steps=3)  # 018, 017, then 016
+        migrations = discover_migrations(REAL_MIGRATIONS)
+        rollback(connection, migrations, steps=_steps_back_to_015(migrations))
         assert _can_read(temp_database, reader_role, "d_usage")
     finally:
         connection.close()
