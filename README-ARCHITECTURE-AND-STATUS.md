@@ -1,11 +1,14 @@
 # CCP: architecture and status
 
+> The detailed documentation and the test suite are kept on the git branch `backup/full-2026-11-16`
+> (`git show backup/full-2026-11-16:docs/<name>.md`).
+
 The Claude Capture Platform (CCP) records every Claude Code session on developer machines (the conversation, Claude's
 reasoning, the code at every step, who changed what and why), stores it, and builds an audit trail, a decision log, an
 approach library and dashboards on top.
 
 Status as of **2026-11-16**. "Done" means built and tested. "Live" means also seen working in a real Claude Code session.
-The detailed, maintained list is [docs/requirements.md](docs/requirements.md); this page is the overview.
+The detailed, maintained list is docs/requirements.md; this page is the overview.
 
 ---
 
@@ -232,13 +235,13 @@ The 21 requirements come from the demo scope (R1 to R9) and from the review (R10
 
 | Topic | Document |
 | --- | --- |
-| Requirement-by-requirement status | [docs/requirements.md](docs/requirements.md) |
-| How to run it | [docs/quickstart.md](docs/quickstart.md) |
-| The capture chain, watcher, Git hooks | [docs/snapshots.md](docs/snapshots.md) |
-| Hooks | [docs/hooks.md](docs/hooks.md) |
-| The report and the catalog | [docs/catalog.md](docs/catalog.md) |
-| Decisions | [docs/decisions.md](docs/decisions.md) |
-| Exact tracing | [docs/audit.md](docs/audit.md) |
-| Approach library and MCP | [docs/approaches.md](docs/approaches.md), [docs/mcp.md](docs/mcp.md) |
-| Explorer | [docs/explorer.md](docs/explorer.md) |
-| Dashboards | [docs/dashboards.md](docs/dashboards.md) |
+| Requirement-by-requirement status | docs/requirements.md |
+| How to run it | docs/quickstart.md |
+| The capture chain, watcher, Git hooks | docs/snapshots.md |
+| Hooks | docs/hooks.md |
+| The report and the catalog | docs/catalog.md |
+| Decisions | docs/decisions.md |
+| Exact tracing | docs/audit.md |
+| Approach library and MCP | docs/approaches.md, docs/mcp.md |
+| Explorer | docs/explorer.md |
+| Dashboards | docs/dashboards.md |

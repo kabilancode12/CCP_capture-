@@ -1,8 +1,0 @@
-{"type":"summary","summary":"Synthetic session for tests","leafUuid":"u1"}
-{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"sess-test","isSidechain":false,"message":{"role":"user","content":"Create hello.py"}}
-{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"sess-test","isSidechain":false,"message":{"role":"assistant","model":"model-x","usage":{"input_tokens":10,"output_tokens":5},"content":[{"type":"thinking","thinking":"Plan the file.","signature":"sig"},{"type":"tool_use","id":"t1","name":"Write","input":{"file_path":"hello.py","content":"print('hi')"}}]}}
-{"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"sess-test","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},"toolUseResult":{"type":"create","filePath":"hello.py","structuredPatch":[{"oldStart":1,"oldLines":0,"newStart":1,"newLines":1}]}}
-{"type":"assistant","uuid":"a2","parentUuid":"u2","sessionId":"sess-test","isSidechain":false,"message":{"role":"assistant","model":"model-x","usage":{"input_tokens":12,"output_tokens":3},"content":[{"type":"thinking","thinking":"","signature":"sig-only"},{"type":"redacted_thinking","data":"x"},{"type":"text","text":"Done."}]}}
-{"type":"assistant","uuid":"a3","parentUuid":"u2","sessionId":"sess-test","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"Sub-agent note."}]}}
-{"type":"system","subtype":"compact_boundary","uuid":"s1","parentUuid":"a2","sessionId":"sess-test"}
-this line is not json
