@@ -11,6 +11,8 @@
 | Which AI edit wrote a line, and the prompt behind it | `ccp-audit why <file> <line>` |
 | Link commits to the sessions that wrote their lines | `ccp-audit link-commits --repo <git directory>` |
 | Which sessions produced a commit | `ccp-audit commit <sha>` |
+| **Exact:** the capture commit, chat, prompt and thinking behind a line | `ccp-audit trace <file> <line> --repo <capture clone>` |
+| **Exact:** every change a chat made, with who made it | `ccp-audit snapshots <chat id>` |
 | Which commits a session produced | `ccp-audit session-commits <session id>` |
 
 `<file>` is a path relative to the session's folder (`src/app.py`) or an absolute path; either kind of slash
@@ -105,3 +107,27 @@ reserved for them.
 
 The five other audit questions are views: [queries.md](queries.md). `v_file_history` lists edits by path and
 `ccp-audit history` is its command-line form.
+
+
+## Exact tracing on the capture chain
+
+`ccp-audit why` and `link-commits` work by replaying recorded edits and matching line text, so a formatter, a shell
+command or a hand edit can fool them. Since every change is one commit of the capture chain ([snapshots.md](snapshots.md)),
+**`ccp-audit trace <file> <line> --repo <clone of the capture project>`** just runs `git blame` on the chain's
+newest branch (`--ref` picks another) and looks the blamed commit up in `shadow_commit`:
+
+```text
+Line 12 of src/app.py was last changed by Claude (claude-opus-5-5), edit tool Edit
+  capture commit 9f3c1a2b7e at 2026-11-17 10:02:11, chat 4a64fad3
+  developer: dev@example.org   tool call: toolu_01...
+  prompt:
+    add a retry to the upload step
+  thinking before the call:
+    ...
+  decisions that touched this file:
+    - Retry with backoff (claude, approved)
+```
+
+A line committed before capture started, or outside it, is reported as older than capture. A change made by a person
+shows as `a person (outside Claude)`. `ccp-audit snapshots <id>` lists a chat's capture commits (the forward trace).
+The older methods stay for chats captured before the chain existed.

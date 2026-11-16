@@ -1,7 +1,7 @@
 # Hooks: connecting Claude Code to the capture client
 
 Claude Code runs a command for each *hook event* and sends it a JSON payload on standard input.
-The capture client registers for six events and, for each, uploads what is new. The code is in
+The capture client registers for eight events and, for each, uploads what is new. The code is in
 [`src/ccp/capture/hooks.py`](../src/ccp/capture/hooks.py) (what to do) and
 [`hook_runner.py`](../src/ccp/capture/hook_runner.py) (running it safely).
 
@@ -17,6 +17,7 @@ The capture client registers for six events and, for each, uploads what is new. 
 | `Stop` | Sync the session; complete the environment record; then take a [code snapshot](snapshots.md) if the working tree changed | 30 s (uploads use at most 15 s) |
 | `SubagentStop` | Sync the session, **except** for Claude's internal helpers (empty `agent_type`), which fire after almost every turn and have no transcript | 30 s |
 | `PreCompact` | Sync the session before it is compacted | 30 s |
+| `PreToolUse`, `PostToolUse` | Only for Edit, Write, MultiEdit, NotebookEdit, Bash and PowerShell. Pre marks a tool as running (the watcher waits); Post takes **one snapshot of what the call changed**, labelled with who made it ([snapshots.md](snapshots.md#the-capture-chain-one-labelled-commit-per-change)). No upload here, so a tool call stays fast | 5 s / 20 s |
 | `SessionEnd` | Queue the session end (see below), then **start a detached background flush and return at once**: it sends the end, uploads what is left and takes the final code snapshot. Best effort only. A chat without a transcript (opened and closed without a message) still gets its end sent | 5 s |
 
 Why these choices come from what we observed (see [verify/transcript-facts.md](verify/transcript-facts.md)):
@@ -87,7 +88,7 @@ output, exit code 0. CCP sets it for its own background Claude runs, so that the
 3. Merge the `env` and `hooks` blocks into `~/.claude/settings.json` (all projects) or a project's
    `.claude/settings.json`. Replace `REPLACE_WITH_THE_INGEST_TOKEN` with the real token, by hand: the
    generator never copies a token from your environment.
-4. Start Claude Code in a repository and run `/hooks`: six capture hooks should be listed.
+4. Start Claude Code in a repository and run `/hooks`: eight capture hooks should be listed.
 5. Watch the log: `Get-Content "$HOME\.ccp\capture\hook.log" -Wait -Tail 20`. After a prompt you should
    see lines such as `Stop session=... 1 chunk(s), 3 attachment(s) uploaded ... (0.7s)`.
 
@@ -115,7 +116,7 @@ If the settings are invalid (for example no token), the hook still exits 0 and l
   no content", the settings generator (including that a real token is never copied), and the
   detached process.
 - Integration tests run each hook as a **separate process**, as Claude Code does, against the real API,
-  PostgreSQL and MinIO: a scripted session through all six events, the API going down and coming back,
+  PostgreSQL and MinIO: a scripted session through all the events, the API going down and coming back,
   and catch-up at the start of a new session.
 - A live run of real Claude Code with the generated settings captured the session, including the
   second chunk uploaded by the background flush after SessionEnd.

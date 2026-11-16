@@ -34,7 +34,9 @@ Details: [docs/architecture.md](docs/architecture.md).
 ## Quick start
 
 Prerequisites: Python 3.11+, Git, Docker Desktop. The full walk-through, with checks after every step, is
-**[docs/quickstart.md](docs/quickstart.md)**. In short, on the server:
+**`./run.sh`** (one command: checks the tools, writes `.env`, starts the database, object store,
+dashboards and the CCP server, applies the migrations, and sets up capture in Claude Code; it asks only
+for what must come from a person, such as the GitHub capture repo). Step by step: **[docs/quickstart.md](docs/quickstart.md)**. In short, on the server:
 
 ```powershell
 python -m venv .venv
@@ -63,6 +65,8 @@ Something not working? [docs/troubleshooting.md](docs/troubleshooting.md).
 | --- | --- |
 | Get it running | [quickstart.md](docs/quickstart.md), then [troubleshooting.md](docs/troubleshooting.md) |
 | Run the one-week self-pilot | [pilot.md](docs/pilot.md) |
+| Architecture diagram and the full status | [README-ARCHITECTURE-AND-STATUS.md](README-ARCHITECTURE-AND-STATUS.md) |
+| What is built, and what is left | [requirements.md](docs/requirements.md) |
 | Ask questions of the captured data (cost, file history, sub-agents, ...) | [queries.md](docs/queries.md), [audit.md](docs/audit.md) |
 | See usage and cost on a dashboard | [dashboards.md](docs/dashboards.md) |
 | Know every setting | [configuration.md](docs/configuration.md) |

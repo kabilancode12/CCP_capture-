@@ -16,7 +16,6 @@ from ccp.storage import ObjectStore
 
 from .conftest import RunningApi
 from .test_hooks_end_to_end import (
-    SESSION,
     Machine,
     _assert_quiet_success,
     _stored,
@@ -44,7 +43,11 @@ def _refs(folder: Path) -> list[str]:
 
 
 def _snapshots(folder: Path) -> list[str]:
-    return [r for r in _refs(folder) if "/sessions/" in r]
+    """The capture commits (one per change) on the capture chain, newest first."""
+    chains = _git(folder, "for-each-ref", "--format=%(refname)", "refs/heads/ccp").splitlines()
+    if not chains:
+        return []
+    return _git(folder, "log", "--format=%H", "--grep=^session: ", chains[0]).splitlines()
 
 
 @pytest.fixture
@@ -91,7 +94,7 @@ def test_a_session_captures_code_and_conversation_without_touching_the_repositor
 
     # The conversation went to the API and the code to the capture project...
     assert '"message":"edit app.py"' in _stored(object_store)
-    assert _snapshots(capture) == [f"refs/claude-capture/sessions/{SESSION}/0001"]
+    assert len(_snapshots(capture)) == 1
     assert "v2 - edited by Claude" in _git(capture, "show", f"{_snapshots(capture)[0]}:app.py")
     # ...and the developer's repository is exactly as they left it.
     assert _git(repo, "rev-parse", "HEAD") == head
@@ -136,7 +139,7 @@ def test_the_hook_log_describes_the_code_step_without_content_or_names(
     _assert_quiet_success(machine.hook("Stop", cwd=str(repo)))
 
     log = machine.log()
-    assert "code: snapshot 0001 (1 file(s) excluded: secret), pushed" in log
+    assert "code: snapshot " in log and " (1 file(s) excluded: secret), pushed" in log
     assert "config.py" not in log and fake_key not in log  # the log says how many, never which
 
 
@@ -156,7 +159,7 @@ def test_a_failed_push_is_retried_at_the_next_session_start(
 
     machine.extra_env["CCP_SNAPSHOT_REMOTE"] = working_remote  # the capture project is reachable
     _assert_quiet_success(machine.hook("SessionStart", cwd=cwd, source="resume"))
-    assert _snapshots(capture) == [f"refs/claude-capture/sessions/{SESSION}/0001"]
+    assert len(_snapshots(capture)) == 1
 
 
 def test_snapshots_are_off_unless_configured(

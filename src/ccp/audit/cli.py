@@ -3,6 +3,8 @@
     ccp-audit history <file>          every recorded AI edit of a file, oldest first
     ccp-audit why <file> <line>       which AI edit wrote a line, and the prompt behind it
     ccp-audit link-commits --repo <git>   link commits to the sessions that wrote their lines
+    ccp-audit trace <file> <line> --repo <clone>   exact: the capture commit, chat and prompt
+    ccp-audit snapshots <id>          the capture commits a chat produced
     ccp-audit commit <sha>            the sessions a commit was linked to
     ccp-audit session-commits <id>    the commits linked to a session
 
@@ -22,6 +24,7 @@ from ccp.audit.gitlog import DEFAULT_REFS, GitError, added_lines, list_commits
 from ccp.audit.linking import DEFAULT_MIN_CONFIDENCE, link_commit
 from ccp.audit.provenance import owner_of, replay
 from ccp.audit.repository import AuditError, AuditRepository, RecordedEdit
+from ccp.audit.trace import describe, newest_chain_ref, trace_line
 from ccp.settings import SettingsError, load_database_settings
 
 PROMPT_WIDTH = 60
@@ -63,6 +66,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="smallest share of a commit that a session must explain (default %(default)s)",
     )
 
+    trace = commands.add_parser(
+        "trace", help="exact: which capture commit and which chat wrote a line"
+    )
+    trace.add_argument("file", help="path inside the repository")
+    trace.add_argument("line", type=int, help="line number (1-based) at the capture chain's tip")
+    trace.add_argument("--repo", type=Path, required=True, help="a clone of the capture project")
+    trace.add_argument("--ref", help="the capture chain (default: the most recently updated)")
+
+    snapshots = commands.add_parser("snapshots", help="the capture commits a chat produced")
+    snapshots.add_argument("session", help="the chat id, or its start")
+
     commit = commands.add_parser("commit", help="the sessions a commit was linked to")
     commit.add_argument("sha", help="the commit id, or its start (at least 7 characters)")
 
@@ -84,6 +98,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _history(repository, args.file, args.include_abandoned)
         if args.command == "link-commits":
             return _link_commits(repository, args)
+        if args.command == "trace":
+            return _trace(repository, args)
+        if args.command == "snapshots":
+            return _snapshots(repository, args.session)
         if args.command == "commit":
             return _commit(repository, args.sha)
         if args.command == "session-commits":
@@ -92,6 +110,36 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (SettingsError, AuditError, GitError) as error:
         print(error, file=sys.stderr)
         return 1
+
+
+def _trace(repository: AuditRepository, args: argparse.Namespace) -> int:
+    if args.line < 1:
+        print("The line number starts at 1.", file=sys.stderr)
+        return 1
+    ref = args.ref or newest_chain_ref(args.repo)
+    origin = trace_line(args.repo, ref, args.file, args.line, repository)
+    print("\n".join(describe(origin, args.file, args.line)))
+    return 0
+
+
+def _snapshots(repository: AuditRepository, session: str) -> int:
+    rows = repository.snapshots_of(session)
+    if not rows:
+        print(f"No capture commit is recorded for chat {session}.")
+        return 0
+    print(f"{len(rows)} capture commit(s) of chat {rows[0][7][:8]}, oldest first:\n")
+    for when, actor, tool, target, model, files, sha, _ in rows:
+        idle = (
+            "changes made outside Claude"
+            if actor == "human"
+            else "changes seen at the end of a reply"
+        )
+        what = f"{tool or ''} {target or ''}".strip() or idle
+        print(
+            f"  {when:%Y-%m-%d %H:%M:%S}  {sha[:10]}  {actor:<10} {files:>3} file(s)  {what}"
+            + (f"  [{model}]" if model else "")
+        )
+    return 0
 
 
 def _history(repository: AuditRepository, path: str, include_abandoned: bool) -> int:

@@ -6,6 +6,7 @@ its behaviour can be tested with a simple fake, and the real database code is te
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import Protocol
@@ -19,12 +20,14 @@ from ccp.environment import FIELD_NAMES, EnvironmentRecord
 from ccp.lifecycle import START, LifecycleEvent
 from ccp.redaction.records import RedactionRecord
 from ccp.settings import DatabaseSettings
+from ccp.shadow import ShadowCommit
 
 # Create the session if it is new; otherwise note the activity and (re)open it, so a late chunk
 # of a session that was marked closed reopens it.
 _UPSERT_SESSION = """
     INSERT INTO session (session_id) VALUES (%s)
-    ON CONFLICT (session_id) DO UPDATE SET last_activity_at = now(), status = 'open'
+    ON CONFLICT (session_id) DO UPDATE SET last_activity_at = now(), status = 'open',
+        ended_at = NULL, end_reason = NULL
 """
 
 # Queue an index job, unless one is already waiting for this session (see migration 002).
@@ -85,6 +88,14 @@ _CLOSE_IDLE_SESSIONS = """
          WHERE r.session_id = c.session_id AND r.ended_at IS NULL
     )
     SELECT session_id FROM closed ORDER BY session_id
+"""
+
+_INSERT_SHADOW_COMMIT = """
+    INSERT INTO shadow_commit (
+        sha, session_id, parent_sha, seq, actor, developer, model, tool, target, tool_use_id,
+        prompt_uuid, prompt_excerpt, agent, event, branch, chain, captured_at, files, files_total)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+    ON CONFLICT (sha) DO NOTHING
 """
 
 # --- lifecycle events (a session of the chat started or ended; see ccp.lifecycle) ---
@@ -173,6 +184,9 @@ class SessionRepository(Protocol):
     def record_environment(self, session_id: str, record: EnvironmentRecord) -> None:
         """Store or merge the session's environment record. Safe to repeat."""
 
+    def record_shadow_commit(self, session_id: str, commit: ShadowCommit) -> bool:
+        """Record one snapshot commit of the capture repository (True if it was new)."""
+
     def record_lifecycle(self, session_id: str, event: LifecycleEvent) -> int:
         """Record a session start or end of the chat; return the session's number in the chat.
 
@@ -252,6 +266,39 @@ class PostgresRepository:
         except (pg8000.dbapi.Error, OSError) as error:
             connection.rollback()
             raise RepositoryError(f"saving environment failed: {type(error).__name__}") from error
+        finally:
+            connection.close()
+
+    def record_shadow_commit(self, session_id: str, commit: ShadowCommit) -> bool:
+        """Record one snapshot commit of the capture repository; repeating it changes nothing.
+
+        Returns:
+            True if the commit was new.
+
+        Raises:
+            RepositoryError: If the database cannot be used.
+        """
+        f = commit.fields
+        connection = self._open()
+        try:
+            cursor = connection.cursor()
+            cursor.execute(_ENSURE_SESSION, (session_id,))
+            cursor.execute(
+                _INSERT_SHADOW_COMMIT,
+                (
+                    commit.sha, session_id, commit.parent_sha, commit.seq, commit.actor,
+                    f.get("developer"), f.get("model"), f.get("tool"), f.get("target"),
+                    f.get("tool_use_id"), f.get("prompt_uuid"), f.get("prompt_excerpt"),
+                    f.get("agent"), f.get("event"), f.get("branch"), f.get("chain"),
+                    commit.captured_at, json.dumps(commit.files), commit.files_total,
+                ),
+            )  # fmt: skip
+            new = bool(cursor.rowcount == 1)
+            connection.commit()
+            return new
+        except (pg8000.dbapi.Error, OSError) as error:
+            connection.rollback()
+            raise RepositoryError(f"saving snapshot failed: {type(error).__name__}") from error
         finally:
             connection.close()
 

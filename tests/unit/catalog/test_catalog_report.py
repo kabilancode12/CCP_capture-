@@ -221,6 +221,27 @@ def _data() -> ChatData:
                 "cost_usd": Decimal("0.01"),
             },
         ],  # fmt: skip
+        shadow_commits=[
+            {
+                "sha": "d" * 40,
+                "parent_sha": None,
+                "seq": 1,
+                "actor": "ai_command",
+                "developer": "dev@x.org",
+                "model": "m1",
+                "tool": "Bash",
+                "target": "make build",
+                "tool_use_id": "toolu_9",
+                "prompt_uuid": "p1",
+                "prompt_excerpt": "build it",
+                "agent": "main",
+                "event": "PostToolUse",
+                "chain": "ccp/dev/host/main",
+                "captured_at": T1,
+                "files": [{"path": "out.bin", "state": "A"}],
+                "files_total": 1,
+            }
+        ],
         cost_total={"total_cost_usd": Decimal("1.51"), "has_unknown_model_cost": False},
     )
 
@@ -238,7 +259,7 @@ def test_report_has_every_section_and_a_title() -> None:
     assert text.startswith("# Parser | demo\n")
     for number in range(1, 11):
         assert f"\n## {number}. " in text
-    assert "### Turn 1 — 05:08:03" in text and "### Turn 2 — 05:20:00" in text
+    assert "### Conversation 1 — 05:08:03" in text and "### Conversation 2 — 05:20:00" in text
 
 
 def test_every_value_of_every_catalog_document_is_in_the_report() -> None:
@@ -294,3 +315,41 @@ def test_empty_chat_says_none_recorded_in_each_section() -> None:
     empty = ChatData(chat=data.chat)
     text = render_report(empty, "catalog/x", 0)
     assert text.count("*None recorded.*") >= 8
+
+
+def test_a_sub_agents_conversation_and_shell_commands_are_in_full() -> None:
+    data = _data()
+    data.agent_events = [
+        {**_event("prompt", "find the slow query", T0, "subagent"), "stream": "agent-a1"},
+        {**_event("tool_call", [{"type": "tool_use", "id": "s1", "name": "Bash",
+                                 "input": {"command": "grep -rn SELECT src/"}}], T0), "stream": "agent-a1"},
+        {**_event("tool_result", [{"type": "tool_result", "tool_use_id": "s1", "content": "src/db.py:12: SELECT *"}], T0),
+         "stream": "agent-a1"},
+    ]  # fmt: skip
+    text = render_report(data, "catalog/x", 1)
+    assert "Full conversation of this sub-agent (3 entries)" in text
+    assert "Instructions to the sub-agent" in text and "grep -rn SELECT src/" in text
+    assert "src/db.py:12: SELECT *" in text
+
+
+def test_every_other_transcript_entry_is_in_the_last_section() -> None:
+    raw = [{"type": "user", "message": {"content": "hi"}},
+           {"type": "api-request-blob", "text": "cd /work && make build"},
+           {"type": "ai-title", "aiTitle": "Parser work"}]  # fmt: skip
+    text = render_report(_data(), "catalog/x", 0, raw)
+    assert "## 11. Everything else Claude Code recorded" in text
+    assert "cd /work && make build" in text and "Parser work" in text
+    assert "| api-request-blob | 1 |" in text
+
+
+def test_the_client_page_holds_the_report_exactly_and_cannot_be_broken_by_its_text() -> None:
+    import json
+    import re
+
+    from ccp.catalog.report_page import report_page
+
+    markdown = "# T\n\n> Account **a** → Project\n\nsee </script><script>alert(1)</script> here ✓"
+    page = report_page("T <b>", markdown)
+    assert "<title>T &lt;b&gt;</title>" in page and "</script><script>alert" not in page
+    source = re.search(r'id="report-source">(.*?)</script>', page, re.S)
+    assert source is not None and json.loads(source.group(1).replace("<\\/", "</")) == markdown

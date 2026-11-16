@@ -2,7 +2,7 @@
 
 Layout (everything below ``catalog/``)::
 
-    accounts/<account>__<account id8>/projects/<project>/chats/<YYYY-MM-DD>__<title>__<chat id8>/
+    accounts/<account>__<account id8>/projects/<project>/sessions/<YYYY-MM-DD>__<title>__<chat id8>/
 
 Every name is a slug: lowercase ``a-z``, ``0-9`` and dashes only, so a name is safe in any file
 system and in any URL. The chat id8 (the first 8 characters of the chat id) is what ties a folder
@@ -23,9 +23,9 @@ UNKNOWN_PROJECT = "unknown-project"
 UNTITLED = "untitled"
 UNDATED = "undated"
 
-# catalog/accounts/<account>/projects/<project>/chats/<chat folder>/<file...>
+# catalog/accounts/<account>/projects/<project>/sessions/<chat folder>/<file...>
 CHAT_FOLDER_PATTERN = re.compile(
-    r"^(catalog/accounts/[^/]+/projects/[^/]+/chats/(?P<folder>[^/]+))/(?P<rest>.+)$"
+    r"^(catalog/accounts/[^/]+/projects/[^/]+/(?:sessions|chats)/(?P<folder>[^/]+))/(?P<rest>.+)$"
 )
 
 

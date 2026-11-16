@@ -49,7 +49,7 @@ Where things are (all under `src/ccp/`): `capture` (developer-machine client, ho
 
 ## Known open issues
 
-- Summed `model_usage` does not always match the transcript's `cost-state` (cause unknown).
+- Summed `model_usage` can be higher than the transcript's `cost-state`: `cost-state` is a snapshot that lags (explained in `docs/indexer.md`).
 - Plan-approval decisions in `v_human_decision` are untested on real transcripts.
 - `repository` and `start_commit` are not filled; a job whose worker crashed stays `running`; indexing 5,000
   events takes about 18 s (one insert per event).

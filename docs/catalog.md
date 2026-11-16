@@ -1,4 +1,7 @@
-# The catalog: chats you can read in MinIO
+# The catalog: sessions you can read in MinIO
+
+Levels: Claude account → project → session (one Claude Code session) → chat (everything said in it) →
+conversations (one prompt and the answer to it). In MinIO: `catalog/accounts/<account>/projects/<project>/sessions/<session>/`.
 
 The raw objects in the bucket (`sessions/<id>/<stream>/<offset>.jsonl`) are exact but hard to read: ids for
 names and one JSON line per entry, split into chunks ([storage.md](storage.md)). The **catalog** is a readable
@@ -100,5 +103,10 @@ transcript lines, the indexer processes them, and the catalog step runs right af
 rewrites the report and the readable files but does not copy the raw transcript again (the copy in
 `transcript/` is refreshed by a full build). A **full** build runs when the decisions of the chat are written
 (at the end of a session, or after quiet time) and with `ccp-catalog build`. A person's approval or rejection of
-a decision in the Explorer queues the chat for a refresh too. The server process must run the current code: restart `ccp-server` after an
+a decision in the Explorer queues the chat for a refresh too. The report also lists the capture commits of the
+chat (who made each change). The server process must run the current code: restart `ccp-server` after an
 upgrade, or the old process keeps writing the old files.
+
+At server start the whole catalog is written again with the current code, so an upgrade never leaves a session
+without `report.md`. The report contains the main chat and every sub-agent's conversation in full, with every shell
+command and its output.

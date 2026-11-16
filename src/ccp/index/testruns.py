@@ -9,6 +9,11 @@ is an error and its text starts with ``Exit code <n>``. So the outcome is read l
 * interrupted, or an error without an exit code: unknown (``None``);
 * a permission denial: the command never ran, so it is not a test run at all (the caller skips it).
 
+A request to a service on this machine (``curl http://localhost:5000/...``) is recorded as a manual
+check (``http check (manual)``), because that is how a check is often done when no test suite
+exists; its outcome is the command's exit code, so a ``curl`` that gets an HTTP error still counts
+as passed unless it was run with ``-f``.
+
 Limits, deliberately simple: the outcome is the *command's* exit code, so a pipeline such as
 ``pytest | tail`` reports the exit code of ``tail``; the number of tests passed or failed is not
 read; a command with several runners counts once, for the first.
@@ -41,6 +46,17 @@ _RUNNERS: tuple[tuple[str, str], ...] = (
 )
 _PATTERNS = tuple((name, re.compile(_WRAPPER + pattern)) for name, pattern in _RUNNERS)
 
+# A manual check of a service running on this machine: an HTTP client aimed at a local address.
+# Claude often verifies an API this way instead of running a test suite; it counts as a (manual)
+# test run. A download (``curl -O https://...``) does not: only local addresses count.
+_HTTP_CLIENT = re.compile(
+    r"(?:curl|wget|http|https|xh|Invoke-WebRequest|Invoke-RestMethod|iwr|irm)\b"
+)
+_LOCAL_ADDRESS = re.compile(
+    r"(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\]|\b::1\b)(?::\d+|/|\b)", re.IGNORECASE
+)
+MANUAL_CHECK = "http check (manual)"
+
 # Commands that start a runner without running tests.
 _NOT_A_RUN = re.compile(r"(?:^|\s)(?:--collect-only|--co|--help|-h|--version)(?:\s|$)")
 
@@ -48,6 +64,9 @@ _NOT_A_RUN = re.compile(r"(?:^|\s)(?:--collect-only|--co|--help|-h|--version)(?:
 _SEGMENT_SPLIT = re.compile(r"&&|\|\||[;|\n]")
 # An environment assignment before the command, such as "CI=1 pytest".
 _ENV_PREFIX = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+")
+
+# A here-document body (``cat > f <<'EOF' ... EOF``): file content, not commands.
+_HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\s*\2\b", re.DOTALL)
 
 _EXIT_CODE = re.compile(r"^Exit code (\d+)")
 
@@ -62,6 +81,7 @@ def detect_test_runner(command: str) -> str | None:
     Args:
         command: The command line as given to the shell tool.
     """
+    command = _HEREDOC.sub(" ", command)  # text written into a file is not a command that runs
     for segment in _SEGMENT_SPLIT.split(command):
         text = _ENV_PREFIX.sub("", segment.strip())
         if _NOT_A_RUN.search(text):
@@ -69,6 +89,8 @@ def detect_test_runner(command: str) -> str | None:
         for name, pattern in _PATTERNS:
             if pattern.match(text):
                 return name
+        if _HTTP_CLIENT.match(text) and _LOCAL_ADDRESS.search(text):
+            return MANUAL_CHECK
     return None
 
 

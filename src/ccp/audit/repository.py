@@ -121,6 +121,38 @@ class RecordedEdit:
     prompt: str | None
 
 
+_SHADOW_COMMIT = """
+    SELECT session_id, actor, developer, model, tool, target, tool_use_id, prompt_uuid,
+           prompt_excerpt, agent, captured_at, chain, seq
+      FROM shadow_commit WHERE sha LIKE %s
+"""
+_SNAPSHOTS_OF_SESSION = """
+    SELECT s.captured_at, s.actor, s.tool, s.target, s.model, s.files_total, s.sha, s.session_id
+      FROM shadow_commit s WHERE s.session_id LIKE %s ORDER BY s.captured_at, s.seq
+"""
+_PROMPT_CONTENT = """
+    SELECT payload #> '{message,content}' FROM event
+     WHERE session_id = %s AND entry_uuid = %s ORDER BY event_id LIMIT 1
+"""
+# The last thinking notes written before the tool call, in the main conversation.
+_THINKING_BEFORE = """
+    SELECT t.text FROM thinking t
+      JOIN event e ON e.event_id = t.event_id
+      JOIN event c ON c.session_id = e.session_id AND c.event_type = 'tool_call'
+                  AND c.tool_use_ids @> ARRAY[%s::text]
+     WHERE e.session_id = %s AND t.text IS NOT NULL
+       AND (e.raw_object_key, e.raw_line_number) <= (c.raw_object_key, c.raw_line_number)
+     ORDER BY e.raw_object_key DESC, e.raw_line_number DESC LIMIT %s
+"""
+_DECISIONS_ABOUT = """
+    SELECT d.title, d.decided_by, d.status FROM decision d
+     WHERE d.session_id = %s AND d.status <> 'rejected' AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements(d.files) f
+         WHERE %s = f ->> 'path' OR %s LIKE '%%/' || (f ->> 'path'))
+     ORDER BY d.seq
+"""
+
+
 class AuditRepository:
     """Read-only access to the index."""
 
@@ -145,6 +177,35 @@ class AuditRepository:
         if len(locations) > 1:
             raise AmbiguousPathError(path, locations)
         return [_recorded(row) for row in rows]
+
+    def shadow_commit(self, sha: str) -> Any:
+        """The capture commit with this id (or id start), or ``None`` if the index has none."""
+        from ccp.audit.trace import ShadowInfo
+
+        rows = self._query(_SHADOW_COMMIT, (sha + "%",))
+        return ShadowInfo(*rows[0]) if len(rows) == 1 else None
+
+    def snapshots_of(self, session: str) -> list[tuple[Any, ...]]:
+        """The capture commits of a session (id or start of it), oldest first."""
+        return self._query(_SNAPSHOTS_OF_SESSION, (session + "%",))
+
+    def reasoning_of(self, shadow: Any, path: str) -> Any:
+        """The prompt, the thinking before the call and the decisions behind a capture commit."""
+        from ccp.audit.trace import THINKING_BLOCKS, Reasoning, text_of_prompt
+
+        prompt = None
+        if shadow.prompt_uuid:
+            rows = self._query(_PROMPT_CONTENT, (shadow.session_id, shadow.prompt_uuid))
+            prompt = text_of_prompt(rows[0][0]) if rows else None
+        thinking: list[str] = []
+        if shadow.tool_use_id:
+            rows = self._query(
+                _THINKING_BEFORE, (shadow.tool_use_id, shadow.session_id, THINKING_BLOCKS)
+            )
+            thinking = [str(row[0]) for row in reversed(rows)]
+        wanted = path.replace("\\", "/")
+        titles = self._query(_DECISIONS_ABOUT, (shadow.session_id, wanted, wanted))
+        return Reasoning(prompt, thinking, [f"{row[0]} ({row[1]}, {row[2]})" for row in titles])
 
     def ai_added_lines(self) -> list[AddedLines]:
         """Every line that a recorded AI edit added (see :mod:`ccp.audit.linking`)."""

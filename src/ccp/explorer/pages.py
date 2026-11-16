@@ -84,6 +84,7 @@ TABS = (
     ("decisions", "Decisions"),
     ("tests", "Tests"),
     ("code", "Code changes"),
+    ("changes", "Changes by cause"),
     ("corrections", "Corrections"),
     ("agents", "Sub-agents and workflows"),
     ("thinking", "Thinking notes"),
@@ -174,6 +175,11 @@ def layout(view: View, title: str, body: str, flash: str = "", error: bool = Fal
     nav = ""
     if user is not None:
         links = [f'<a href="{view.url("/")}">Home</a>']
+        for path, label in (
+            ("/approaches", "Approaches"), ("/timeline", "Timeline"), ("/review", "Review"),
+            ("/activity", "Activity"), ("/insights", "Insights"), ("/alerts", "Alerts"),
+        ):  # fmt: skip
+            links.append(f'<a href="{view.url(path)}">{label}</a>')
         if user.is_admin:
             links.append(f'<a href="{view.url("/admin/users")}">Users</a>')
             links.append(f'<a href="{view.url("/admin/labels")}">Labels</a>')
@@ -397,7 +403,9 @@ def chat_header(view: View, chat: Row, tab: str) -> str:
     )
     download = (
         f'<p><a href="{view.url("/chat/" + quote(str(chat["chat_id"])) + "/report.md")}">'
-        "Download the whole chat as one .md file</a></p>"
+        "Download the whole chat as one .md file</a> &middot; "
+        f'<a href="{view.url("/chat/" + quote(str(chat["chat_id"])) + "/report.html")}" target="_blank">'
+        "Open the report as a page (for clients)</a></p>"
     )
     return (
         f'<h1>{esc(chat_title(chat))}</h1><p class="muted">{facts}</p>{download}'

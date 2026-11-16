@@ -22,7 +22,7 @@ from typing import Any
 
 import pg8000.dbapi
 
-from ccp.decisions.shellfiles import files_changed_by
+from ccp.index.shellfiles import files_changed_by
 
 # How long a prompt or reply excerpt may be, tried in this order until the digest fits.
 EXCERPT_WIDTHS = (800, 400, 200, 100)

@@ -65,6 +65,24 @@ class MetabaseClient:
             raise MetabaseError("sign-in answered without a session")
         self._session = session
 
+    def create(self, path: str, body: Any, attempts: int = 120) -> Any:
+        """``POST`` something new, getting past Metabase's out-of-step id counter.
+
+        Metabase's built-in database can hand out an id that is already taken (its counter fell
+        behind the sample content): the insert then fails with a 500 naming a primary key, and every
+        failed try uses up one id. Trying again moves the counter on until a free id comes up.
+
+        Raises:
+            MetabaseError: If the id still clashes after ``attempts`` tries, or on any other error.
+        """
+        for _ in range(attempts - 1):
+            try:
+                return self.request("POST", path, body)
+            except MetabaseError as error:
+                if "answered 500" not in str(error) or "PRIMARY KEY" not in str(error):
+                    raise
+        return self.request("POST", path, body)
+
     def request(self, method: str, path: str, body: Any = None) -> Any:
         """Send a request and return the decoded answer.
 

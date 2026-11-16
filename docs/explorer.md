@@ -84,3 +84,19 @@ note, and one more entry in `review_history`.
 | `CCP_EXPLORER_PASSWORD` | Password for `create-user` when not asked interactively |
 
 The database settings are the usual `POSTGRES_*` ones (see [configuration](configuration.md)).
+
+
+## Approaches, activity and the capture chain
+
+| Page | What it shows |
+| --- | --- |
+| `/approaches` | search the approach library; open one for its story, or compare two ([approaches.md](approaches.md)); thinking notes only for leads, auditors and admins |
+| `/timeline` | the decisions in time order, with what replaced what |
+| `/review` | decisions the AI reviewer sent to a person |
+| `/activity` | per developer, machine and branch: last change, changes by a person and by Claude, files touched |
+| `/insights` | changes by actor and model, decisions by who decided, approaches by state, most reused |
+| `/alerts` | newer work whose title resembles a removed approach; reviews waiting |
+| chat tab **Changes by cause** | every change made during the chat with who made it (person, edit tool, shell command, sub-agent) |
+| chat page link | **Download the whole chat as one .md file** ([catalog.md](catalog.md)) |
+
+All of them need a signed-in user; the chat tabs keep their usual per-account access rule.

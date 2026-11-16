@@ -25,7 +25,7 @@ from ccp.storage.keys import transcript_chunk_key
 pytestmark = pytest.mark.integration
 
 ACCOUNT_UUID = "11111111-2222-3333-4444-555555555555"
-BASE = "catalog/accounts/claude1__11111111/projects/billing/chats"
+BASE = "catalog/accounts/claude1__11111111/projects/billing/sessions"
 CHAT = f"{BASE}/2026-07-01__fix-the-bug__sess-sto"
 OTHER = "sess-stor2"  # starts with the same 8 characters as SESSION
 
@@ -150,7 +150,7 @@ def test_chat_folder_has_every_file(story: ObjectStore, connection: Any) -> None
     assert catalog_chat(connection, story, SESSION) == CHAT
     names = {k.removeprefix(f"{CHAT}/") for k in story.list_keys(f"{CHAT}/")}
     assert names == {
-        "README.md", "report.md", "00_summary.json", "01_conversation.md", "02_sessions.json",
+        "README.md", "report.md", "report.html", "00_summary.json", "01_conversation.md", "02_sessions.json",
         "03_decisions.json", "04_tests.json", "05_code_changes.json", "06_corrections.json",
         "07_subagents_and_workflows.json", "08_usage.json", "transcript/main.json",
         "transcript/agents/explore__a1.json",
@@ -216,7 +216,7 @@ def test_index_and_readmes(story: ObjectStore, connection: Any) -> None:
     (project,) = account["projects"]
     assert account["name"] == "claude1" and account["path"].endswith("claude1__11111111")
     assert project["name"] == "billing" and project["path"] == f"{account['path']}/projects/billing"
-    assert project["chats"][0]["chat_id"] == SESSION and project["chats"][0]["path"] == CHAT
+    assert project["sessions"][0]["chat_id"] == SESSION and project["sessions"][0]["path"] == CHAT
     assert "accounts/<account>__<id8>/" in story.get("catalog/README.md").decode()
     assert "01_conversation.md" in story.get(f"{CHAT}/README.md").decode()
     assert tree_lines(_catalog_keys(story), with_files=False)[-1].endswith("__sess-sto")
@@ -251,7 +251,7 @@ def test_a_changed_title_or_label_moves_the_folder(story: ObjectStore, connectio
     )
     moved = catalog_chat(connection, story, SESSION)
     assert moved == (
-        "catalog/accounts/claude-two__11111111/projects/billing-api/chats/"
+        "catalog/accounts/claude-two__11111111/projects/billing-api/sessions/"
         "2026-07-01__a-new-title__sess-sto"
     )
     assert [k for k in _catalog_keys(story) if "claude1__" in k or "/billing/" in k] == []
@@ -271,7 +271,7 @@ def test_an_empty_chat_has_no_folder(story: ObjectStore, connection: Any) -> Non
     catalog_chat(connection, story, SESSION)
     _run(connection, "UPDATE session SET is_empty = TRUE WHERE session_id = %s", SESSION)
     assert catalog_chat(connection, story, SESSION) is None
-    assert [k for k in _catalog_keys(story) if "/chats/" in k] == []
+    assert [k for k in _catalog_keys(story) if "/sessions/" in k] == []
     assert _json(story, "catalog/index.json") == {"accounts": []}
     result = catalog_all(connection, story)
     assert result.built == [] and result.failed == {}
@@ -300,7 +300,7 @@ def test_catalog_all_with_chats_that_share_an_id_start_and_one_without_account(
         OTHER,
     )  # no account; the project is found by the folder
     result = catalog_all(connection, story)
-    other = "catalog/accounts/unknown-account__00000000/projects/billing/chats"
+    other = "catalog/accounts/unknown-account__00000000/projects/billing/sessions"
     assert sorted(result.built) == [CHAT, f"{other}/2026-07-03__other-chat__sess-sto"]
 
     # Renaming one chat must not remove the other, although both folders end in "__sess-sto".
@@ -323,7 +323,7 @@ def test_the_folder_of_a_chat_that_no_longer_exists_is_removed(
 ) -> None:
     """A chat deleted from the index (test debris, a purge) leaves no folder in the catalog."""
     store = story  # the fixture of the chat tests: an object store with the catalog built
-    ghost = "catalog/accounts/account__00000099/projects/x/chats/2026-01-01__old__zzzzzzzz"
+    ghost = "catalog/accounts/account__00000099/projects/x/sessions/2026-01-01__old__zzzzzzzz"
     store.put(f"{ghost}/00_summary.json", b"{}")
     connection = connect(database)
     try:

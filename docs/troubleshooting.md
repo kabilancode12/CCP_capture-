@@ -49,7 +49,7 @@ Problems we have actually met, by where they show up. First, where the logs are.
 
 | Symptom | Cause and fix |
 | --- | --- |
-| `hook.log` does not exist | The hooks never ran. In Claude Code run `/hooks`: the six capture hooks should be listed. Check the JSON in `settings.json` is valid and was merged under `hooks`. A hook command that points to the wrong Python path fails silently: it must be `"<full path>/python.exe" -m ccp.capture hook` |
+| `hook.log` does not exist | The hooks never ran. In Claude Code run `/hooks`: the eight capture hooks should be listed. Check the JSON in `settings.json` is valid and was merged under `hooks`. A hook command that points to the wrong Python path fails silently: it must be `"<full path>/python.exe" -m ccp.capture hook` |
 | `settings invalid: ... CCP_INGEST_TOKEN is required` | The `env` block is missing in `settings.json`, or the token is shorter than 16 characters |
 | `the API refused the token (401); check CCP_INGEST_TOKEN` (or `rejected (401)`) | The token in `settings.json` differs from the server's `CCP_INGEST_TOKEN`, or still is `REPLACE_WITH_THE_INGEST_TOKEN`. The client stops trying other streams and sessions until the next hook; nothing is lost |
 | `chunk of <stream> at <offset> refused 3 times in a row` | The API keeps refusing one chunk (for example 413, too large). A `ccp-withheld` placeholder was uploaded in its place so the stream could move on; the earlier `upload of ... refused` lines give the server's reason |

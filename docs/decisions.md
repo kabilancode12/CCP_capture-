@@ -74,10 +74,14 @@ field to a person (`needs_review`). Review notes are plain words and never cite 
 
 **Files are never written by the model.** The model only names the EDIT and SHELL digest lines that belong
 to a decision; the file names, the kind of change and how it was made are read from the recorded data
-(`file_change` for Claude's Edit and Write tools, and the commands read by `ccp.decisions.shellfiles` for
+(`file_change` for Claude's Edit and Write tools, and the commands read by `ccp.index.shellfiles` for
 shell changes). The shell reader understands only clear cases (`>`, `>>`, `tee`, `sed -i`, `rm`, `mv`, `cp`,
 `touch`, `mkdir`, project scaffolds such as `dotnet new`), skips `/tmp` and `/dev`, and gives no file for a
 command it cannot read. Shell changes have no line counts.
+
+## How fast decisions appear
+
+Indexing and the catalog follow each reply within seconds (a new job waits a median of about 3 s and runs for about 5 s). Decisions take longer because they call a model twice, about 35 s per chat (24 s to write, 10 s to review). A chat is processed as soon as a session of it **ends**, or after **1 quiet minute** if no end arrives; the server looks every **15 seconds**, and up to **3 chats** are sent to the model at the same time. A chat that is still in use is not processed again within **2 minutes**, so a long chat with many pauses does not spend tokens at every pause. All of this is set with `CCP_DECISION_IDLE_MINUTES`, `CCP_DECISION_SWEEP_SECONDS`, `CCP_DECISION_MIN_GAP_MINUTES` and `CCP_DECISION_WORKERS` ([configuration.md](configuration.md)). A faster model for the writing step (`CCP_DECISION_MODEL`) shortens each run at some cost in quality.
 
 ## When a chat is processed
 
@@ -90,7 +94,7 @@ unusable, and if a run returns no valid decision the stored ones are kept.
 
 A chat for which the model finds no decision at all has none stored, but it is marked as checked
 (`session.decisions_checked_at`, migration 019): it is not sent to the model again until it has new activity.
-A chat whose run failed is left alone by the server for 30 minutes, because every try costs tokens.
+A chat whose run failed is left alone by the server for 5 minutes, because every try costs tokens. In Docker the server has no `claude` command: set `ANTHROPIC_API_KEY` in `.env` for the container, or run the server on the machine itself (`run.sh` does that), where it uses the logged-in `claude`.
 
 ## The model
 

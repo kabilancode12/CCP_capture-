@@ -22,6 +22,7 @@ Code's settings file (the shell's own variables win). ``install``, ``uninstall``
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -44,6 +45,7 @@ from ccp.capture.install import (
     install,
     uninstall,
 )
+from ccp.capture.snapshots.context import HUMAN, SnapshotContext
 from ccp.capture.snapshots.service import snapshot_service_from
 from ccp.capture.state import StateStore
 from ccp.settings import SettingsError, load_client_settings
@@ -76,6 +78,20 @@ def build_parser() -> argparse.ArgumentParser:
     snapshot.add_argument("--cwd", type=Path, default=Path.cwd(), help="a folder in the repository")
     snapshot.add_argument("--event", default="Manual", help="recorded in the snapshot message")
     commands.add_parser("hook", help="handle one Claude Code hook (payload on standard input)")
+    watch = commands.add_parser(
+        "watch", help="watch the repositories for changes no hook sees (run in the background)"
+    )
+    watch.add_argument("--interval", type=float, default=30.0, help="seconds between looks")
+    watch.add_argument("--quiet", type=float, default=60.0, help="seconds without change first")
+    watch.add_argument("--once", action="store_true", help="look once and stop")
+    watch_service = commands.add_parser(
+        "watch-service", help="start the watcher at login (systemd, launchd or Task Scheduler)"
+    )
+    watch_service.add_argument("action", choices=["install", "uninstall"])
+    git_hooks = commands.add_parser("git-hooks", help="install or remove the global Git hooks")
+    git_hooks.add_argument("action", choices=["install", "uninstall"])
+    git_hook = commands.add_parser("git-hook", help="run by the Git hook scripts (not by hand)")
+    git_hook.add_argument("name", choices=["post-commit", "pre-push"])
     hook_settings = commands.add_parser(
         "hook-settings", help="print the settings that register hooks"
     )
@@ -138,6 +154,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "hook":  # never fails, never prints: see ccp.capture.hook_runner
         payload = sys.stdin.buffer.read().decode("utf-8", errors="replace")
         return run_hook(payload, os.environ, Path.home())
+    if args.command == "watch-service":
+        from ccp.capture import watch_service
+
+        notes = watch_service.install() if args.action == "install" else watch_service.uninstall()
+        print("\n".join(notes))
+        return 0
+    if args.command == "git-hooks":
+        from ccp.capture import githooks
+
+        notes = githooks.install() if args.action == "install" else githooks.uninstall()
+        print("\n".join(notes))
+        return 0
     if args.command == "hook-settings":
         print(json.dumps(build_hook_settings(hook_command(), args.api_url), indent=2))
         return 0
@@ -153,19 +181,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(error, file=sys.stderr)
         return 1
     state = StateStore(settings.state_dir)
+    api = HttpApiClient(settings.api_url, settings.token, settings.timeout_seconds, fail_fast=True)
     client = CaptureClient(
-        HttpApiClient(settings.api_url, settings.token, settings.timeout_seconds, fail_fast=True),
+        api,
         state,
         chunk_bytes=settings.chunk_bytes,
         budget_seconds=settings.budget_seconds,
     )
-    snapshots = snapshot_service_from(settings, state)
+    snapshots = snapshot_service_from(settings, state, api)
 
     if args.command == "backfill":
         return _run_backfill(args, client, state)
 
+    if args.command == "git-hook":  # run by Git: silent, never fails
+        if args.name == "post-commit":
+            snapshots.note_commit(Path.cwd())
+        else:
+            snapshots.backup(Path.cwd())
+        return 0
+
+    if args.command == "watch":
+        from ccp.capture.watcher import Watcher, run
+
+        watcher = Watcher(snapshots, state, settings.state_dir, quiet_seconds=args.quiet)
+        with contextlib.suppress(KeyboardInterrupt):
+            run(watcher, args.interval, once=args.once)
+        return 0
+
     if args.command == "snapshot":
-        outcome = snapshots.snapshot(args.session_id, args.cwd, args.event)
+        outcome = snapshots.snapshot(args.session_id, args.cwd, args.event, SnapshotContext(HUMAN))
         print(f"{args.session_id}: " + (outcome or "snapshots are not enabled (see CCP_SNAPSHOTS)"))
         return 0 if outcome is None or not outcome.startswith("failed") else 1
 
@@ -181,7 +225,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         line, flushed_ok = _summary(args.session_id, results)
         # A chat closed without a message (no transcript) changed no code: no final snapshot.
         note = (
-            snapshots.finish(args.session_id, args.cwd)
+            snapshots.finish(args.session_id, args.cwd, SnapshotContext(HUMAN))
             if args.cwd is not None and args.transcript is not None
             else None
         )

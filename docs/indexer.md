@@ -354,13 +354,16 @@ Checked on three real sessions: 14, 77 and 39 runs found, one of them a failure,
   price list is kept. This is also the only place that shows helper models (for example the small model that
   writes session titles) and `has_unknown_model_cost`, which says the total is partial.
 
-The two do not have to add up: `cost-state` also counts work that has no entry in the main transcript.
-Checked on real sessions: one matched exactly (output tokens 8202 = 8202). With sub-agent streams included, two
-sessions got closer but stayed lower (3295 against 5238, 12091 against 15823), and two had no sub-agents and
-were off in opposite directions (653591 against 661529; 168540 against 147572). The reason is not yet known
-(rewound or resumed work are the first suspects), so **do not treat `model_usage` as the bill**: use
-`session_cost` for cost, and `model_usage` for attribution to events. Task 2.8 looks into the gap. A few
-rows have the model `<synthetic>` (messages Claude Code makes itself, with zero tokens).
+The two do not have to add up, and the reason is now known: `cost-state` is a **snapshot** that Claude Code writes
+at certain moments (for example when a session is closed), so replies written after the last snapshot are not in
+it, and it counts input tokens differently (cache reads and writes are counted apart, and the plain `input_tokens`
+of a response are not the same number as its `inputTokens`). `model_usage` is the sum of what each API response
+reported, so it is complete for the transcript. Checked on a real chat (6 prompts, resumed twice): the output
+tokens of the 20 distinct responses add up to 21,221 in the transcript and in `model_usage`, while the last
+`cost-state` says 20,265 (the 956 missing tokens are the answer given after that snapshot was written).
+Use `model_usage` for tokens and for attributing work to events, and `session_cost` for the cost Claude Code
+reported **as of its last snapshot** (it can lag for a chat that is still going or was resumed). A few rows have
+the model `<synthetic>` (messages Claude Code makes itself, with zero tokens).
 
 ## Thinking
 

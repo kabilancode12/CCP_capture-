@@ -20,7 +20,7 @@ from ccp.db.connection import connect
 from ccp.settings import SettingsError, load_database_settings, load_storage_settings
 from ccp.storage import StorageError, connect_store
 
-_NAMELESS_LEVELS = ("accounts", "projects", "chats")  # folders that only organise; not printed
+_NAMELESS_LEVELS = ("accounts", "projects", "sessions")  # folders that only organise; not printed
 
 
 def build_parser() -> argparse.ArgumentParser:
