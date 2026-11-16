@@ -419,6 +419,14 @@ class ExplorerApp:
         users.record_access(
             ctx.connection, ctx.user.user_id, "review_decision", f"{chat_id}#{decision_id}:{status}"
         )
+        # The chat's catalog files and report.md show who reviewed each decision: have the server
+        # write them again (an index job; its after-index step rebuilds the folder).
+        ctx.connection.cursor().execute(
+            "INSERT INTO job (job_type, session_id) VALUES ('index_session', %s) "
+            "ON CONFLICT (session_id) WHERE job_type = 'index_session' AND status = 'queued' "
+            "DO NOTHING",
+            (chat_id,),
+        )
         return ctx.redirect(f"/chat/{quote(chat_id)}", tab="decisions", done="review")
 
     def access_log(self, ctx: Context) -> Response:
