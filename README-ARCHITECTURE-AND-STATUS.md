@@ -16,6 +16,12 @@ migrations, the CCP server as a service, the dashboard, the first Explorer admin
 thinking summaries, the GitHub capture repo with an SSH key, the watcher and the Git hooks). `./run.sh status` and
 `./run.sh stop` show and stop it.
 
+On each **developer machine**: clone the repository and run `./run.sh developer`. It installs only the capture client
+and asks for the CCP server's address and ingest token (printed by `./run.sh` on the server), then sets up Claude
+Code (hooks, thinking summaries), the GitHub capture repo with an SSH key, the watcher and the Git hooks. The server must
+be set up with "Will other developers' machines send their sessions to this server?" = yes so that it listens on the
+network.
+
 Words used: Claude **account** → **project** → **session** (one Claude Code session, one transcript) → **chat**
 (everything said in it) → **conversations** (one prompt and everything Claude did in answer).
 
