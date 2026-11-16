@@ -403,7 +403,9 @@ def chat_header(view: View, chat: Row, tab: str) -> str:
     )
     download = (
         f'<p><a href="{view.url("/chat/" + quote(str(chat["chat_id"])) + "/report.md")}">'
-        "Download the whole chat as one .md file</a></p>"
+        "Download the whole chat as one .md file</a> &middot; "
+        f'<a href="{view.url("/chat/" + quote(str(chat["chat_id"])) + "/report.html")}" target="_blank">'
+        "Open the report as a page (for clients)</a></p>"
     )
     return (
         f'<h1>{esc(chat_title(chat))}</h1><p class="muted">{facts}</p>{download}'

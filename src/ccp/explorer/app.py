@@ -37,6 +37,7 @@ from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from ccp.catalog.builder import report_of_chat
+from ccp.catalog.report_page import report_page
 from ccp.db.connection import connect
 from ccp.db.labels import LabelError, remove_label, set_account_label, set_project_label
 from ccp.explorer import library_views, pages, queries, users
@@ -150,6 +151,7 @@ class ExplorerApp:
             self._route("/project/{project_id:int}", self.project, ["GET"]),
             self._route("/chat/{chat_id}", self.chat, ["GET"]),
             self._route("/chat/{chat_id}/report.md", self.report, ["GET"]),
+            self._route("/chat/{chat_id}/report.html", self.report_html, ["GET"]),
             self._route(
                 "/chat/{chat_id}/decisions/{decision_id:int}/review", self.review, ["POST"]
             ),
@@ -368,6 +370,22 @@ class ExplorerApp:
                 headers={"Content-Disposition": f'attachment; filename="chat-{chat_id[:8]}.md"'},
             )
         )
+
+    def report_html(self, ctx: Context) -> Response:
+        """The whole chat as a styled page (for showing to a client). Same access rule."""
+        if ctx.user is None:
+            return ctx.redirect("/login")
+        chat_id = str(ctx.request.path_params["chat_id"])
+        chat = queries.chat_summary(ctx.connection, chat_id)
+        if chat is None or not ctx.user.may_open_chat(chat["account_id"]):
+            return self._not_found(ctx)
+        users.record_access(ctx.connection, ctx.user.user_id, "view_report", chat_id)
+        page = report_page(chat.get("title"), report_of_chat(ctx.connection, self.store, chat_id))
+        # The page loads its Markdown renderer from cdn.jsdelivr.net, so it gets its own policy.
+        return HTMLResponse(page, headers={"Content-Security-Policy": (
+            "default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'unsafe-inline'; img-src data: https:; frame-ancestors 'none'"
+        )})
 
     def _tab_body(self, ctx: Context, chat_id: str, tab: str) -> str:
         """The HTML of one tab of a chat."""

@@ -82,6 +82,7 @@ def report_page(title: str | None, markdown: str) -> str:
     """A complete HTML page for the report (``markdown`` is ``report.md`` exactly)."""
     name = html.escape(title or "Claude Code session")
     first = markdown.split("\n> ", 1)[1].split("\n", 1)[0] if "\n> " in markdown else ""
+    first = first.replace("**", "").replace("`", "")
     # JSON keeps every character; "</" is escaped so the text cannot end the script element.
     source = json.dumps(markdown, ensure_ascii=False).replace("</", "<\\/")
     return (
