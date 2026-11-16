@@ -64,6 +64,6 @@ def test_folder_pattern_splits_a_key() -> None:
     key = "catalog/accounts/a__1/projects/p/sessions/2026-07-02__t__895d43d3/transcript/main.json"
     match = CHAT_FOLDER_PATTERN.match(key)
     assert match is not None
-    assert match.group(1).endswith("chats/2026-07-02__t__895d43d3")
+    assert match.group(1).endswith("sessions/2026-07-02__t__895d43d3")
     assert match.group("rest") == "transcript/main.json"
     assert CHAT_FOLDER_PATTERN.match("catalog/index.json") is None
