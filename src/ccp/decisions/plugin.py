@@ -4,7 +4,7 @@ Asking a model is slow and costs tokens, so a chat is not processed after every 
 processed when **a session of the chat has ended** (the ``SessionEnd`` hook, recorded in
 ``chat_session.ended_at`` after the chat's last message), and, for sessions that never send an end
 (a closed window, a crash), when the chat has been quiet for ``CCP_DECISION_IDLE_MINUTES`` (default
-2). Every ``CCP_DECISION_SWEEP_SECONDS`` (default 30) the sweep takes the chats that need decisions
+1). Every ``CCP_DECISION_SWEEP_SECONDS`` (default 15) the sweep takes the chats that need decisions
 (:func:`ccp.decisions.repository.pending_chats`) and processes those that are finished, one at a
 time. A chat that continues later is processed again: its newer messages make it pending.
 """
@@ -145,11 +145,11 @@ def sweep_once(
 def register(registry: PluginRegistry, context: PluginContext) -> None:
     """Start the sweep thread (a daemon, so it never keeps the server from stopping)."""
     env = dict(context.env)
-    idle = timedelta(minutes=_minutes(env, "CCP_DECISION_IDLE_MINUTES", 2))
-    every = _minutes(env, "CCP_DECISION_SWEEP_SECONDS", 30)
+    idle = timedelta(minutes=_minutes(env, "CCP_DECISION_IDLE_MINUTES", 1))
+    every = _minutes(env, "CCP_DECISION_SWEEP_SECONDS", 15)
     if "CCP_DECISION_SWEEP_MINUTES" in env and "CCP_DECISION_SWEEP_SECONDS" not in env:
         every = _minutes(env, "CCP_DECISION_SWEEP_MINUTES", 1) * 60  # the older setting still works
-    min_gap = timedelta(minutes=_minutes(env, "CCP_DECISION_MIN_GAP_MINUTES", 5))
+    min_gap = timedelta(minutes=_minutes(env, "CCP_DECISION_MIN_GAP_MINUTES", 2))
     workers = _minutes(env, "CCP_DECISION_WORKERS", 3)
     stop = threading.Event()
     # The catalog is built right after indexing, before the decisions exist: rebuild a chat's

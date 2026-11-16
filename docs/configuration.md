@@ -60,8 +60,8 @@ Used by `ccp-db create-reader`, `ccp-dashboards setup` and the Metabase service 
 | `CCP_CATALOG_ENABLED`, `CCP_DECISIONS_ENABLED`, `CCP_EXPLORER_ENABLED` | no | `false` | Turn on the readable catalog, the AI-written decisions and the Explorer website inside `ccp-server`; see [install.md](install.md) |
 | `CCP_EXPLORER_SECRET` | with the Explorer (secret) | | Signs the Explorer's cookies and forms (at least 16 characters); see [explorer.md](explorer.md) |
 | `CCP_SERVER_MIGRATE`, `CCP_SERVER_BIND` | no | `false`, `127.0.0.1` | Apply migrations when `ccp-server` starts; address the container publishes on; see [install.md](install.md) |
-| `CCP_DECISION_IDLE_MINUTES`, `CCP_DECISION_SWEEP_SECONDS` | no | `2`, `30` | A chat is given decisions when a session of it ends, or after this many quiet minutes if no end arrives; how often the server looks (the older `CCP_DECISION_SWEEP_MINUTES` still works); see [decisions.md](decisions.md) |
-| `CCP_DECISION_MIN_GAP_MINUTES`, `CCP_DECISION_WORKERS` | no | `5`, `3` | A chat that is still being used is not sent to the model again within this many minutes (a session end always counts); how many chats are sent to the model at the same time |
+| `CCP_DECISION_IDLE_MINUTES`, `CCP_DECISION_SWEEP_SECONDS` | no | `1`, `15` | A chat is given decisions when a session of it ends, or after this many quiet minutes if no end arrives; how often the server looks (the older `CCP_DECISION_SWEEP_MINUTES` still works); see [decisions.md](decisions.md) |
+| `CCP_DECISION_MIN_GAP_MINUTES`, `CCP_DECISION_WORKERS` | no | `2`, `3` | A chat that is still being used is not sent to the model again within this many minutes (a session end always counts); how many chats are sent to the model at the same time |
 | `CCP_METABASE_ADMIN_EMAIL` | **yes** for dashboards | | Address of the Metabase administrator that `ccp-dashboards setup` creates the first time. Use your own |
 | `CCP_METABASE_ADMIN_PASSWORD` | **yes** for dashboards (secret) | | That administrator's password, at least 12 characters |
 | `METABASE_PORT` | no | `3000` | Port on this machine where Metabase answers (bound to `127.0.0.1`) |

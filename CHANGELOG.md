@@ -6,9 +6,9 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
 
 ### Added
 
-- **Faster decisions:** a chat is processed after 2 quiet minutes (was 15) or at once when a session ends, the sweep looks
-  every 30 seconds, up to 3 chats go to the model at the same time, and a chat still in use is not processed again within
-  5 minutes (`CCP_DECISION_IDLE_MINUTES`, `_SWEEP_SECONDS`, `_MIN_GAP_MINUTES`, `_WORKERS`; see `docs/decisions.md`).
+- **Faster decisions:** a chat is processed after 1 quiet minute (was 15) or at once when a session ends, the sweep looks
+  every 15 seconds, up to 3 chats go to the model at the same time, and a chat still in use is not processed again within
+  2 minutes (`CCP_DECISION_IDLE_MINUTES`, `_SWEEP_SECONDS`, `_MIN_GAP_MINUTES`, `_WORKERS`; see `docs/decisions.md`).
 - **Snapshot secret check for source code:** the generic "value assigned to a password/token name" rule ignores values that
   are plainly not secrets, so ordinary files are no longer left out of snapshots (`docs/snapshots.md`, task 1.10b).
 - **Capture chain:** a snapshot after every tool call (PreToolUse/PostToolUse) and at every prompt, one linear branch per
