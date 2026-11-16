@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ccp.capture.hooks import HOOK_TIMEOUTS
+from ccp.capture.hooks import HOOK_MATCHERS, HOOK_TIMEOUTS
 
 TOKEN_PLACEHOLDER = "REPLACE_WITH_THE_INGEST_TOKEN"  # noqa: S105  (a placeholder, not a secret)
 
@@ -39,10 +39,14 @@ def build_hook_settings(command: str, api_url: str) -> dict[str, Any]:
         A dictionary with an ``env`` block (API address and a token placeholder) and one hook entry
         per event, each with its time limit.
     """
-    hooks = {
-        event: [{"hooks": [{"type": "command", "command": command, "timeout": timeout}]}]
-        for event, timeout in HOOK_TIMEOUTS.items()
-    }
+    hooks: dict[str, Any] = {}
+    for event, timeout in HOOK_TIMEOUTS.items():
+        entry: dict[str, Any] = {
+            "hooks": [{"type": "command", "command": command, "timeout": timeout}]
+        }
+        if event in HOOK_MATCHERS:  # tool hooks only for the tools that can change files
+            entry = {"matcher": HOOK_MATCHERS[event], **entry}
+        hooks[event] = [entry]
     return {
         "env": {"CCP_API_URL": api_url, "CCP_INGEST_TOKEN": TOKEN_PLACEHOLDER},
         "hooks": hooks,

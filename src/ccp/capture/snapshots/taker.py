@@ -42,7 +42,7 @@ from ccp.capture.snapshots.context import HUMAN, SnapshotContext
 from ccp.capture.snapshots.git import Git, GitError
 from ccp.capture.state import StateStore
 from ccp.redaction.redactor import redact_string
-from ccp.redaction.rules import SECRET_RULES
+from ccp.redaction.rules import SNAPSHOT_SECRET_RULES
 from ccp.storage.keys import check_id
 
 REF_NAMESPACE = "refs/claude-capture"
@@ -152,7 +152,7 @@ def file_has_secret(path: Path) -> bool:
         return False
     if len(data) > SECRET_SCAN_LIMIT_BYTES:
         return True
-    _, fired = redact_string(data.decode("utf-8", errors="replace"), SECRET_RULES)
+    _, fired = redact_string(data.decode("utf-8", errors="replace"), SNAPSHOT_SECRET_RULES)
     return bool(fired)
 
 
@@ -347,7 +347,7 @@ class SnapshotTaker:
         if head is None or self._state.get_marker(session_id, SCANNED_HEAD_MARKER) == head:
             return False
         patch = self._git.run("log", "-p", "--format=", head, "--not", "--remotes", timeout=30)
-        _, fired = redact_string(patch[:PATCH_SCAN_LIMIT_BYTES], SECRET_RULES)
+        _, fired = redact_string(patch[:PATCH_SCAN_LIMIT_BYTES], SNAPSHOT_SECRET_RULES)
         if fired:
             return True
         self._state.set_marker(session_id, SCANNED_HEAD_MARKER, head)

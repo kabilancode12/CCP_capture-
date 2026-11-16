@@ -146,3 +146,61 @@ batching the exclusions and merging the identity lookup. The `Stop` hook adds th
 - `tests/integration/test_hooks_snapshots_end_to_end.py`: real hook processes, a real repository, a real
   capture project and the real API: a scripted session, the final snapshot after SessionEnd, the log line, a
   failed push retried at the next start, and "off unless configured".
+
+
+## The capture chain (one labelled commit per change)
+
+Snapshots made by the hooks ([hooks.md](hooks.md)) form a **chain**: one linear history per developer, machine and
+branch, kept locally under `refs/claude-capture/chain/<user>/<host>/<branch>` and published to the capture project
+as the branch `ccp/<user>/<host>/<branch>`, so GitHub and GitLab show it as a normal branch with the real project
+layout. Each commit is **one change**, taken right after it happened:
+
+| When | Hook | Who it is recorded as |
+| --- | --- | --- |
+| After an Edit, Write, MultiEdit or NotebookEdit call | PostToolUse | `ai_edit` |
+| After a Bash or PowerShell call | PostToolUse | `ai_command` |
+| After any tool call inside a sub-agent | PostToolUse | `subagent` |
+| What changed since the last snapshot, when a prompt is sent | UserPromptSubmit | `human` |
+| Changes seen at the end of a reply, or at session start and end | Stop, SessionStart, SessionEnd | `ai_other` / `human` |
+| Quiet changes made while Claude is closed | the watcher ([below](#the-watcher-and-git-hooks)) | `human` |
+
+A commit reads like this on GitHub (the author says who: `Claude (claude-opus-5-5) for <developer>`, or the
+developer's own name for a person):
+
+```text
+[AI · claude-opus-5-5] Edit src/app.py
+
+Why: add a retry to the upload step
+
+session: 4a64fad3-...        (older lines kept: seq, event, branch, started-from, captured-at, excluded)
+CCP-Actor: ai_edit
+CCP-Developer: Dev A
+CCP-Model: claude-opus-5-5
+CCP-Session: 4a64fad3-...
+CCP-Prompt: <uuid of the prompt>
+CCP-Tool: Edit
+CCP-Tool-Use: toolu_...
+CCP-Agent: main
+CCP-Event: PostToolUse
+```
+
+The prompt excerpt is redacted before it is written. Because each commit is one change, `git blame` on the chain
+names the cause of every line, whoever made it: see `ccp-audit trace` in [audit.md](audit.md). The client also
+reports each commit to the server (`POST /v1/sessions/{id}/snapshots`, table `shadow_commit`), which links it to
+the chat, the tool call and the model. Tool hooks run only for the tools that can change files, and a snapshot
+uses a cached index, so only changed files are read again; a lock stops parallel hooks from colliding.
+
+### The watcher and Git hooks
+
+`ccp-capture watch` (run it in the background; once per machine) looks at the repositories the hooks have seen. A
+folder that has been quiet for 60 seconds with changes no snapshot has recorded gets a snapshot labelled `human`,
+and every local branch, **unpushed commits included**, is kept backed up in the capture project. It waits while a
+Claude tool call is running, so Claude's changes are never recorded as a person's. Options: `--interval`,
+`--quiet`, `--once`. `ccp-capture watch-service install` starts it at every login (a systemd user unit on Linux, a launchd
+agent on macOS, a Task Scheduler task on Windows; no administrator rights); `watch-service uninstall` removes it.
+
+`ccp-capture git-hooks install` writes a `post-commit` and a `pre-push` script to `~/.ccp/git-hooks` and sets Git's
+global `core.hooksPath` **only if it is not already set**. The scripts run silently (never failing the commit or
+the push) and then run the repository's own hook of the same name. `post-commit` adds a Git note (`refs/notes/ccp`)
+linking the commit to the capture chain; the commit itself is never changed. `pre-push` backs up the branches and
+publishes the chain. `ccp-capture git-hooks uninstall` removes them.

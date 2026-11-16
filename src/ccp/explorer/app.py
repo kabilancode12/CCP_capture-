@@ -39,7 +39,7 @@ from starlette.routing import Route
 from ccp.catalog.builder import report_of_chat
 from ccp.db.connection import connect
 from ccp.db.labels import LabelError, remove_label, set_account_label, set_project_label
-from ccp.explorer import pages, queries, users
+from ccp.explorer import library_views, pages, queries, users
 from ccp.explorer.security import PasswordError, SessionData, SessionSigner, verify_password
 from ccp.explorer.users import UiUser, UserError
 from ccp.settings import DatabaseSettings
@@ -153,6 +153,14 @@ class ExplorerApp:
             self._route(
                 "/chat/{chat_id}/decisions/{decision_id:int}/review", self.review, ["POST"]
             ),
+            self._route("/approaches", library_views.approaches, ["GET"]),
+            self._route("/approaches/compare", library_views.compare, ["GET"]),
+            self._route("/approach/{decision_id:int}", library_views.approach, ["GET"]),
+            self._route("/timeline", library_views.timeline, ["GET"]),
+            self._route("/review", library_views.review_queue, ["GET"]),
+            self._route("/activity", library_views.activity, ["GET"]),
+            self._route("/insights", library_views.insights, ["GET"]),
+            self._route("/alerts", library_views.alerts, ["GET"]),
             self._route("/access-log", self.access_log, ["GET"]),
             self._route("/admin/users", self.admin_users, ["GET"]),
             self._route("/admin/users", self.create_user, ["POST"]),
@@ -382,6 +390,8 @@ class ExplorerApp:
             return pages.tests_tab(*queries.test_runs(connection, chat_id))
         if tab == "code":
             return pages.code_tab(*queries.file_changes(connection, chat_id))
+        if tab == "changes":
+            return library_views.changes_tab(ctx, chat_id)
         if tab == "corrections":
             return pages.corrections_tab(queries.corrections(connection, chat_id))
         if tab == "agents":
