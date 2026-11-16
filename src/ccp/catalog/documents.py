@@ -20,6 +20,7 @@ TEXT_MAX = 2000  # sub-agent instructions and results are cut to this many chara
 
 FILES = {
     "README.md": "what this chat is and what every file means",
+    "report.md": "the whole chat in one readable file: every file below, as headings and tables",
     "00_summary.json": "ids, account, project, title, start and end, models, tokens, cost, counts",
     "01_conversation.md": "the conversation, readable: prompts, replies, tool calls, thinking",
     "02_sessions.json": "each time the chat was opened (start, resume, clear, compact)",

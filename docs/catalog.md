@@ -14,6 +14,7 @@ catalog/
   accounts/<account>__<id8>/      the account label (else its name) and 8 characters of its id
     projects/<project>/           the project label (else its name)
       chats/<date>__<title>__<id8>/
+        report.md                 the WHOLE chat in one readable file (see below)
         README.md                 what this chat is and what each file means
         00_summary.json           ids, account, project, title, start/end, models, tokens, cost, counts
         01_conversation.md        prompts, replies, tool calls (one line each), thinking notes
@@ -51,6 +52,7 @@ catalog/
 | --- | --- |
 | Write one chat (and the index) | `python -m ccp.catalog build --chat <chat id>` |
 | Write every chat, remove empty chats, write the index | `python -m ccp.catalog build --all` |
+| One chat as a single Markdown file (printed, or `--out file.md`) | `python -m ccp.catalog export --chat <id> [--out file.md]` |
 | Print the catalog as a tree | `python -m ccp.catalog show` (add `--files` to list each file) |
 
 The same works as `ccp-catalog` once the command is registered in `pyproject.toml`. `build` reads the index in
@@ -70,3 +72,23 @@ the indexer has refreshed a chat, so the catalog stays current.
 mixed up). Writing a chat twice gives identical objects.
 
 Tool results kept by Claude Code in files (`sessions/<id>/tool-results/`) are not copied into the catalog.
+
+## The single-file report (`report.md`)
+
+Every chat folder has `report.md`: the content of all the other files of the folder in one readable
+Markdown file, with no JSON. It is also made on demand by `ccp-catalog export` and by the **Download the
+whole chat as one .md file** link on each Explorer chat page (same access rule as the page; logged as
+`export_chat`). Code: [`report.py`](../src/ccp/catalog/report.py).
+
+Sections: 1 Summary (with tokens and counts), 2 Openings of the session, 3 Conversation (one *turn* per
+developer prompt: prompt, thinking, replies, every tool call with its full input and output in collapsible
+blocks, and the files changed and test runs of that turn), 4 Decisions (goal, options, chosen, reason, result,
+tests, who decided, which model wrote it, who reviewed it, files, thinking notes, evidence), 5 Code changes
+and linked commits, 6 Tests, 7 Corrections, 8 Sub-agents, workflows and slash commands (instructions and
+results in full), 9 Usage and cost (a model that only appears in Claude Code's cost record is marked
+"internal helper"), 10 About this report. A section without data says *None recorded*. Claude's own
+headings are pushed down so they never outrank the turn they belong to. Only the raw transcript is not
+copied; the report gives its object keys and line numbers.
+
+A test (`tests/unit/catalog/test_catalog_report.py`) walks every value of the JSON documents and fails if
+one is missing from the report.

@@ -36,6 +36,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 
+from ccp.catalog.builder import report_of_chat
 from ccp.db.connection import connect
 from ccp.db.labels import LabelError, remove_label, set_account_label, set_project_label
 from ccp.explorer import pages, queries, users
@@ -148,6 +149,7 @@ class ExplorerApp:
             self._route("/logout", self.logout, ["POST"]),
             self._route("/project/{project_id:int}", self.project, ["GET"]),
             self._route("/chat/{chat_id}", self.chat, ["GET"]),
+            self._route("/chat/{chat_id}/report.md", self.report, ["GET"]),
             self._route(
                 "/chat/{chat_id}/decisions/{decision_id:int}/review", self.review, ["POST"]
             ),
@@ -340,6 +342,24 @@ class ExplorerApp:
         body = self._tab_body(ctx, chat_id, tab)
         flash = "Decision updated." if ctx.query("done") == "review" else ""
         return ctx.page(pages.chat_page(ctx.view, chat, tab, body, flash))
+
+    def report(self, ctx: Context) -> Response:
+        """The whole chat as one Markdown file (download). Same access rule as the chat page."""
+        if ctx.user is None:
+            return ctx.redirect("/login")
+        chat_id = str(ctx.request.path_params["chat_id"])
+        chat = queries.chat_summary(ctx.connection, chat_id)
+        if chat is None or not ctx.user.may_open_chat(chat["account_id"]):
+            return self._not_found(ctx)
+        users.record_access(ctx.connection, ctx.user.user_id, "export_chat", chat_id)
+        text = report_of_chat(ctx.connection, self.store, chat_id)
+        return _with_headers(
+            Response(
+                text,
+                media_type="text/markdown; charset=utf-8",
+                headers={"Content-Disposition": f'attachment; filename="chat-{chat_id[:8]}.md"'},
+            )
+        )
 
     def _tab_body(self, ctx: Context, chat_id: str, tab: str) -> str:
         """The HTML of one tab of a chat."""

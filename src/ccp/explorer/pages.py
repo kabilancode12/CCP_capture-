@@ -395,7 +395,14 @@ def chat_header(view: View, chat: Row, tab: str) -> str:
         f"{' class=on' if key == tab else ''}>{esc(label)}</a>"
         for key, label in TABS
     )
-    return f'<h1>{esc(chat_title(chat))}</h1><p class="muted">{facts}</p><nav class="tabs">{tabs}</nav>'
+    download = (
+        f'<p><a href="{view.url("/chat/" + quote(str(chat["chat_id"])) + "/report.md")}">'
+        "Download the whole chat as one .md file</a></p>"
+    )
+    return (
+        f'<h1>{esc(chat_title(chat))}</h1><p class="muted">{facts}</p>{download}'
+        f'<nav class="tabs">{tabs}</nav>'
+    )
 
 
 def chat_page(view: View, chat: Row, tab: str, body: str, flash: str = "") -> str:

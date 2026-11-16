@@ -31,6 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
     which = build.add_mutually_exclusive_group(required=True)
     which.add_argument("--chat", metavar="ID", help="one chat")
     which.add_argument("--all", action="store_true", help="every chat")
+    export = commands.add_parser("export", help="write one chat's report as a single Markdown file")
+    export.add_argument("--chat", metavar="ID", required=True, help="the chat id")
+    export.add_argument(
+        "--out", metavar="FILE", help="file to write (default: print to the screen)"
+    )
     show = commands.add_parser("show", help="print the catalog as a tree")
     show.add_argument("--files", action="store_true", help="also list the files of each chat")
     return parser
@@ -69,12 +74,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         connection = connect(load_database_settings())
         try:
+            if args.command == "export":
+                return _export(connection, store, args)
             return _build(connection, store, args)
         finally:
             connection.close()
     except (SettingsError, StorageError, CatalogError, OSError) as error:
         print(error, file=sys.stderr)
         return 1
+
+
+def _export(connection: Any, store: Any, args: argparse.Namespace) -> int:
+    """Print or write the single-file report of one chat (the chat id may be shortened)."""
+    from ccp.catalog.builder import report_of_chat
+
+    text = report_of_chat(connection, store, args.chat)
+    if args.out:
+        with open(args.out, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+        print(f"Wrote {args.out}")
+    else:
+        sys.stdout.write(text)
+    return 0
 
 
 def _build(connection: Any, store: Any, args: argparse.Namespace) -> int:

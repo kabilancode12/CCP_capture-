@@ -28,6 +28,7 @@ from ccp.catalog.names import (
     short_id,
     slugify,
 )
+from ccp.catalog.report import render_report
 from ccp.catalog.transcripts import RawStore, read_lines, transcript_streams
 from ccp.index.agents import agent_id_of
 from ccp.storage import ObjectNotFoundError, StorageError
@@ -36,6 +37,7 @@ from ccp.storage.keys import MAIN_STREAM
 logger = logging.getLogger("ccp.catalog")
 
 SUMMARY_FILE = "00_summary.json"
+REPORT_FILE = "report.md"
 INDEX_KEY = f"{CATALOG_ROOT}/index.json"
 README_KEY = f"{CATALOG_ROOT}/README.md"
 _JSON = "application/json"
@@ -148,6 +150,7 @@ def _build_chat(
             documents.build_readme(data, folder.rsplit("/", 1)[-1], len(agent_files)).encode(),
             _MARKDOWN,
         ),
+        REPORT_FILE: (render_report(data, folder, len(agent_files)).encode(), _MARKDOWN),
         SUMMARY_FILE: (
             documents.to_json(documents.build_summary(data, folder), sort_keys=True),
             _JSON,
@@ -286,3 +289,30 @@ def catalog_all(connection: Any, store: CatalogStore) -> CatalogResult:
             result.removed_deleted += 1
     _write_index(connection, store, listing)
     return result
+
+
+def report_of_chat(connection: Any, store: CatalogStore | None, chat_id: str) -> str:
+    """The single-file Markdown report of one chat, made now (not read from the bucket).
+
+    Args:
+        connection: A database connection (only read from).
+        store: The object store (used to count the sub-agent transcripts); None counts none.
+        chat_id: The chat id, or the start of it if that is unique.
+
+    Raises:
+        CatalogError: If there is no such chat, or the start of the id matches several.
+    """
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT session_id FROM session WHERE session_id LIKE %s LIMIT 2", (chat_id + "%",)
+    )
+    found = [row[0] for row in cursor.fetchall()]
+    if len(found) != 1:
+        raise CatalogError(f"{chat_id!r} matches {len(found)} chats; give more of the id.")
+    data = load_chat(connection, found[0])
+    if data is None:
+        raise CatalogError(f"There is no chat {chat_id!r}.")
+    folder = _folder_path(data.chat)
+    streams = transcript_streams(store, found[0]) if store is not None else {}
+    agents = [s for s in streams if s != MAIN_STREAM]
+    return render_report(data, folder, len(agents))
