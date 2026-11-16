@@ -577,7 +577,7 @@ def _other_entries(raw_lines: list[Any] | None) -> list[str]:
         "Claude Code also writes bookkeeping entries to the transcript: what it sent to the model, "
         "attachments, snapshots of files, titles, costs. They are listed here in full, in order.",
         "",
-        *table(["Entry type", "Count"], sorted(counts.items())),
+        *table(["Entry type", "Count"], [[k, v] for k, v in sorted(counts.items())]),
     ]
     for number, entry in enumerate(others, 1):
         kind = entry.get("type", "?") if isinstance(entry, dict) else "unreadable"

@@ -1,3 +1,4 @@
+# ruff: noqa: E501  (CSS and JavaScript are clearer on one line each)
 """The report as a styled web page (``report.html``), for showing a session to a client.
 
 The page holds the exact text of ``report.md`` and turns it into formatted HTML in the browser
