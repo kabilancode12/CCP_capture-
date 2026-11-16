@@ -94,7 +94,7 @@ unusable, and if a run returns no valid decision the stored ones are kept.
 
 A chat for which the model finds no decision at all has none stored, but it is marked as checked
 (`session.decisions_checked_at`, migration 019): it is not sent to the model again until it has new activity.
-A chat whose run failed is left alone by the server for 30 minutes, because every try costs tokens.
+A chat whose run failed is left alone by the server for 5 minutes, because every try costs tokens. In Docker the server has no `claude` command: set `ANTHROPIC_API_KEY` in `.env` for the container, or run the server on the machine itself (`run.sh` does that), where it uses the logged-in `claude`.
 
 ## The model
 
