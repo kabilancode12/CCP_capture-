@@ -21,7 +21,8 @@ def register(registry: PluginRegistry, context: PluginContext) -> None:
     def rebuild(session_id: str) -> None:
         connection = connect(settings.database)
         try:
-            catalog_chat(connection, store, session_id)
+            # After every turn: refresh report.md and the readable files, not the raw copy.
+            catalog_chat(connection, store, session_id, light=True)
         finally:
             connection.close()
 

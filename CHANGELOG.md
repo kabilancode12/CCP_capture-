@@ -8,7 +8,8 @@ All notable changes are listed here. Format based on [Keep a Changelog](https://
 
 - Single-file chat report: `report.md` in every catalog folder, `ccp-catalog export --chat <id> [--out file]`, and a
   download link on each Explorer chat page. All catalog data as readable Markdown, nothing cut, with a
-  completeness test (see `docs/catalog.md`).
+  completeness test (see `docs/catalog.md`). It is rewritten after every turn (a light build that leaves the raw
+  transcript copy alone) and after a person reviews a decision.
 - Chat hierarchy (migration 016): Claude account (`claude_account`) -> project (`project`, keyed by the
   normalised Git remote or the folder) -> chat (`session`, view `chat`) -> sessions of a chat (`chat_session`),
   plus the tables later steps fill (`test_case`, `correction`, `decision`, `ui_user`, `ui_access_log`) and

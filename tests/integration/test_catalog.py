@@ -332,3 +332,20 @@ def test_the_folder_of_a_chat_that_no_longer_exists_is_removed(
         connection.close()
     assert result.removed_deleted == 1
     assert not [k for k in store.list_keys("catalog/accounts/") if "zzzzzzzz" in k]
+
+
+def test_a_light_build_after_each_turn_refreshes_the_report_but_not_the_raw_copy(
+    story: ObjectStore, connection: Any
+) -> None:
+    catalog_chat(connection, story, SESSION)  # the first build is always full
+    story.put(f"{CHAT}/transcript/main.json", b"SENTINEL")
+    story.put(f"{CHAT}/report.md", b"stale")
+
+    catalog_chat(connection, story, SESSION, light=True)
+
+    assert story.get(f"{CHAT}/transcript/main.json") == b"SENTINEL"  # not copied again
+    assert story.get(f"{CHAT}/report.md").startswith(b"# Fix the bug")  # refreshed
+    assert f"{CHAT}/transcript/agents/explore__a1.json" in story.list_keys(f"{CHAT}/")  # kept
+
+    catalog_chat(connection, story, SESSION)  # a full build refreshes the copy
+    assert story.get(f"{CHAT}/transcript/main.json") != b"SENTINEL"

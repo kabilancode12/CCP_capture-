@@ -131,7 +131,12 @@ def _agent_file_names(data: ChatData, streams: list[str]) -> dict[str, str]:
 
 
 def _build_chat(
-    connection: Any, store: CatalogStore, listing: _Listing, session_id: str
+    connection: Any,
+    store: CatalogStore,
+    listing: _Listing,
+    session_id: str,
+    *,
+    light: bool = False,
 ) -> str | None:
     """Write one chat's folder; returns it, or None for an empty chat (whose folder is removed)."""
     data = load_chat(connection, session_id)
@@ -141,6 +146,12 @@ def _build_chat(
         _remove_old_folders(store, listing, session_id, keep=None)
         return None
     folder = _folder_path(data.chat)
+    # A light build (after every turn) leaves the copy of the raw transcript alone when the folder
+    # already has one: copying it again at every turn would grow with the chat, and the raw data
+    # in sessions/ is the source anyway. A full build (session end, ``build``) refreshes it.
+    keep_transcripts = light and f"{folder}/transcript/main.json" in listing.folders.get(
+        folder, set()
+    )
     streams = transcript_streams(store, session_id)
     agent_streams = sorted(s for s in streams if s != MAIN_STREAM)
     agent_files = _agent_file_names(data, agent_streams)
@@ -166,21 +177,24 @@ def _build_chat(
             _JSON,
         ),
         "08_usage.json": (documents.to_json(documents.build_usage(data)), _JSON),
-        "transcript/main.json": (
+    }
+    if not keep_transcripts:
+        files["transcript/main.json"] = (
             documents.to_json(read_lines(store, streams.get(MAIN_STREAM, []))),
             _JSON,
-        ),
-    }
-    for stream in agent_streams:
-        files[f"transcript/agents/{agent_files[stream]}"] = (
-            documents.to_json(read_lines(store, streams[stream])),
-            _JSON,
         )
+        for stream in agent_streams:
+            files[f"transcript/agents/{agent_files[stream]}"] = (
+                documents.to_json(read_lines(store, streams[stream])),
+                _JSON,
+            )
 
     for name, (content, content_type) in files.items():
         store.put(f"{folder}/{name}", content, content_type)
         listing.folders[folder].add(f"{folder}/{name}")
     wanted = {f"{folder}/{name}" for name in files}
+    if keep_transcripts:
+        wanted |= {k for k in listing.folders[folder] if f"{folder}/transcript/" in k}
     for key in sorted(listing.folders[folder] - wanted):  # files of an earlier build
         store.delete(key)
         listing.folders[folder].discard(key)
@@ -237,7 +251,9 @@ def _write_index(connection: Any, store: CatalogStore, listing: _Listing) -> Non
     store.put(README_KEY, documents.TOP_README.encode(), _MARKDOWN)
 
 
-def catalog_chat(connection: Any, store: CatalogStore, session_id: str) -> str | None:
+def catalog_chat(
+    connection: Any, store: CatalogStore, session_id: str, *, light: bool = False
+) -> str | None:
     """Write (or update) the catalog folder of one chat, and the index.
 
     Args:
@@ -245,6 +261,8 @@ def catalog_chat(connection: Any, store: CatalogStore, session_id: str) -> str |
         store: The object store: raw data is read from ``sessions/``, the catalog is written to
             ``catalog/``.
         session_id: The chat id.
+        light: Do not copy the raw transcript again if the folder already has a copy (used
+            after every turn so that ``report.md`` follows the conversation cheaply).
 
     Returns:
         The folder of the chat in the bucket (``catalog/accounts/.../chats/<chat>``, no trailing
@@ -255,7 +273,7 @@ def catalog_chat(connection: Any, store: CatalogStore, session_id: str) -> str |
         ccp.storage.StorageError: If the object store fails.
     """
     listing = _Listing(store)
-    folder = _build_chat(connection, store, listing, session_id)
+    folder = _build_chat(connection, store, listing, session_id, light=light)
     _write_index(connection, store, listing)
     return folder
 
