@@ -91,7 +91,7 @@ def _folder_path(row: Row) -> str:
     )
     project = project_folder(row["project_label"], row["project_name"])
     chat = chat_folder(row["started_at"] or row["last_activity_at"], row["title"], row["chat_id"])
-    return f"{ACCOUNTS_FOLDER}/{account}/projects/{project}/chats/{chat}"
+    return f"{ACCOUNTS_FOLDER}/{account}/projects/{project}/sessions/{chat}"
 
 
 def _remove_folder(store: CatalogStore, listing: _Listing, folder: str) -> None:
@@ -214,7 +214,7 @@ def _write_index(connection: Any, store: CatalogStore, listing: _Listing) -> Non
         if f"{folder}/{SUMMARY_FILE}" not in listing.folders.get(folder, set()):
             continue  # not built (yet)
         account_path, _, rest = folder.removeprefix(f"{ACCOUNTS_FOLDER}/").partition("/projects/")
-        project_name, _, chat_name = rest.partition("/chats/")
+        project_name, _, chat_name = rest.partition("/sessions/")
         account = accounts.setdefault(
             account_path,
             {
@@ -265,7 +265,7 @@ def catalog_chat(
             after every turn so that ``report.md`` follows the conversation cheaply).
 
     Returns:
-        The folder of the chat in the bucket (``catalog/accounts/.../chats/<chat>``, no trailing
+        The folder of the chat in the bucket (``catalog/accounts/.../sessions/<session>``, no trailing
         slash), or None if the chat is empty (it has no folder; an old one is removed).
 
     Raises:

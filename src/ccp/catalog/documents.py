@@ -348,7 +348,8 @@ def build_readme(data: ChatData, folder_name: str, agent_files: int) -> str:
 
 TOP_README = """# CCP catalog
 
-A readable view of the captured Claude Code chats. It is **derived** from the raw data under
+A readable view of the captured Claude Code sessions (account -> project -> session -> chat ->
+conversations). It is **derived** from the raw data under
 `sessions/` (which is never changed) and can be deleted and rebuilt at any time with
 `ccp-catalog build --all`.
 
@@ -360,7 +361,7 @@ catalog/
   index.json                     every account, project and chat, with its path
   accounts/<account>__<id8>/     one Claude account (its label or name, and 8 characters of its id)
     projects/<project>/          one project (its label or name)
-      chats/<date>__<title>__<id8>/    one chat: start date, title, 8 characters of its id
+      sessions/<date>__<title>__<id8>/ one Claude Code session: start date, title, id
         README.md                what the chat is and what each file means
         00_summary.json          ids, account, project, models, tokens, cost, counts
         01_conversation.md       the conversation, readable

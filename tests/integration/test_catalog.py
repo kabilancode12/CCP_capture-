@@ -251,7 +251,7 @@ def test_a_changed_title_or_label_moves_the_folder(story: ObjectStore, connectio
     )
     moved = catalog_chat(connection, story, SESSION)
     assert moved == (
-        "catalog/accounts/claude-two__11111111/projects/billing-api/chats/"
+        "catalog/accounts/claude-two__11111111/projects/billing-api/sessions/"
         "2026-07-01__a-new-title__sess-sto"
     )
     assert [k for k in _catalog_keys(story) if "claude1__" in k or "/billing/" in k] == []
@@ -271,7 +271,7 @@ def test_an_empty_chat_has_no_folder(story: ObjectStore, connection: Any) -> Non
     catalog_chat(connection, story, SESSION)
     _run(connection, "UPDATE session SET is_empty = TRUE WHERE session_id = %s", SESSION)
     assert catalog_chat(connection, story, SESSION) is None
-    assert [k for k in _catalog_keys(story) if "/chats/" in k] == []
+    assert [k for k in _catalog_keys(story) if "/sessions/" in k] == []
     assert _json(story, "catalog/index.json") == {"accounts": []}
     result = catalog_all(connection, story)
     assert result.built == [] and result.failed == {}
@@ -323,7 +323,7 @@ def test_the_folder_of_a_chat_that_no_longer_exists_is_removed(
 ) -> None:
     """A chat deleted from the index (test debris, a purge) leaves no folder in the catalog."""
     store = story  # the fixture of the chat tests: an object store with the catalog built
-    ghost = "catalog/accounts/account__00000099/projects/x/chats/2026-01-01__old__zzzzzzzz"
+    ghost = "catalog/accounts/account__00000099/projects/x/sessions/2026-01-01__old__zzzzzzzz"
     store.put(f"{ghost}/00_summary.json", b"{}")
     connection = connect(database)
     try:
