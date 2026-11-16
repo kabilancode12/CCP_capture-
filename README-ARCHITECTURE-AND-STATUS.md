@@ -9,6 +9,16 @@ The detailed, maintained list is [docs/requirements.md](docs/requirements.md); t
 
 ---
 
+## 0. Setting it up
+
+`./run.sh` on a fresh clone sets up everything (tools check, `.env` with random passwords, PostgreSQL, MinIO, Metabase,
+migrations, the CCP server as a service, the dashboard, the first Explorer admin, and capture in Claude Code: hooks,
+thinking summaries, the GitHub capture repo with an SSH key, the watcher and the Git hooks). `./run.sh status` and
+`./run.sh stop` show and stop it.
+
+Words used: Claude **account** → **project** → **session** (one Claude Code session, one transcript) → **chat**
+(everything said in it) → **conversations** (one prompt and everything Claude did in answer).
+
 ## 1. Architecture
 
 ### 1.1 The whole picture
@@ -107,7 +117,7 @@ sequenceDiagram
   P->>P: index events, edits, tests, usage
   P->>M: rewrite report.md and readable files
   Note over S,P: a few seconds after the reply
-  S->>P: decisions: after 2 quiet minutes or a session end
+  S->>P: decisions: after 1 quiet minute or at once when the session ends
 ```
 
 ### 1.4 What lives where
@@ -115,7 +125,7 @@ sequenceDiagram
 | Data | Stored in | Read with |
 | --- | --- | --- |
 | Conversation, thinking, tool calls (redacted, byte-exact) | MinIO `sessions/` | catalog, `report.md` |
-| One readable file per chat | MinIO `catalog/.../report.md` (also 00 to 08 files) | Explorer download, `ccp-catalog export` |
+| One readable file per session | MinIO `catalog/accounts/<account>/projects/<project>/sessions/<session>/report.md` (also 00 to 08 files) | Explorer download, `ccp-catalog export` |
 | Code at every step, who changed it, why | GitHub capture repo branch `ccp/<user>/<host>/<branch>` | GitHub (history, blame), `ccp-audit trace` |
 | Events, file changes, tests, usage, sessions, environment | PostgreSQL | Explorer, `ccp-audit`, Metabase |
 | Decisions (goal, options, choice, reason, who decided, who reviewed) | PostgreSQL `decision` | Explorer, `report.md`, `ccp-approaches` |
@@ -196,7 +206,7 @@ The 21 requirements come from the demo scope (R1 to R9) and from the review (R10
 
 1. **Uncommitted work.** On branch `feat/chat-hierarchy` only the first report commits are committed; most of the later work
    (capture chain, tracing, approaches, Explorer pages, watcher, MCP, fixes) is uncommitted and waits for an instruction.
-2. **Restart after upgrades.** `ccp-server` must be restarted to run new code (the decision speed-up needs one more restart).
+2. **Restart after upgrades.** `ccp-server` must be restarted to run new code: `./run.sh` does it.
 3. **GitHub access.** The capture repo receives data through a deploy key with write access; each developer machine needs its
    own key or token.
 4. **Tests.** The last full run was 1,791 passed, 0 failed; changes made after it (snapshot secret check, faster decisions)

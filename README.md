@@ -34,7 +34,9 @@ Details: [docs/architecture.md](docs/architecture.md).
 ## Quick start
 
 Prerequisites: Python 3.11+, Git, Docker Desktop. The full walk-through, with checks after every step, is
-**[docs/quickstart.md](docs/quickstart.md)**. In short, on the server:
+**`./run.sh`** (one command: checks the tools, writes `.env`, starts the database, object store,
+dashboards and the CCP server, applies the migrations, and sets up capture in Claude Code; it asks only
+for what must come from a person, such as the GitHub capture repo). Step by step: **[docs/quickstart.md](docs/quickstart.md)**. In short, on the server:
 
 ```powershell
 python -m venv .venv
