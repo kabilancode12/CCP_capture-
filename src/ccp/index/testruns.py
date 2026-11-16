@@ -65,6 +65,9 @@ _SEGMENT_SPLIT = re.compile(r"&&|\|\||[;|\n]")
 # An environment assignment before the command, such as "CI=1 pytest".
 _ENV_PREFIX = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+")
 
+# A here-document body (``cat > f <<'EOF' ... EOF``): file content, not commands.
+_HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\s*\2\b", re.DOTALL)
+
 _EXIT_CODE = re.compile(r"^Exit code (\d+)")
 
 
@@ -78,6 +81,7 @@ def detect_test_runner(command: str) -> str | None:
     Args:
         command: The command line as given to the shell tool.
     """
+    command = _HEREDOC.sub(" ", command)  # text written into a file is not a command that runs
     for segment in _SEGMENT_SPLIT.split(command):
         text = _ENV_PREFIX.sub("", segment.strip())
         if _NOT_A_RUN.search(text):

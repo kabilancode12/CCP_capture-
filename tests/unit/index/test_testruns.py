@@ -118,3 +118,14 @@ def test_a_request_to_a_local_service_is_a_manual_check_and_a_download_is_not() 
     assert detect_test_runner("curl -O https://example.com/archive.tar.gz") is None
     assert detect_test_runner("echo curl http://localhost:1") is None
     assert detect_test_runner("pytest -q") == "pytest"
+
+
+def test_a_script_written_through_a_heredoc_is_not_a_check() -> None:
+    from ccp.index.testruns import detect_test_runner
+
+    command = "cat > tools/c.py <<'EOF'\nimport os\nos.system('curl http://localhost:5000/x')\nEOF\npython3 -m py_compile tools/c.py"
+    assert detect_test_runner(command) is None
+    assert (
+        detect_test_runner("cat > a.sh <<EOF\necho\nEOF\ncurl -sf http://127.0.0.1:8000/health")
+        is not None
+    )
