@@ -29,6 +29,7 @@ from ccp.catalog.names import (
     slugify,
 )
 from ccp.catalog.report import render_report
+from ccp.catalog.report_page import report_page
 from ccp.catalog.transcripts import RawStore, read_lines, transcript_streams
 from ccp.index.agents import agent_id_of
 from ccp.storage import ObjectNotFoundError, StorageError
@@ -38,10 +39,12 @@ logger = logging.getLogger("ccp.catalog")
 
 SUMMARY_FILE = "00_summary.json"
 REPORT_FILE = "report.md"
+REPORT_HTML = "report.html"
 INDEX_KEY = f"{CATALOG_ROOT}/index.json"
 README_KEY = f"{CATALOG_ROOT}/README.md"
 _JSON = "application/json"
 _MARKDOWN = "text/markdown; charset=utf-8"
+_HTML = "text/html; charset=utf-8"
 
 
 class CatalogError(RuntimeError):
@@ -155,13 +158,15 @@ def _build_chat(
     streams = transcript_streams(store, session_id)
     agent_streams = sorted(s for s in streams if s != MAIN_STREAM)
     agent_files = _agent_file_names(data, agent_streams)
+    raw_main = read_lines(store, streams.get(MAIN_STREAM, []))  # the report holds every line
 
     files: dict[str, tuple[bytes, str]] = {
         "README.md": (
             documents.build_readme(data, folder.rsplit("/", 1)[-1], len(agent_files)).encode(),
             _MARKDOWN,
         ),
-        REPORT_FILE: (render_report(data, folder, len(agent_files)).encode(), _MARKDOWN),
+        REPORT_FILE: (render_report(data, folder, len(agent_files), raw_main).encode(), _MARKDOWN),
+        REPORT_HTML: (report_page(data.chat.get("title"), render_report(data, folder, len(agent_files), raw_main)).encode(), _HTML),
         SUMMARY_FILE: (
             documents.to_json(documents.build_summary(data, folder), sort_keys=True),
             _JSON,
@@ -180,7 +185,7 @@ def _build_chat(
     }
     if not keep_transcripts:
         files["transcript/main.json"] = (
-            documents.to_json(read_lines(store, streams.get(MAIN_STREAM, []))),
+            documents.to_json(raw_main),
             _JSON,
         )
         for stream in agent_streams:
@@ -333,4 +338,5 @@ def report_of_chat(connection: Any, store: CatalogStore | None, chat_id: str) ->
     folder = _folder_path(data.chat)
     streams = transcript_streams(store, found[0]) if store is not None else {}
     agents = [s for s in streams if s != MAIN_STREAM]
-    return render_report(data, folder, len(agents))
+    raw = read_lines(store, streams.get(MAIN_STREAM, [])) if store is not None else None
+    return render_report(data, folder, len(agents), raw)

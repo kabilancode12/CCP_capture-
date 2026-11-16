@@ -559,13 +559,44 @@ def _about(data: ChatData, folder: str, agent_files: int) -> list[str]:
     return out
 
 
-def render_report(data: ChatData, folder: str, agent_files: int = 0) -> str:
+_SHOWN_TYPES = ("user", "assistant")  # shown in section 3; every other entry goes to section 11
+
+
+def _other_entries(raw_lines: list[Any] | None) -> list[str]:
+    """Section 11: every transcript entry that is not a message, in full (nothing is left out)."""
+    if raw_lines is None:
+        return ["*The raw transcript was not read for this export.*", ""]
+    others = [e for e in raw_lines if not (isinstance(e, dict) and e.get("type") in _SHOWN_TYPES)]
+    if not others:
+        return [NONE, ""]
+    counts: dict[str, int] = {}
+    for entry in others:
+        kind = str(entry.get("type", "?")) if isinstance(entry, dict) else "unreadable"
+        counts[kind] = counts.get(kind, 0) + 1
+    out = [
+        "Claude Code also writes bookkeeping entries to the transcript: what it sent to the model, "
+        "attachments, snapshots of files, titles, costs. They are listed here in full, in order.",
+        "",
+        *table(["Entry type", "Count"], sorted(counts.items())),
+    ]
+    for number, entry in enumerate(others, 1):
+        kind = entry.get("type", "?") if isinstance(entry, dict) else "unreadable"
+        text = json.dumps(entry, indent=2, ensure_ascii=False, default=str)
+        out += details(f"{number}. {kind}", fence(text, "json"))
+    return out
+
+
+def render_report(
+    data: ChatData, folder: str, agent_files: int = 0, raw_lines: list[Any] | None = None
+) -> str:
     """The whole report of a chat as Markdown.
 
     Args:
         data: Everything the catalog knows about the chat.
         folder: The chat's catalog folder in the bucket.
         agent_files: How many sub-agent transcripts the chat has.
+        raw_lines: The raw main-transcript entries; when given, every entry that is not a message is
+            added in full (section 11), so the report holds every line Claude Code wrote.
     """
     chat = data.chat
     title = chat.get("title") or "Untitled chat"
@@ -582,6 +613,7 @@ def render_report(data: ChatData, folder: str, agent_files: int = 0) -> str:
         ("8. Sub-agents, workflows and slash commands", _agents(data)),
         ("9. Usage and cost", _usage(data)),
         ("10. About this report", _about(data, folder, agent_files)),
+        ("11. Everything else Claude Code recorded", _other_entries(raw_lines)),
     ]
     out = [
         f"# {title}",
