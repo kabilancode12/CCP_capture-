@@ -1,9 +1,12 @@
-"""Plug the decisions into ``ccp-server``: a background sweep that processes quiet chats.
+"""Plug the decisions into ``ccp-server``: a background sweep that processes finished chats.
 
-Asking a model is slow and costs tokens, so a chat is processed only once it has been quiet for
-``CCP_DECISION_IDLE_MINUTES`` (default 30), never after every prompt. Every
-``CCP_DECISION_SWEEP_MINUTES`` (default 10) the sweep takes the chats that need decisions
-(:func:`ccp.decisions.repository.pending_chats`) and processes the quiet ones, one at a time.
+Asking a model is slow and costs tokens, so a chat is not processed after every prompt. It is
+processed when **a session of the chat has ended** (the ``SessionEnd`` hook, recorded in
+``chat_session.ended_at`` after the chat's last message), and, for sessions that never send an end
+(a closed window, a crash), when the chat has been quiet for ``CCP_DECISION_IDLE_MINUTES`` (default
+15). Every ``CCP_DECISION_SWEEP_MINUTES`` (default 2) the sweep takes the chats that need decisions
+(:func:`ccp.decisions.repository.pending_chats`) and processes those that are finished, one at a
+time. A chat that continues later is processed again: its newer messages make it pending.
 """
 
 from __future__ import annotations
@@ -12,7 +15,7 @@ import logging
 import threading
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ccp.db.connection import connect
 from ccp.decisions.provider import choose_provider
@@ -32,6 +35,25 @@ def _minutes(env: Mapping[str, str], name: str, default: int) -> int:
     return int(value) if value.isdigit() and int(value) > 0 else default
 
 
+_SESSION_ENDED = """
+    SELECT EXISTS (
+        SELECT 1 FROM chat_session cs
+         WHERE cs.session_id = %s AND cs.run_key IS NOT NULL AND cs.ended_at IS NOT NULL
+           AND cs.ended_at >= COALESCE(
+               (SELECT max(e.occurred_at) FROM event e WHERE e.session_id = %s),
+               cs.ended_at) - interval '1 minute')
+"""
+
+
+def session_ended(connection: Any, session_id: str) -> bool:
+    """True if a session of the chat ended after the chat's last message."""
+    cursor = connection.cursor()
+    cursor.execute(_SESSION_ENDED, (session_id, session_id))
+    row = cursor.fetchone()
+    connection.rollback()
+    return bool(row and row[0])
+
+
 def sweep_once(
     database: DatabaseSettings, idle: timedelta, stop: threading.Event, env: Mapping[str, str]
 ) -> int:
@@ -47,7 +69,8 @@ def sweep_once(
             state = chat_state(connection, session_id)
             if state is None or state.is_empty or not state.has_prompt:
                 continue
-            if state.last_event_at is not None and datetime.now(UTC) - state.last_event_at < idle:
+            quiet = state.last_event_at is None or datetime.now(UTC) - state.last_event_at >= idle
+            if not quiet and not session_ended(connection, session_id):
                 continue
             try:
                 process_chat(connection, provider, settings, session_id)
@@ -63,8 +86,8 @@ def sweep_once(
 def register(registry: PluginRegistry, context: PluginContext) -> None:
     """Start the sweep thread (a daemon, so it never keeps the server from stopping)."""
     env = dict(context.env)
-    idle = timedelta(minutes=_minutes(env, "CCP_DECISION_IDLE_MINUTES", 30))
-    every = _minutes(env, "CCP_DECISION_SWEEP_MINUTES", 10) * 60
+    idle = timedelta(minutes=_minutes(env, "CCP_DECISION_IDLE_MINUTES", 15))
+    every = _minutes(env, "CCP_DECISION_SWEEP_MINUTES", 2) * 60
     stop = threading.Event()
 
     def loop() -> None:

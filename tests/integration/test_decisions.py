@@ -581,3 +581,27 @@ def test_the_command_refuses_an_ambiguous_chat_id(
     assert decisions_main(["list", "--chat", "chat-decisions"]) == 1
     assert "matches 2 chats" in capsys.readouterr().err
     assert decisions_main(["list", "--chat", "chat-decisions-2"]) == 0
+
+
+def test_a_chat_whose_session_ended_after_its_last_message_is_finished(conn: Any) -> None:
+    """The sweep processes a chat when its session ended (no need to wait for quiet time)."""
+    from ccp.decisions.plugin import session_ended
+
+    assert session_ended(conn, CHAT) is False
+    cursor = conn.cursor()
+    cursor.execute("SELECT max(occurred_at) FROM event WHERE session_id = %s", (CHAT,))
+    (last,) = cursor.fetchone()
+    cursor.execute(
+        "INSERT INTO chat_session (session_id, seq, start_source, started_at, ended_at, "
+        "end_reason, run_key) VALUES (%s, 1, 'startup', %s, %s, 'other', 'run-1')",
+        (CHAT, last - timedelta(hours=1), last + timedelta(minutes=5)),
+    )
+    conn.commit()
+    assert session_ended(conn, CHAT) is True
+    # A session that ended long BEFORE the last message does not count: the chat went on.
+    cursor.execute(
+        "UPDATE chat_session SET ended_at = %s WHERE run_key = 'run-1'",
+        (last - timedelta(hours=2),),
+    )
+    conn.commit()
+    assert session_ended(conn, CHAT) is False
