@@ -16,6 +16,7 @@ the middle of the chat is left out (the start and the end are kept).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -39,6 +40,7 @@ _PLAN_CHARS = 700
 _ANSWER_CHARS = 300
 _OPEN_ADVICE_LIMIT = 10
 
+_PROMPT_LINE = re.compile(r"\[L\d+\] PROMPT")
 _MAIN_STREAM = "main"
 _EARLIEST = datetime.min.replace(tzinfo=UTC)
 
@@ -198,6 +200,30 @@ class Digest:
     text: str
     refs: dict[int, LineRef]
     advice: dict[int, AdviceRef] = field(default_factory=dict)  # OPEN ADVICE number -> advice
+
+    def windows(self, limit: int) -> list[str]:
+        """The digest as parts of about ``limit`` characters, so that a long chat is not squeezed.
+
+        Each part has the header and the footer; a part starts at a PROMPT line (a message of the
+        developer and what followed it stay together). A digest that fits is one part.
+        """
+        if len(self.text) <= limit:
+            return [self.text]
+        lines = self.text.split("\n")
+        head, rest = lines[0], lines[1:]
+        body = [line for line in rest if line.startswith(("[L", "..."))]
+        foot = [line for line in rest if not line.startswith(("[L", "..."))]
+        room = max(limit - len(head) - sum(len(line) + 1 for line in foot), limit // 2)
+        parts: list[list[str]] = [[]]
+        size = 0
+        for line in body:
+            starts_turn = _PROMPT_LINE.match(line) is not None
+            if parts[-1] and size + len(line) > room and (starts_turn or size > room * 1.3):
+                parts.append([])
+                size = 0
+            parts[-1].append(line)
+            size += len(line) + 1
+        return ["\n".join([head, *part, *foot]) for part in parts if part]
 
     @property
     def chars(self) -> int:

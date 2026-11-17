@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import pg8000.dbapi
@@ -18,6 +18,7 @@ from ccp.decisions import prompts
 from ccp.decisions.digest import Digest, LineRef, build_digest
 from ccp.decisions.extraction import (
     AnswerError,
+    DeveloperCorrection,
     ExtractedDecision,
     Extraction,
     Review,
@@ -33,7 +34,7 @@ from ccp.decisions.repository import (
     mark_checked,
     save_decisions,
 )
-from ccp.decisions.settings import DecisionSettings
+from ccp.decisions.settings import WINDOW_CHARS, DecisionSettings
 
 logger = logging.getLogger("ccp.decisions")
 
@@ -98,15 +99,12 @@ def process_chat(
 
     commits = linked_commits(connection, session_id)
     usage: dict[str, Any] = {}
-    extraction = _extract(provider, settings, digest, commits)
-    _note_usage(usage, "write", provider)
+    extraction, reviews = _read_in_parts(provider, settings, digest, commits, usage)
     if not extraction.decisions:
         # Nothing valid came back: keep what is stored rather than wipe it, and remember that the
         # chat was looked at, so it is not sent to the model again until it has new activity.
         mark_checked(connection, session_id)
         return ChatResult(session_id, NO_DECISIONS, digest.chars, dropped=extraction.dropped)
-    reviews = _review(provider, settings, digest, extraction)
-    _note_usage(usage, "review", provider)
     decisions = [
         _new_decision(item, digest, reviews.get(index), index)
         for index, item in enumerate(extraction.decisions)
@@ -137,32 +135,82 @@ def process_chat(
 
 
 def _note_usage(usage: dict[str, Any], step: str, provider: Provider) -> None:
-    """Remember what the latest call used (providers that cannot tell leave it out)."""
+    """Add what the latest call used (providers that cannot tell leave it out)."""
     used = getattr(provider, "last_usage", None)
-    if used is not None:
-        usage[step] = used.as_dict()
+    if used is None:
+        return
+    now = used.as_dict()
+    before = usage.get(step)
+    if before is None:
+        usage[step] = {**now, "calls": 1}
+        return
+    for key, value in now.items():
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            before[key] = (before.get(key) or 0) + value
+    before["calls"] = before.get("calls", 1) + 1
+
+
+def _read_in_parts(
+    provider: Provider,
+    settings: DecisionSettings,
+    digest: Digest,
+    commits: list[str],
+    usage: dict[str, Any],
+) -> tuple[Extraction, dict[int, Review]]:
+    """Write and review the decisions of every part of the digest, in the order of the chat.
+
+    A short chat is one part. In a longer one each part is read in full, so nothing is squeezed
+    out; a decision that follows an earlier one counts from the first decision of the whole chat.
+    """
+    decisions: list[ExtractedDecision] = []
+    corrections: list[DeveloperCorrection] = []
+    reviews: dict[int, Review] = {}
+    dropped = 0
+    for text in digest.windows(WINDOW_CHARS):
+        part = _extract(provider, settings, text, digest.refs, commits)
+        _note_usage(usage, "write", provider)
+        dropped += part.dropped
+        known = {item.line for item in corrections}
+        corrections += [item for item in part.corrections if item.line not in known]
+        if not part.decisions:
+            continue
+        offset = len(decisions)
+        for index, verdict in _review(provider, settings, text, part).items():
+            reviews[offset + index] = verdict
+        _note_usage(usage, "review", provider)
+        decisions += [
+            replace(item, follows_decision=item.follows_decision + offset)
+            if item.follows_decision
+            else item
+            for item in part.decisions
+        ]
+    return Extraction(decisions, corrections, dropped), reviews
 
 
 def _extract(
-    provider: Provider, settings: DecisionSettings, digest: Digest, commits: list[str]
+    provider: Provider,
+    settings: DecisionSettings,
+    text: str,
+    refs: dict[int, LineRef],
+    commits: list[str],
 ) -> Extraction:
     try:
         answer = provider.complete(
-            prompts.EXTRACT_SYSTEM, prompts.extract_prompt(digest.text), settings.model
+            prompts.EXTRACT_SYSTEM, prompts.extract_prompt(text), settings.model
         )
-        return parse_extraction(answer, digest.refs, commits)
+        return parse_extraction(answer, refs, commits)
     except (ProviderError, AnswerError) as error:
         raise DecisionError(f"extraction failed: {error}") from error
 
 
 def _review(
-    provider: Provider, settings: DecisionSettings, digest: Digest, extraction: Extraction
+    provider: Provider, settings: DecisionSettings, text: str, extraction: Extraction
 ) -> dict[int, Review]:
     asked = [item.as_prompt_dict() for item in extraction.decisions]
     try:
         answer = provider.complete(
             prompts.REVIEW_SYSTEM,
-            prompts.review_prompt(digest.text, asked),
+            prompts.review_prompt(text, asked),
             settings.review_model,
         )
         return parse_reviews(answer, len(asked))
