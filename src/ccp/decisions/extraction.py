@@ -212,7 +212,7 @@ def _decision(
     if not isinstance(item, dict):
         return None
     title = _text(item.get("title"), MAX_TITLE)
-    chosen = _text(item.get("chosen"), MAX_TEXT)
+    chosen = _text(item.get("chosen"), MAX_TEXT) or _text(item.get("short_answer"), MAX_TEXT)
     if not title or not chosen:
         return None
     evidence = [n for n in _ints(item.get("evidence_lines")) if n in refs]
@@ -266,8 +266,8 @@ def _not_chosen(value: Any) -> list[dict[str, str]]:
 
 
 def _squash(text: str) -> str:
-    """White space made single and case removed, to compare a quote with the recorded text."""
-    return " ".join(text.split()).casefold()
+    """White space made single, to compare a quote with the recorded text."""
+    return " ".join(text.split())
 
 
 def _quotes(value: Any, refs: dict[int, LineRef]) -> list[dict[str, Any]]:
@@ -284,8 +284,9 @@ def _quotes(value: Any, refs: dict[int, LineRef]) -> list[dict[str, Any]]:
         ref = refs.get(number) if _is_int(number) else None
         if ref is None or words is None or ref.kind not in ("prompt", "reply"):
             continue
-        if len(words) < MIN_QUOTE or _squash(words.rstrip(".")) not in _squash(ref.text):
-            continue
+        words = _squash(words)
+        if len(words) < MIN_QUOTE or words not in _squash(ref.text):
+            continue  # what is kept is a piece of the recorded text, letter for letter
         entry = {
             "digest_line": number,
             "key": ref.raw_object_key,
