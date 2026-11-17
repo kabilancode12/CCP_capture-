@@ -38,6 +38,7 @@ ACTOR_LABEL = {"human": "a person", "ai_edit": "Claude · edit tool", "ai_comman
 
 BLOCK_LIMIT = 30_000  # characters of one tool output, input or code block shown in the page
 INLINE_LIMIT = 4_000  # longer paragraphs are not formatted (the patterns can backtrack on them)
+TEXT_LIMIT = 100_000  # characters of one prompt, reply or thinking note shown in full in the page
 RAW_ENTRIES_SHOWN = 200  # raw bookkeeping entries listed in section 11 of the page
 RAW_ENTRY_LIMIT = 6_000  # characters of one such entry shown in the page
 
@@ -564,7 +565,7 @@ def step_html(step: Step) -> str:
         )
         return f'<div class="think"><span class="lab">Claude\'s thinking · {esc(step.clock)}</span><div class="pre">{body}</div></div>'
     if step.kind == "text":
-        return f'<div class="reply"><span class="lab">Claude · {esc(step.clock)}</span>{markdown(step.text)}</div>'
+        return f'<div class="reply"><span class="lab">Claude · {esc(step.clock)}</span>{markdown(cut(step.text, TEXT_LIMIT))}</div>'
     if step.kind == "note":
         return f'<div class="note"><pre>{esc(step.text)}</pre></div>'
     if step.tool == "AskUserQuestion":
@@ -611,7 +612,7 @@ def turn_html(
         + "</div>"
     )
     prompt = (
-        f'<div class="prompt"><span class="lab">{esc(turn.who)}</span>{markdown(turn.prompt) if turn.prompt else "<em>empty</em>"}</div>'
+        f'<div class="prompt"><span class="lab">{esc(turn.who)}</span>{markdown(cut(turn.prompt, TEXT_LIMIT)) if turn.prompt else "<em>empty</em>"}</div>'
         if turn.prompt or turn.who != "Developer prompt"
         else ""
     )
