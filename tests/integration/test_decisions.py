@@ -875,15 +875,19 @@ def test_a_link_to_advice_that_does_not_exist_is_ignored(conn: Any) -> None:
     assert row == (None, False)
 
 
-def test_a_new_prompt_version_makes_a_chat_pending_once_without_anyone_asking(conn: Any) -> None:
+def test_a_new_prompt_version_alone_does_not_rewrite_an_old_chat(conn: Any) -> None:
     assert run(conn, FakeProvider()).outcome == "done"
-    assert not chat_state(conn, CHAT).outdated and CHAT not in pending_chats(conn, False)  # type: ignore[union-attr]
     cursor = conn.cursor()
     cursor.execute("UPDATE session SET decisions_checked_version = '5'")
     conn.commit()
-    assert chat_state(conn, CHAT).outdated and CHAT in pending_chats(conn, False)  # type: ignore[union-attr]
-    assert run(conn, FakeProvider()).outcome == "done"  # processed again, without force
-    assert CHAT not in pending_chats(conn, False)
+    assert chat_state(conn, CHAT).outdated  # type: ignore[union-attr]
+    assert CHAT not in pending_chats(conn, False)  # no tokens are spent on it
+    add_event(cursor, 70, "prompt", "human", 90, {"message": {"content": "one more thing"}})
+    cursor.execute(
+        "UPDATE event SET occurred_at = now() + interval '1 hour' WHERE raw_line_number = 70"
+    )
+    conn.commit()
+    assert CHAT in pending_chats(conn, False)  # new activity: rewritten with the new prompt
 
 
 class PerPartProvider(FakeProvider):

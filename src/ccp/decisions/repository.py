@@ -35,8 +35,8 @@ _NEWEST_DECISION = (
     "s.decisions_checked_at)"
 )
 
-# A newer prompt version makes every chat pending once, so that the decisions already stored get
-# the new facts (kind, short answer, outcome ...) without anyone asking.
+# Whether the chat was last looked at with an older prompt version (informational: it does not make
+# a chat pending, to save tokens).
 _OUTDATED = "s.decisions_checked_version IS DISTINCT FROM %s"
 
 _STATE = f"""
@@ -48,8 +48,7 @@ _STATE = f"""
 _PENDING = f"""
     SELECT s.session_id FROM session s
      WHERE NOT s.is_empty AND {_HAS_PROMPT}
-       AND (%s OR {_NEWEST_DECISION} IS NULL OR {_LAST_EVENT} > {_NEWEST_DECISION}
-            OR {_OUTDATED})
+       AND (%s OR {_NEWEST_DECISION} IS NULL OR {_LAST_EVENT} > {_NEWEST_DECISION})
      ORDER BY s.last_activity_at DESC, s.session_id
 """  # noqa: S608  (only constants are inserted)
 
@@ -176,8 +175,12 @@ class ChatState:
     outdated: bool = False  # last looked at with an older prompt version
 
     def needs_decisions(self) -> bool:
-        """True without decisions, with newer events, or after a newer prompt version."""
-        if self.newest_decision_at is None or self.outdated:
+        """True without decisions, or when the chat has events newer than the newest decision.
+
+        A newer prompt version alone does not make an old chat pending: it costs tokens, so a chat
+        is rewritten with the new prompt only when it has new activity (or is forced).
+        """
+        if self.newest_decision_at is None:
             return True
         return self.last_event_at is not None and self.last_event_at > self.newest_decision_at
 
@@ -247,7 +250,7 @@ def chat_state(connection: pg8000.dbapi.Connection, session_id: str) -> ChatStat
 def pending_chats(connection: pg8000.dbapi.Connection, force: bool) -> list[str]:
     """Chats to process, most recently active first (every non-empty chat with ``force``)."""
     cursor = connection.cursor()
-    cursor.execute(_PENDING, (force, PROMPT_VERSION))
+    cursor.execute(_PENDING, (force,))
     chats = [row[0] for row in cursor.fetchall()]
     connection.rollback()
     return chats
