@@ -722,14 +722,18 @@ def _stats(data: ChatData) -> str:
 
 
 def render_report_html(
-    data: ChatData, folder: str, agent_files: int = 0, raw_lines: list[Any] | None = None
+    data: ChatData,
+    folder: str,
+    agent_files: int = 0,
+    raw_lines: list[Any] | None = None,
+    report_md: str | None = None,
 ) -> str:
     """The complete page for a session (same content as :func:`~ccp.catalog.report.render_report`)."""
     chat = data.chat
     title = chat.get("title") or "Claude Code session"
     account = chat.get("account_label") or chat.get("account_name") or "unknown account"
     project = chat.get("project_label") or chat.get("project_name") or "unknown project"
-    md = render_report(data, folder, agent_files, raw_lines)
+    md = report_md if report_md is not None else render_report(data, folder, agent_files, raw_lines)
     decisions = documents.build_decisions(data)
     slash = {row["event_id"]: row for row in data.slash_commands if "event_id" in row}
     turns = build_turns(data.events, slash)
