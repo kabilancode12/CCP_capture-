@@ -25,7 +25,7 @@ import pg8000.dbapi
 from ccp.index.shellfiles import files_changed_by
 
 # How long a prompt or reply excerpt may be, tried in this order until the digest fits. An answer
-# that weighs options is long, so the widest excerpt is wide; a big chat falls back to a narrower one.
+# that weighs options is long, so the widest excerpt is wide; a big chat uses narrower ones.
 EXCERPT_WIDTHS = (1500, 800, 400, 200, 100)
 
 # How much text of an event is read from the database before the excerpt is cut again.
@@ -129,7 +129,7 @@ _ANSWERS = """
        AND b ->> 'type' = 'tool_result' AND b ->> 'tool_use_id' = ANY(%s::text[])
 """
 
-# Advice of other chats of the same project that is still open: a decision of this chat may follow it.
+# Advice of other chats of the same project that is still open: a decision here may follow it.
 _OPEN_ADVICE = """
     SELECT d.session_id, d.prompt_uuid, d.title, d.kind, left(d.details ->> 'short_answer', 200),
            left(d.details ->> 'waiting_for', 200)
@@ -425,8 +425,10 @@ def _question_text(data: Any) -> str:
 
 
 def _questions_and_plans(cursor: pg8000.dbapi.Cursor, session_id: str) -> list[_Entry]:
-    """ASK lines (a question put to the developer and the answer) and PLAN lines (a plan and
-    whether the developer approved it). Both are recorded data, so they are exact."""
+    """ASK lines (a question put to the developer, with the answer) and PLAN lines.
+
+    A PLAN line says whether the developer approved the plan. Both come from recorded data.
+    """
     cursor.execute(_QUESTIONS, (session_id,))
     calls = cursor.fetchall()
     if not calls:
