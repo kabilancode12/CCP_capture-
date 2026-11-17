@@ -195,28 +195,27 @@ def linked_commits(connection: pg8000.dbapi.Connection, session_id: str) -> list
     return shas
 
 
-# The developer prompt that was current at each decision's first evidence line, stored with it.
-_SET_PROMPTS = """
 # The developer prompt current at each decision's first evidence line, stored with it.
+_SET_PROMPTS = """
+    UPDATE decision d SET
+        prompt_text = COALESCE(pe.payload #>> '{message,content}',
+                               pe.payload #>> '{message,content,0,text}', ''),
+        prompt_at = pe.occurred_at, prompt_uuid = pe.entry_uuid
       FROM (
         SELECT d2.decision_id,
-               (SELECT row(e.entry_uuid, e.occurred_at,
-                           COALESCE(e.payload #>> '{message,content}',
-                                    e.payload #>> '{message,content,0,text}', ''))
-                  FROM event e
+               (SELECT e.event_id FROM event e
                  WHERE e.session_id = d2.session_id AND e.event_type = 'prompt'
                    AND e.actor = 'human' AND NOT e.is_abandoned
                    AND (e.raw_object_key, e.raw_line_number) <= (first_ev.key, first_ev.line)
-                 ORDER BY e.raw_object_key DESC, e.raw_line_number DESC LIMIT 1) AS found
+                 ORDER BY e.raw_object_key DESC, e.raw_line_number DESC LIMIT 1) AS event_id
           FROM decision d2
           CROSS JOIN LATERAL (
             SELECT x ->> 'key' AS key, (x ->> 'line')::int AS line
               FROM jsonb_array_elements(d2.evidence_lines) x
              ORDER BY x ->> 'key', (x ->> 'line')::int LIMIT 1) first_ev
          WHERE d2.session_id = %s) q
-      CROSS JOIN LATERAL (
-        SELECT (q.found).f1 AS entry_uuid, (q.found).f2 AS occurred_at, (q.found).f3 AS text) p
-     WHERE d.decision_id = q.decision_id AND q.found IS NOT NULL
+      JOIN event pe ON pe.event_id = q.event_id
+     WHERE d.decision_id = q.decision_id
 """
 
 
