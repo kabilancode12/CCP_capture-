@@ -14,6 +14,7 @@ from typing import Any
 import pg8000.dbapi
 
 from ccp.decisions.digest import FileRef, LineRef
+from ccp.decisions.prompts import PROMPT_VERSION
 
 HUMAN_STATUSES = ("approved", "rejected", "needs_review")
 MAX_REVIEWER = 100
@@ -34,8 +35,12 @@ _NEWEST_DECISION = (
     "s.decisions_checked_at)"
 )
 
+# A newer prompt version makes every chat pending once, so that the decisions already stored get
+# the new facts (kind, short answer, outcome ...) without anyone asking.
+_OUTDATED = "s.decisions_checked_version IS DISTINCT FROM %s"
+
 _STATE = f"""
-    SELECT s.is_empty, {_HAS_PROMPT}, {_LAST_EVENT}, {_NEWEST_DECISION}
+    SELECT s.is_empty, {_HAS_PROMPT}, {_LAST_EVENT}, {_NEWEST_DECISION}, {_OUTDATED}
       FROM session s WHERE s.session_id = %s
 """  # noqa: S608  (only constants are inserted)
 
@@ -43,7 +48,8 @@ _STATE = f"""
 _PENDING = f"""
     SELECT s.session_id FROM session s
      WHERE NOT s.is_empty AND {_HAS_PROMPT}
-       AND (%s OR {_NEWEST_DECISION} IS NULL OR {_LAST_EVENT} > {_NEWEST_DECISION})
+       AND (%s OR {_NEWEST_DECISION} IS NULL OR {_LAST_EVENT} > {_NEWEST_DECISION}
+            OR {_OUTDATED})
      ORDER BY s.last_activity_at DESC, s.session_id
 """  # noqa: S608  (only constants are inserted)
 
@@ -57,10 +63,40 @@ _INSERT_DECISION = """
     INSERT INTO decision (session_id, seq, title, goal, options, chosen, reason, result,
                           tests_summary, commit_shas, evidence_lines, status, reviewed_by_kind,
                           reviewer, review_note, review_history, model, prompt_version,
-                          decided_by, files, thinking, llm_usage)
+                          decided_by, files, thinking, llm_usage, kind, raised_by, outcome,
+                          follows_session_id, follows_prompt_uuid, details)
     VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s::text[], %s::jsonb, %s, 'ai', %s, %s,
-            %s::jsonb, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
+            %s::jsonb, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s::jsonb)
 """
+
+# A decision that follows an earlier decision of the same chat: the link is the earlier decision's
+# prompt (stable), found once the prompts are filled in.
+_LINK_SAME_CHAT = """
+    UPDATE decision f SET follows_session_id = f.session_id, follows_prompt_uuid = a.prompt_uuid
+      FROM decision a
+     WHERE f.session_id = %s AND a.session_id = f.session_id AND a.prompt_uuid IS NOT NULL
+       AND f.follows_session_id IS NULL AND a.seq = (f.details ->> 'follows_seq')::int
+       AND a.decision_id <> f.decision_id
+"""
+
+# The outcome of advice is what the newest decision that follows it says; without one, it is what
+# the decision itself said. Decisions rewritten earlier (no ``own_outcome``) are left alone.
+_RELINK = """
+    WITH want AS (
+        SELECT d.decision_id,
+               COALESCE((SELECT f.details ->> 'follows_how' FROM decision f
+                          WHERE f.follows_session_id = d.session_id
+                            AND f.follows_prompt_uuid = d.prompt_uuid
+                            AND f.decision_id <> d.decision_id
+                            AND f.details ->> 'follows_how' IS NOT NULL
+                          ORDER BY f.created_at DESC, f.decision_id DESC LIMIT 1),
+                        d.details ->> 'own_outcome') AS outcome
+          FROM decision d WHERE d.details ? 'own_outcome'
+    )
+    UPDATE decision d SET outcome = w.outcome
+      FROM want w WHERE d.decision_id = w.decision_id AND d.outcome IS DISTINCT FROM w.outcome
+"""
+_SET_VERSION = "UPDATE session SET decisions_checked_version = %s WHERE session_id = %s"
 _DELETE_AI_CORRECTIONS = """
     DELETE FROM correction
      WHERE session_id = %s AND kind = 'developer_correction' AND detected_by = 'ai'
@@ -105,10 +141,11 @@ class ChatState:
     has_prompt: bool
     last_event_at: datetime | None
     newest_decision_at: datetime | None
+    outdated: bool = False  # last looked at with an older prompt version
 
     def needs_decisions(self) -> bool:
-        """True without decisions, or when the chat has events newer than the newest decision."""
-        if self.newest_decision_at is None:
+        """True without decisions, with newer events, or after a newer prompt version."""
+        if self.newest_decision_at is None or self.outdated:
             return True
         return self.last_event_at is not None and self.last_event_at > self.newest_decision_at
 
@@ -131,6 +168,13 @@ class NewDecision:
     decided_by: str | None = None  # developer | claude
     files: list[FileRef] = field(default_factory=list)
     thinking: list[LineRef] = field(default_factory=list)
+    kind: str = "code change"
+    raised_by: str | None = None
+    outcome: str = "done"
+    follows_session_id: str | None = None  # earlier advice in another chat ...
+    follows_prompt_uuid: str | None = None  # ... found by the prompt it answered
+    follows_local: int | None = None  # or the 1-based number of an earlier decision of this chat
+    details: dict[str, Any] = field(default_factory=dict)  # short answer, use when, quotes ...
 
 
 @dataclass(frozen=True)
@@ -181,7 +225,9 @@ def mark_checked(connection: pg8000.dbapi.Connection, session_id: str) -> None:
     """Remember that the chat was given to the decisions run (also when it found no decision)."""
     cursor = connection.cursor()
     cursor.execute(
-        "UPDATE session SET decisions_checked_at = now() WHERE session_id = %s", (session_id,)
+        "UPDATE session SET decisions_checked_at = now(), decisions_checked_version = %s "
+        "WHERE session_id = %s",
+        (PROMPT_VERSION, session_id),
     )
     connection.commit()
 
@@ -258,6 +304,7 @@ def save_decisions(
         cursor.execute(_DELETE_AI_DECISIONS, (session_id,))
         cursor.execute(_NEXT_SEQ, (session_id,))
         seq = int(cursor.fetchone()[0])
+        base = seq
         now = datetime.now(UTC).isoformat()
         reviewer = review_model or model
         for decision in decisions:
@@ -275,6 +322,9 @@ def save_decisions(
                 {"key": ref.raw_object_key, "line": ref.raw_line_number}
                 for ref in decision.evidence
             ]
+            details = dict(decision.details)
+            if decision.follows_local:
+                details["follows_seq"] = base + decision.follows_local
             cursor.execute(
                 _INSERT_DECISION,
                 (
@@ -314,12 +364,21 @@ def save_decisions(
                         ensure_ascii=False,
                     ),
                     json.dumps(llm_usage or {}),
+                    decision.kind,
+                    decision.raised_by,
+                    decision.outcome,
+                    decision.follows_session_id,
+                    decision.follows_prompt_uuid,
+                    json.dumps(details, ensure_ascii=False),
                 ),
             )
         cursor.execute(_DELETE_AI_CORRECTIONS, (session_id,))
         for event_id, note in developer_corrections:
             cursor.execute(_INSERT_CORRECTION, (session_id, event_id, event_id, note))
         cursor.execute(_SET_PROMPTS, (session_id, True))  # the prompt each decision answers
+        cursor.execute(_LINK_SAME_CHAT, (session_id,))
+        cursor.execute(_RELINK)  # advice takes the outcome its follower reports
+        cursor.execute(_SET_VERSION, (PROMPT_VERSION, session_id))
         connection.commit()
     except pg8000.dbapi.DatabaseError as error:
         connection.rollback()
