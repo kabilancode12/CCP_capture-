@@ -92,6 +92,10 @@ def _data() -> ChatData:
                     "not_chosen": [{"option": "single request", "why": "proxy limits"}],
                     "waiting_for": "where the files come from",
                     "follows_how": "not followed",
+                    "models_used": [
+                        {"model": "claude-opus-5-5", "effort": "high", "responses": 4},
+                        {"model": "claude-sonnet-5-5", "effort": None, "responses": 2},
+                    ],
                     "quotes": [
                         {"key": KEY, "line": 3, "who": "claude", "text": "not a good design"}
                     ],

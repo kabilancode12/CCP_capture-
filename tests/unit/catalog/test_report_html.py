@@ -147,3 +147,8 @@ def test_a_decision_without_code_shows_its_short_answer_conditions_and_links() -
     assert "Follows earlier advice:" in page and "Earlier advice" in page
     assert "Exact words" in page and "not a good design" in page
     assert 'class="chip kind"' in page and 'class="chip out-followed"' in page
+
+
+def test_every_model_that_worked_on_a_decision_is_shown_with_its_effort_level() -> None:
+    page = render_report_html(_turn_data(), "catalog/x", 0, [])
+    assert "claude-opus-5-5 · high" in page and "claude-sonnet-5-5" in page
