@@ -13,9 +13,13 @@ if (-not (Test-Path ".env")) {
 
 # Determine Python executable
 $Python = ".\.venv\Scripts\python.exe"
-if (-not (Test-Path $Python)) {
-    $Python = (Get-Command python -ErrorAction SilentlyContinue).Source
-    if (-not $Python) {
+if (Test-Path $Python) {
+    $Python = (Resolve-Path $Python).Path
+} else {
+    $Cmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($Cmd) {
+        $Python = $Cmd.Source
+    } else {
         Write-Error "Python was not found. Please install Python 3.11+ and create .venv."
     }
 }
@@ -78,7 +82,7 @@ try {
 
 if (-not $ServerHealthy) {
     Write-Host "Starting CCP Server in a dedicated background window..." -ForegroundColor Yellow
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot'; .\$Python -m ccp.server --migrate"
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot'; & '$Python' -m ccp.server --migrate"
     Start-Sleep -Seconds 3
 } else {
     Write-Host "CCP server is already running and healthy." -ForegroundColor Green

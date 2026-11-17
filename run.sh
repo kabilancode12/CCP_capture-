@@ -396,6 +396,7 @@ setup_capture "http://127.0.0.1:${CCP_API_PORT}" "$CCP_INGEST_TOKEN"
 # ---------------------------------------------------------------------------------- 9. summary
 bold "9/9 Ready"
 LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+[[ -z "$LAN_IP" ]] && LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
 cat <<EOF
   What                 Address                                   User / password
   -------------------  ----------------------------------------  -----------------------------------------
