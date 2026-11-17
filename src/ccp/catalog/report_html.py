@@ -126,13 +126,13 @@ def markdown(text: str) -> str:
             while i < len(lines) and lines[i].lstrip().startswith("|"):
                 rows.append(_cells(lines[i]))
                 i += 1
-            body = "".join(
+            table_body = "".join(
                 "<tr>" + "".join(f"<td>{inline(c)}</td>" for c in r) + "</tr>" for r in rows
             )
             out.append(
                 '<div class="tablewrap"><table><thead><tr>'
                 + "".join(f"<th>{inline(c)}</th>" for c in head)
-                + f"</tr></thead><tbody>{body}</tbody></table></div>"
+                + f"</tr></thead><tbody>{table_body}</tbody></table></div>"
             )
             continue
         if re.match(r"^\s*([-*]|\d+[.)])\s+", line):
@@ -299,10 +299,10 @@ def build_turns(
         elif kind == "tool_result":
             for block in content if isinstance(content, list) else []:
                 if isinstance(block, dict) and block.get("type") == "tool_result":
-                    step = calls.get(str(block.get("tool_use_id")))
-                    if step is not None:
-                        step.result = result_text(block)
-                        step.status = "error" if block.get("is_error") is True else "ok"
+                    called = calls.get(str(block.get("tool_use_id")))
+                    if called is not None:
+                        called.result = result_text(block)
+                        called.status = "error" if block.get("is_error") is True else "ok"
         elif kind == "compact_boundary":
             turn.steps.append(Step("note", clock, "The conversation was compacted here."))
         elif kind in ("agent_message", "command_output"):
