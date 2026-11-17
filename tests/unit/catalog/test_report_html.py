@@ -91,7 +91,9 @@ def test_text_from_a_session_cannot_run_as_code_in_the_page() -> None:
 
 
 def test_markdown_renders_headings_lists_tables_code_and_stays_safe() -> None:
-    text = "# Title\n\n- one\n- **two**\n\n| a | b |\n|---|---|\n| 1 | `x` |\n\n```\n<b>raw</b>\n```\n"
+    text = (
+        "# Title\n\n- one\n- **two**\n\n| a | b |\n|---|---|\n| 1 | `x` |\n\n```\n<b>raw</b>\n```\n"
+    )
     html = markdown(text)
     assert "<h2>Title</h2>" in html and "<li><strong>two</strong></li>" in html
     assert "<table>" in html and "<code>x</code>" in html
