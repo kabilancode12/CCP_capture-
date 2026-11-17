@@ -316,9 +316,7 @@ def catalog_all(connection: Any, store: CatalogStore) -> CatalogResult:
 
 
 def report_html_of_chat(connection: Any, store: CatalogStore | None, chat_id: str) -> str:
-    """The designed web page (``report.html``) of one chat, made now. Same arguments as
-    :func:`report_of_chat`.
-    """
+    """The designed web page (``report.html``) of one chat, made now (arguments as for report_of_chat)."""
     data, folder, agents, raw = _report_inputs(connection, store, chat_id)
     return render_report_html(data, folder, agents, raw)
 
@@ -326,7 +324,7 @@ def report_html_of_chat(connection: Any, store: CatalogStore | None, chat_id: st
 def _report_inputs(
     connection: Any, store: CatalogStore | None, chat_id: str
 ) -> tuple[ChatData, str, int, list[Any] | None]:
-    """What a report is made from: the chat's data, its folder, its sub-agent count, its raw lines."""
+    """What a report is made from: the chat's data, folder, sub-agent count and raw lines."""
     cursor = connection.cursor()
     cursor.execute(
         "SELECT session_id FROM session WHERE session_id LIKE %s LIMIT 2", (chat_id + "%",)

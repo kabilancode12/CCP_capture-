@@ -81,7 +81,7 @@ def markdown(text: str) -> str:
         line = lines[i]
         fence = _FENCE.match(line)
         if fence:
-            mark, lang, body = fence.group(1), fence.group(2), []
+            mark, body = fence.group(1), []
             i += 1
             while i < len(lines) and not (
                 lines[i].strip().startswith(mark[0] * len(mark))
@@ -348,6 +348,7 @@ def assign_decisions(
 
 
 def chip(text: object, kind: str = "") -> str:
+    """A small coloured label."""
     return f'<span class="chip {esc(kind)}">{esc(text)}</span>'
 
 
@@ -711,9 +712,8 @@ def render_report_html(
         else ""
     )
 
-    nav, body, number = [], [], 0
-    for name, section in _sections(md):
-        number += 1
+    nav, body = [], []
+    for number, (name, section) in enumerate(_sections(md), start=1):
         sid = f"s{number}"
         label = re.sub(r"^\d+\.\s*", "", name)
         nav.append(f'<a href="#{sid}">{esc(label)}</a>')
