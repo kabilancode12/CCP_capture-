@@ -110,6 +110,7 @@ ALLOWED_TEXT_COLUMNS = {
     "run_mode", "auth_type", "model", "path", "tool", "change_type", "actor_class", "framework",
     "project", "account", "token_source",  # d_usage: labels or neutral names, never e-mail or paths
     "chat_id", "effort",  # d_chat (migration 016): the chat's id and the highest effort level
+    "actor",  # d_change (migration 023): person, edit tool, shell command or sub-agent: a fixed short word
 }  # fmt: skip
 
 

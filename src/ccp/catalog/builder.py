@@ -29,7 +29,7 @@ from ccp.catalog.names import (
     slugify,
 )
 from ccp.catalog.report import render_report
-from ccp.catalog.report_page import report_page
+from ccp.catalog.report_html import render_report_html
 from ccp.catalog.transcripts import RawStore, read_lines, transcript_streams
 from ccp.index.agents import agent_id_of
 from ccp.storage import ObjectNotFoundError, StorageError
@@ -167,7 +167,7 @@ def _build_chat(
             _MARKDOWN,
         ),
         REPORT_FILE: (report_text.encode(), _MARKDOWN),
-        REPORT_HTML: (report_page(data.chat.get("title"), report_text).encode(), _HTML),
+        REPORT_HTML: (render_report_html(data, folder, len(agent_files), raw_main).encode(), _HTML),
         SUMMARY_FILE: (
             documents.to_json(documents.build_summary(data, folder), sort_keys=True),
             _JSON,
@@ -313,6 +313,13 @@ def catalog_all(connection: Any, store: CatalogStore) -> CatalogResult:
             result.removed_deleted += 1
     _write_index(connection, store, listing)
     return result
+
+
+def report_html_of_chat(connection: Any, store: CatalogStore | None, chat_id: str) -> str:
+    """The designed web page (``report.html``) of one chat, made now. Same arguments as
+    :func:`report_of_chat`."""
+    data, folder, agents, raw = _report_inputs(connection, store, chat_id)
+    return render_report_html(data, folder, agents, raw)
 
 
 def report_of_chat(connection: Any, store: CatalogStore | None, chat_id: str) -> str:
