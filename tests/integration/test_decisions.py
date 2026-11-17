@@ -201,6 +201,10 @@ def run(conn: Any, provider: FakeProvider, **options: bool) -> Any:
     return process_chat(conn, provider, SETTINGS, CHAT, **options)
 
 
+def run_chat(conn: Any, provider: FakeProvider, chat: str, **options: bool) -> Any:
+    return process_chat(conn, provider, SETTINGS, chat, **options)
+
+
 # ------------------------------------------------------------------ digest
 
 
@@ -823,8 +827,7 @@ def test_advice_is_stored_with_exact_words_and_takes_the_outcome_of_its_follower
     assert advice[3]["quotes"][0]["who"] == "claude" and advice[4] == "u-ask"
     assert plan[:3] == ("plan", None, "not followed")  # the developer rejected the plan
     assert code[:3] == ("code change", None, "done")
-    assert (code[5], code[4]) == ("u-ask", "u-ask") or code[5] == CHAT  # linked by the prompt
-    assert code[5] == CHAT and code[4] == "u-ask"
+    assert (code[5], code[6]) == ("u-ask", CHAT)  # linked to the advice by the prompt it answered
 
 
 def test_advice_of_another_chat_is_offered_and_its_outcome_follows_the_link(conn: Any) -> None:
@@ -852,10 +855,12 @@ def test_advice_of_another_chat_is_offered_and_its_outcome_follows_the_link(conn
     assert run(conn, FakeProvider(extract=answer)).outcome == "done"
     assert stored(conn, other)["Large upload design"][2] == "not followed"
     mine = stored(conn)["Other approach"]
-    assert (mine[5], mine[6]) == ("u-ask", other) or mine[6] == other
+    assert (mine[5], mine[6]) == ("u-ask", other)
 
     # The chat is written again without that link: the advice is waiting again.
-    plain = {"decisions": [{"title": "Other approach", "chosen": "thread", "evidence_lines": [edit]}]}
+    plain = {
+        "decisions": [{"title": "Other approach", "chosen": "thread", "evidence_lines": [edit]}]
+    }
     assert run(conn, FakeProvider(extract=plain), force=True).outcome == "done"
     assert stored(conn, other)["Large upload design"][2] == "waiting"
 

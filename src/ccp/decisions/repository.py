@@ -79,8 +79,8 @@ _LINK_SAME_CHAT = """
        AND a.decision_id <> f.decision_id
 """
 
-# The outcome of advice is what the newest decision that follows it says; without one, it is what
-# the decision itself said. Decisions rewritten earlier (no ``own_outcome``) are left alone.
+# The outcome of open advice (waiting or postponed) is what the newest decision that follows it
+# says; without one, it is what the advice itself said. Other decisions keep their own outcome.
 _RELINK = """
     WITH want AS (
         SELECT d.decision_id,
@@ -91,7 +91,8 @@ _RELINK = """
                             AND f.details ->> 'follows_how' IS NOT NULL
                           ORDER BY f.created_at DESC, f.decision_id DESC LIMIT 1),
                         d.details ->> 'own_outcome') AS outcome
-          FROM decision d WHERE d.details ? 'own_outcome'
+          FROM decision d
+         WHERE d.details ->> 'own_outcome' IN ('waiting', 'postponed')  -- only open advice
     )
     UPDATE decision d SET outcome = w.outcome
       FROM want w WHERE d.decision_id = w.decision_id AND d.outcome IS DISTINCT FROM w.outcome
