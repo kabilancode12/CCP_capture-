@@ -36,6 +36,18 @@ ACTOR_LABEL = {"human": "a person", "ai_edit": "Claude · edit tool", "ai_comman
                "subagent": "sub-agent", "ai_other": "Claude"}  # fmt: skip
 
 
+BLOCK_LIMIT = 30_000  # characters of one tool output, input or code block shown in the page
+RAW_ENTRIES_SHOWN = 200  # raw bookkeeping entries listed in section 11 of the page
+RAW_ENTRY_LIMIT = 6_000  # characters of one such entry shown in the page
+
+
+def cut(text: str, limit: int = BLOCK_LIMIT) -> str:
+    """Text for the page: all of it up to ``limit`` characters; beyond that, a note (report.md has it all)."""
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}\n... {len(text) - limit:,} more characters are in report.md"
+
+
 def esc(value: object) -> str:
     """HTML-escape any value (``None`` becomes an empty string)."""
     return "" if value is None else html.escape(str(value), quote=True)
@@ -49,6 +61,11 @@ _ITALIC = re.compile(r"(?<![*\w])\*([^*\n]+)\*(?![*\w])")
 _LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})\s*([\w+-]*)\s*$")
 _DETAILS = re.compile(r"^<details>(?:<summary>(.*)</summary>)?$")
+_HEADING = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
+_LIST_ITEM = re.compile(r"^\s*([-*]|\d+[.)])\s+")
+_TABLE_SEP = re.compile(r"^\s*\|?\s*:?-{3,}")
+_RULE = re.compile(r"^\s*(-{3,}|\*{3,})\s*$")
+_BLOCK_START = re.compile(r"^(#{1,6}\s|\s*([-*]|\d+[.)])\s+)")
 
 
 def inline(text: str) -> str:
@@ -90,7 +107,7 @@ def markdown(text: str) -> str:
                 body.append(lines[i])
                 i += 1
             i += 1
-            out.append(f'<pre class="code"><code>{esc(chr(10).join(body))}</code></pre>')
+            out.append(f'<pre class="code"><code>{esc(cut(chr(10).join(body)))}</code></pre>')
             continue
         details = _DETAILS.match(line.strip())
         if details:
@@ -102,7 +119,7 @@ def markdown(text: str) -> str:
             out.append("</details>")
             i += 1
             continue
-        heading = re.match(r"^(#{1,6})\s+(.*\S)\s*$", line)
+        heading = _HEADING.match(line)
         if heading:
             level = min(len(heading.group(1)) + 1, 6)
             out.append(f"<h{level}>{inline(heading.group(2))}</h{level}>")
@@ -115,11 +132,7 @@ def markdown(text: str) -> str:
                 i += 1
             out.append(f"<blockquote>{markdown(chr(10).join(quoted))}</blockquote>")
             continue
-        if (
-            line.lstrip().startswith("|")
-            and i + 1 < len(lines)
-            and re.match(r"^\s*\|?\s*:?-{3,}", lines[i + 1])
-        ):
+        if line.lstrip().startswith("|") and i + 1 < len(lines) and _TABLE_SEP.match(lines[i + 1]):
             head = _cells(line)
             i += 2
             rows = []
@@ -135,16 +148,16 @@ def markdown(text: str) -> str:
                 + f"</tr></thead><tbody>{table_body}</tbody></table></div>"
             )
             continue
-        if re.match(r"^\s*([-*]|\d+[.)])\s+", line):
-            ordered = bool(re.match(r"^\s*\d", line))
+        if _LIST_ITEM.match(line):
+            ordered = line.lstrip()[:1].isdigit()
             items = []
-            while i < len(lines) and re.match(r"^\s*([-*]|\d+[.)])\s+", lines[i]):
-                items.append(re.sub(r"^\s*([-*]|\d+[.)])\s+", "", lines[i]))
+            while i < len(lines) and _LIST_ITEM.match(lines[i]):
+                items.append(_LIST_ITEM.sub("", lines[i]))
                 i += 1
             tag = "ol" if ordered else "ul"
             out.append(f"<{tag}>" + "".join(f"<li>{inline(t)}</li>" for t in items) + f"</{tag}>")
             continue
-        if re.match(r"^\s*(-{3,}|\*{3,})\s*$", line):
+        if _RULE.match(line):
             out.append("<hr>")
             i += 1
             continue
@@ -162,7 +175,7 @@ def markdown(text: str) -> str:
 def _starts_block(line: str) -> bool:
     return bool(
         _FENCE.match(line) or line.startswith(">") or line.lstrip().startswith("|")
-        or re.match(r"^(#{1,6}\s|\s*([-*]|\d+[.)])\s+)", line) or _DETAILS.match(line.strip()) or line.strip() == "</details>"
+        or _BLOCK_START.match(line) or _DETAILS.match(line.strip()) or line.strip() == "</details>"
     )  # fmt: skip
 
 
@@ -504,7 +517,7 @@ def chosen_option(options: list[Any], chosen: object) -> int | None:
 
 def _input_html(tool_input: Any) -> str:
     if not isinstance(tool_input, dict):
-        return f'<pre class="code"><code>{esc(json.dumps(tool_input, indent=2, ensure_ascii=False, default=str))}</code></pre>'
+        return f'<pre class="code"><code>{esc(cut(json.dumps(tool_input, indent=2, ensure_ascii=False, default=str)))}</code></pre>'
     rows = []
     for key, value in tool_input.items():
         text = (
@@ -566,7 +579,7 @@ def step_html(step: Step) -> str:
     ):
         extra = f'<div class="plan"><span class="lab">Plan put to the developer for approval</span>{markdown(str(step.tool_input["plan"]))}</div>'
     output = (
-        f'<div class="kv"><span class="lab">Output</span><pre class="code out"><code>{esc(step.result)}</code></pre></div>'
+        f'<div class="kv"><span class="lab">Output</span><pre class="code out"><code>{esc(cut(step.result))}</code></pre></div>'
         if step.result
         else '<div class="kv"><em>no output recorded</em></div>'
     )
@@ -696,6 +709,37 @@ _SCRIPT = """
 """
 
 
+def _other_entries_html(raw_lines: list[Any] | None) -> str:
+    """Section 11 for the page: a count per entry type and the first entries (report.md lists them all)."""
+    if raw_lines is None:
+        return "<p><em>The raw transcript was not read for this export.</em></p>"
+    others = [
+        e for e in raw_lines if not (isinstance(e, dict) and e.get("type") in ("user", "assistant"))
+    ]
+    if not others:
+        return "<p><em>None recorded.</em></p>"
+    counts: dict[str, int] = {}
+    for entry in others:
+        kind = str(entry.get("type", "?")) if isinstance(entry, dict) else "unreadable"
+        counts[kind] = counts.get(kind, 0) + 1
+    rows = "".join(f"<tr><td>{esc(k)}</td><td>{v:,}</td></tr>" for k, v in sorted(counts.items()))
+    out = [
+        "<p>Claude Code also writes bookkeeping entries to the transcript: what it sent to the model, attachments, snapshots of files, titles, costs.</p>",
+        f'<div class="tablewrap"><table><thead><tr><th>Entry type</th><th>Count</th></tr></thead><tbody>{rows}</tbody></table></div>',
+    ]
+    for number, entry in enumerate(others[:RAW_ENTRIES_SHOWN], 1):
+        kind = entry.get("type", "?") if isinstance(entry, dict) else "unreadable"
+        text = json.dumps(entry, indent=2, ensure_ascii=False, default=str)
+        out.append(
+            f'<details><summary>{number}. {esc(kind)}</summary><pre class="code"><code>{esc(cut(text, RAW_ENTRY_LIMIT))}</code></pre></details>'
+        )
+    if len(others) > RAW_ENTRIES_SHOWN:
+        out.append(
+            f"<p><em>{len(others) - RAW_ENTRIES_SHOWN:,} more entries are listed in report.md.</em></p>"
+        )
+    return "".join(out)
+
+
 def _sections(md: str) -> list[tuple[str, str]]:
     """The numbered sections of the Markdown report: ``(title, body)``."""
     parts = re.split(r"(?m)^## (.+)$", md)
@@ -773,6 +817,8 @@ def render_report_html(
             inner = conversation
         elif name.startswith("4."):
             inner = overview + all_decisions
+        elif name.startswith("11."):
+            inner = _other_entries_html(raw_lines)
         elif name.startswith("1."):
             inner = markdown(section) + (
                 "<h3>Decisions at a glance</h3>" + overview if overview else ""

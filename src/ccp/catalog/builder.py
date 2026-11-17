@@ -167,7 +167,10 @@ def _build_chat(
             _MARKDOWN,
         ),
         REPORT_FILE: (report_text.encode(), _MARKDOWN),
-        REPORT_HTML: (render_report_html(data, folder, len(agent_files), raw_main, report_text).encode(), _HTML),
+        REPORT_HTML: (
+            render_report_html(data, folder, len(agent_files), raw_main, report_text).encode(),
+            _HTML,
+        ),
         SUMMARY_FILE: (
             documents.to_json(documents.build_summary(data, folder), sort_keys=True),
             _JSON,
