@@ -451,12 +451,33 @@ def decision_card(decision: dict[str, Any], turn_models: list[str], full: bool =
     return "".join(parts)
 
 
-_STOP_WORDS = frozenset("the and with for using use via from that this into over then than not but".split())
+_STOP_WORDS = frozenset(
+    [
+        "the",
+        "and",
+        "with",
+        "for",
+        "using",
+        "use",
+        "via",
+        "from",
+        "that",
+        "this",
+        "into",
+        "over",
+        "then",
+        "than",
+        "not",
+        "but",
+    ]
+)
 _REJECTING = r"(?:replace[sd]?|replacing|instead of|rather than|without|drop(?:ped)?|remov(?:e|es|ed)|not|no)"
 
 
 def _words(text: str) -> set[str]:
-    return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 2 and w not in _STOP_WORDS}
+    return {
+        w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 2 and w not in _STOP_WORDS
+    }
 
 
 def chosen_option(options: list[Any], chosen: object) -> int | None:

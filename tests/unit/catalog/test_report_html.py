@@ -99,3 +99,17 @@ def test_markdown_renders_headings_lists_tables_code_and_stays_safe() -> None:
     assert "<table>" in html and "<code>x</code>" in html
     assert "&lt;b&gt;raw&lt;/b&gt;" in html and "<b>raw</b>" not in html
     assert 'href="javascript:' not in markdown("[x](javascript:alert(1))")
+
+
+def test_the_chosen_option_is_the_one_the_decision_names_not_one_it_only_rejects() -> None:
+    from ccp.catalog.report_html import chosen_option
+
+    options = [
+        "CsvHelper: robust but API mismatch in v34",
+        "hand-written RFC 4180 parser: no dependency, own maintenance",
+    ]
+    chosen = "Replace CsvHelper with a small custom streaming RFC 4180 parser using a StreamReader buffer."
+    assert chosen_option(options, chosen) == 1
+    assert chosen_option(options, "Keep CsvHelper as the parser") == 0
+    assert chosen_option(options, "Something unrelated entirely") is None
+    assert chosen_option([], "anything") is None
