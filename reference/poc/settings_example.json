@@ -1,0 +1,43 @@
+{
+  "env": {
+    "CAPTURE_REMOTE_BASE": "git@gitlab.example.com:claude-capture"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude-capture/bin/capture.sh\" session-start",
+            "timeout": 30,
+            "statusMessage": "Claude capture: recording session marker"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude-capture/bin/capture.sh\" snapshot",
+            "timeout": 30,
+            "statusMessage": "Claude capture: snapshot"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude-capture/bin/capture.sh\" session-end",
+            "timeout": 30,
+            "statusMessage": "Claude capture: final snapshot"
+          }
+        ]
+      }
+    ]
+  }
+}
