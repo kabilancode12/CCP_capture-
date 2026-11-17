@@ -367,3 +367,28 @@ def test_no_password_appears_in_an_error_message() -> None:
 
     assert "admin-password-1" not in str(caught.value)
     assert json.dumps(str(caught.value)).count("admin-password-1") == 0
+
+
+def test_a_card_is_created_even_when_metabases_id_counter_is_behind() -> None:
+    clash = '{"message": "Unique index or primary key violation: PRIMARY KEY ON PUBLIC.REPORT_CARD(ID)"}'
+    answers = iter([(500, clash), (500, clash), (200, {"id": 77})])
+    calls: list[tuple[str, str]] = []
+
+    def transport(method: str, url: str, body: object, session: str | None) -> tuple[int, object]:
+        calls.append((method, url))
+        return next(answers)
+
+    assert MetabaseClient("http://mb", transport).create("/api/card", {"name": "x"}) == {"id": 77}
+    assert len(calls) == 3
+
+
+def test_other_errors_are_not_retried() -> None:
+    calls: list[str] = []
+
+    def transport(method: str, url: str, body: object, session: str | None) -> tuple[int, object]:
+        calls.append(url)
+        return 400, "bad card"
+
+    with pytest.raises(MetabaseError):
+        MetabaseClient("http://mb", transport).create("/api/card", {})
+    assert len(calls) == 1

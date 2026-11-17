@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ccp.redaction.checksums import is_valid_verhoeff
 
@@ -121,6 +121,48 @@ SECRET_RULES: tuple[Rule, ...] = (
     ),
 )
 
+# ---------------------------------------------------------------- source code in snapshots
+
+# The generic rule above is deliberately greedy, which is right for a transcript (hiding too much is
+# safe). For *source code* it would flag ``token = args.token``, ``ENV_TOKEN = "CCP_INGEST_TOKEN"``
+# or a documented placeholder, and a snapshot would then silently keep the old version of the file.
+# The snapshot scan therefore applies the same rule with one more check: a value that is plainly
+# not a secret (a code reference, a constant's name, a placeholder, a short plain word) is ignored.
+_PLACEHOLDER = re.compile(
+    r"change-?me|replace|placeholder|example|invented|dummy|fake|sample|redacted|your[-_]|xxx|\*\*\*|"
+    r"[<>{}$]|%s|not-a-|todo|secret-for|for-tests?|test-",
+    re.IGNORECASE,
+)
+_CODE_REFERENCE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+(?:\(\))?")
+_CONSTANT_NAME = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")
+_PLAIN_WORD = re.compile(r"[A-Za-z]{1,15}")
+_LITERAL_WORD = re.compile(r"(?:true|false|none|null)(?:/(?:true|false|none|null))*", re.IGNORECASE)
+_LOWER_NAME = re.compile(r"[a-z_]+")  # a variable name such as password_hash
+_PLACEHOLDER_PASSWORD = re.compile(
+    r"(?:token|password|passwd|pass|pwd|secret|user|xxx+|\*+|\.\.\.)", re.IGNORECASE
+)
+
+
+def looks_like_a_real_secret(value: str) -> bool:
+    """False for a value that is plainly not a secret: used by the snapshot scan of source code."""
+    return not (
+        _PLACEHOLDER.search(value)
+        or "(" in value  # a call, not a literal
+        or ")" in value
+        or value.startswith("/")  # a path
+        or _CODE_REFERENCE.fullmatch(value)
+        or _CONSTANT_NAME.fullmatch(value)
+        or _PLAIN_WORD.fullmatch(value)
+        or _LITERAL_WORD.fullmatch(value)
+        or _LOWER_NAME.fullmatch(value)
+    )
+
+
+def _not_a_placeholder_password(value: str) -> bool:
+    """False for the password part of a documented address such as ``https://user:token@host``."""
+    return not _PLACEHOLDER_PASSWORD.fullmatch(value)
+
+
 # ---------------------------------------------------------------- personal data (India)
 
 PERSONAL_DATA_RULES: tuple[Rule, ...] = (
@@ -150,3 +192,17 @@ PERSONAL_DATA_RULES: tuple[Rule, ...] = (
 
 # Order matters: specific secret formats first, then generic assignments, then personal data.
 DEFAULT_RULES: tuple[Rule, ...] = SECRET_RULES + PERSONAL_DATA_RULES
+
+_SNAPSHOT_VALIDATORS: dict[str, Callable[[str], bool]] = {
+    "secret-assignment": looks_like_a_real_secret,
+    "url-password": _not_a_placeholder_password,
+}
+
+# The secret rules for source code (code snapshots): every rule as it is, except the generic
+# assignment rule and the address-with-password rule, which also check the value could be a secret.
+SNAPSHOT_SECRET_RULES: tuple[Rule, ...] = tuple(
+    replace(rule, validator=_SNAPSHOT_VALIDATORS[rule.rule_id])
+    if rule.rule_id in _SNAPSHOT_VALIDATORS
+    else rule
+    for rule in SECRET_RULES
+)
