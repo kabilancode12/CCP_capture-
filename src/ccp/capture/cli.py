@@ -173,8 +173,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_install_command(args)
     try:
         settings = load_client_settings(
-            effective_env(args.settings_path or default_settings_path(), os.environ)
-            if args.command == "backfill"
+            effective_env(getattr(args, "settings_path", None) or default_settings_path(), os.environ)
+            if args.command in ("backfill", "watch")
             else None
         )
     except SettingsError as error:
