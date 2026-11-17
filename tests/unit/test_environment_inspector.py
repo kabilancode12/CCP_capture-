@@ -68,3 +68,12 @@ def test_missing_config_file_is_reported(tmp_path: Path) -> None:
     result = read_account_fields(tmp_path, {})
     assert result["config_file_exists"] is False
     assert result["oauth_account_fields"] is None
+
+
+def test_the_desktop_app_sdk_and_unknown_entrypoints_are_named_not_guessed() -> None:
+    from ccp.verify.environment_inspector import detect_surface
+
+    assert detect_surface({"CLAUDE_CODE_ENTRYPOINT": "claude-desktop"})["value"] == "desktop"
+    assert detect_surface({"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"})["value"] == "sdk"
+    assert detect_surface({"CLAUDE_CODE_ENTRYPOINT": "something-new"})["value"] == "something-new"
+    assert detect_surface({})["value"] == "terminal"

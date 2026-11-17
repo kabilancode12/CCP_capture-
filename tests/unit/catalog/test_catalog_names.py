@@ -61,9 +61,9 @@ def test_chat_id8_is_found_at_the_end_of_the_folder_name() -> None:
 
 
 def test_folder_pattern_splits_a_key() -> None:
-    key = "catalog/accounts/a__1/projects/p/chats/2026-07-02__t__895d43d3/transcript/main.json"
+    key = "catalog/accounts/a__1/projects/p/sessions/2026-07-02__t__895d43d3/transcript/main.json"
     match = CHAT_FOLDER_PATTERN.match(key)
     assert match is not None
-    assert match.group(1).endswith("chats/2026-07-02__t__895d43d3")
+    assert match.group(1).endswith("sessions/2026-07-02__t__895d43d3")
     assert match.group("rest") == "transcript/main.json"
     assert CHAT_FOLDER_PATTERN.match("catalog/index.json") is None

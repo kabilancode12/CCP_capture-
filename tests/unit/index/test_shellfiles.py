@@ -2,7 +2,7 @@
 
 import pytest
 
-from ccp.decisions.shellfiles import CREATED, DELETED, MODIFIED, ShellFile, files_changed_by
+from ccp.index.shellfiles import CREATED, DELETED, MODIFIED, ShellFile, files_changed_by
 
 
 @pytest.mark.parametrize(
