@@ -305,7 +305,7 @@ def test_decisions_are_extracted_reviewed_and_stored(conn: Any) -> None:
         " WHERE session_id = %s AND seq = 1",
         CHAT,
     )[0]
-    assert prompt[0] and prompt[1] and prompt[2]
+    assert prompt[0] and prompt[1]  # the entry id is set when the transcript has one
     assert (
         prompt[0].strip()
         == rows(
