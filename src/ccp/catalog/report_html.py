@@ -375,7 +375,12 @@ def decider(decision: dict[str, Any], turn_models: list[str]) -> str:
     who = decision.get("decided_by")
     if who == "developer":
         return chip("the developer decided", "human")
-    model = ", ".join(turn_models) or "model not recorded"
+    used = [
+        f"{m.get('model')} · {m.get('effort')}" if m.get("effort") else str(m.get("model"))
+        for m in decision.get("models_used") or []
+        if isinstance(m, dict)
+    ]
+    model = ", ".join(used or turn_models) or "model not recorded"
     return (
         chip(f"Claude decided · {model}", "ai")
         if who == "claude"

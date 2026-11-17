@@ -195,6 +195,7 @@ def build_decisions(data: ChatData) -> list[dict[str, Any]]:
                 for q in _detail(d, "quotes", [])
                 if isinstance(q, dict)
             ],
+            "models_used": _detail(d, "models_used", []),
             "chosen": d["chosen"],
             "reason": d["reason"],
             "result": d["result"],

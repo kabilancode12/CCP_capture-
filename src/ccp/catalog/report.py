@@ -356,6 +356,9 @@ def _decisions(data: ChatData) -> list[str]:
             ("Prompt time", (d.get("prompt") or {}).get("at")),
             ("Prompt entry", (d.get("prompt") or {}).get("entry")),
             ("Kind", d["kind"]), ("Raised by", d["raised_by"]), ("Outcome", d["outcome"]),
+            ("Models that did the work (model, effort level, responses)",
+             [f"{m.get('model')} ({m.get('effort') or 'effort not recorded'}, "
+              f"{m.get('responses')} responses)" for m in d["models_used"]]),
             ("Short answer", d["short_answer"]), ("Waiting for", d["waiting_for"]),
             ("Follows earlier advice", d["follows"]), ("How it follows", d["follows_how"]),
             ("Followed later by", d["followed_by"]),

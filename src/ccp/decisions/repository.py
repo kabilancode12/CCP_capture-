@@ -97,6 +97,29 @@ _RELINK = """
     UPDATE decision d SET outcome = w.outcome
       FROM want w WHERE d.decision_id = w.decision_id AND d.outcome IS DISTINCT FROM w.outcome
 """
+# The models that did the work of each decision, with their effort level: every response between the
+# developer's prompt and the last evidence line of the decision (all models, not only the first).
+_SET_MODELS = """
+    UPDATE decision d SET details = d.details || jsonb_build_object('models_used', COALESCE((
+        SELECT jsonb_agg(jsonb_build_object('model', m.model, 'effort', m.effort,
+                                            'responses', m.n) ORDER BY m.model, m.effort)
+          FROM (
+            SELECT u.model, u.effort, count(*) AS n
+              FROM model_usage u JOIN event e ON e.event_id = u.event_id
+             WHERE e.session_id = d.session_id AND NOT e.is_abandoned
+               AND split_part(e.raw_object_key, '/', 3) = 'main'
+               AND u.model IS NOT NULL AND u.model <> '<synthetic>'
+               AND (e.raw_object_key, e.raw_line_number) >=
+                   (SELECT p.raw_object_key, p.raw_line_number FROM event p
+                     WHERE p.session_id = d.session_id AND p.entry_uuid = d.prompt_uuid
+                     ORDER BY p.event_id LIMIT 1)
+               AND (e.raw_object_key, e.raw_line_number) <=
+                   (SELECT x ->> 'key', (x ->> 'line')::int
+                      FROM jsonb_array_elements(d.evidence_lines) x
+                     ORDER BY x ->> 'key' DESC, (x ->> 'line')::int DESC LIMIT 1)
+             GROUP BY u.model, u.effort) m), '[]'::jsonb))
+     WHERE d.session_id = %s
+"""
 _SET_VERSION = "UPDATE session SET decisions_checked_version = %s WHERE session_id = %s"
 _DELETE_AI_CORRECTIONS = """
     DELETE FROM correction
@@ -377,6 +400,7 @@ def save_decisions(
         for event_id, note in developer_corrections:
             cursor.execute(_INSERT_CORRECTION, (session_id, event_id, event_id, note))
         cursor.execute(_SET_PROMPTS, (session_id, True))  # the prompt each decision answers
+        cursor.execute(_SET_MODELS, (session_id,))
         cursor.execute(_LINK_SAME_CHAT, (session_id,))
         cursor.execute(_RELINK)  # advice takes the outcome its follower reports
         cursor.execute(_SET_VERSION, (PROMPT_VERSION, session_id))
