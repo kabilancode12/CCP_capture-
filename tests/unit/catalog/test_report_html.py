@@ -1,5 +1,7 @@
 """The designed web page: thinking, options and decisions per conversation; safe and self-contained."""
 
+from test_catalog_report import KEY, T0, _data, _event
+
 from ccp.catalog.loader import ChatData
 from ccp.catalog.report_html import (
     THEMES,
@@ -8,8 +10,6 @@ from ccp.catalog.report_html import (
     markdown,
     render_report_html,
 )
-
-from .test_catalog_report import KEY, T0, _data, _event
 
 
 def _turn_data() -> ChatData:
