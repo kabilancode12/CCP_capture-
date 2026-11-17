@@ -352,6 +352,9 @@ def _decisions(data: ChatData) -> list[str]:
         r = d["review"]
         out += [f"### Decision {d['number']} — {d['title']}", ""]
         out += facts([
+            ("Prompt that led to it", (d.get("prompt") or {}).get("text")),
+            ("Prompt time", (d.get("prompt") or {}).get("at")),
+            ("Prompt entry", (d.get("prompt") or {}).get("entry")),
             ("Goal", d["goal"]), ("Chosen", d["chosen"]), ("Reason", d["reason"]),
             ("Result", d["result"]), ("Tests", d["tests"]), ("Decided by", d["decided_by"]),
             ("Written by (model)", d["written_by"]), ("Status", r["status"]),
