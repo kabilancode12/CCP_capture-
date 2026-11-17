@@ -718,7 +718,9 @@ def _budget(section: str, limit: int = SECTION_LIMIT) -> str:
         return section
     head = section[:limit].rsplit("\n", 1)[0]
     lines = head.split("\n")
-    open_blocks = sum(1 for x in lines if x.startswith("<details>")) - sum(1 for x in lines if x.strip() == "</details>")
+    open_blocks = sum(1 for x in lines if x.startswith("<details>")) - sum(
+        1 for x in lines if x.strip() == "</details>"
+    )
     closers = "\n".join(["</details>"] * max(open_blocks, 0))
     return f"{head}\n{closers}\n\n*{len(section) - len(head):,} more characters of this section are in report.md.*\n"
 
@@ -834,7 +836,7 @@ def render_report_html(
         elif name.startswith("11."):
             inner = _other_entries_html(raw_lines)
         elif name.startswith("1."):
-            inner = markdown(section) + (
+            inner = markdown(_budget(section)) + (
                 "<h3>Decisions at a glance</h3>" + overview if overview else ""
             )
         else:

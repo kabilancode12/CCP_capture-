@@ -169,7 +169,7 @@ def _build_chat(
         ),
         REPORT_FILE: (report_text.encode(), _MARKDOWN),
         REPORT_HTML: (
-            render_report_html(data, folder, len(agent_files), raw_main, report_text).encode(),
+            report_html.encode(),
             _HTML,
         ),
         SUMMARY_FILE: (
