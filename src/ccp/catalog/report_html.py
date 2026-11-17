@@ -37,6 +37,7 @@ ACTOR_LABEL = {"human": "a person", "ai_edit": "Claude · edit tool", "ai_comman
 
 
 BLOCK_LIMIT = 30_000  # characters of one tool output, input or code block shown in the page
+INLINE_LIMIT = 4_000  # longer paragraphs are not formatted (the patterns can backtrack on them)
 RAW_ENTRIES_SHOWN = 200  # raw bookkeeping entries listed in section 11 of the page
 RAW_ENTRY_LIMIT = 6_000  # characters of one such entry shown in the page
 
@@ -70,6 +71,8 @@ _BLOCK_START = re.compile(r"^(#{1,6}\s|\s*([-*]|\d+[.)])\s+)")
 
 def inline(text: str) -> str:
     """Inline Markdown (code, bold, italic, http links) on text that is escaped first."""
+    if len(text) > INLINE_LIMIT:  # a huge paragraph (pasted text): escaped as it is, no formatting
+        return esc(text)
     out = esc(text)
     codes: list[str] = []
 
