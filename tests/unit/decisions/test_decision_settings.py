@@ -12,7 +12,7 @@ def test_defaults() -> None:
     settings = load_decision_settings({}, env_file=None)
     assert settings.model == DEFAULT_MODEL == "claude-opus-5-5"
     assert settings.timeout_seconds == 600
-    assert settings.max_chars == DEFAULT_MAX_CHARS == 80_000
+    assert settings.max_chars == DEFAULT_MAX_CHARS == 200_000
 
 
 def test_values_are_read_from_the_environment() -> None:

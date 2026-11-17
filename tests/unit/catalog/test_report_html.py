@@ -136,3 +136,19 @@ def test_a_line_that_looks_like_a_table_row_but_is_not_one_does_not_hang_the_ren
     html = markdown(text)
     assert "just a pipe, no separator row" in html and "another" in html
     assert "<blockquote>" in html and "<li>item</li>" in html
+
+
+def test_a_decision_without_code_shows_its_short_answer_conditions_and_links() -> None:
+    page = render_report_html(_turn_data(), "catalog/x", 0, [])
+    assert "Short answer" in page and "Works, but not recommended at that size" in page
+    assert "When to use which" in page and "under 50 MB -&gt; current endpoint" in page
+    assert "Not chosen, and why" in page and "proxy limits" in page
+    assert "Claude is waiting for" in page and "where the files come from" in page
+    assert "Follows earlier advice:" in page and "Earlier advice" in page
+    assert "Exact words" in page and "not a good design" in page
+    assert 'class="chip kind"' in page and 'class="chip out-followed"' in page
+
+
+def test_every_model_that_worked_on_a_decision_is_shown_with_its_effort_level() -> None:
+    page = render_report_html(_turn_data(), "catalog/x", 0, [])
+    assert "claude-opus-5-5 · high" in page and "claude-sonnet-5-5" in page

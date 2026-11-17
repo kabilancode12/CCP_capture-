@@ -13,7 +13,10 @@ from typing import Any
 from ccp.approaches.lineage import same_file
 from ccp.audit.gitlog import _git
 
-TEXT_COLUMNS = "d.title, d.goal, d.chosen, d.reason, d.result, d.options::text, d.files::text"
+TEXT_COLUMNS = (
+    "d.title, d.goal, d.chosen, d.reason, d.result, d.options::text, d.files::text, "
+    "d.kind, d.outcome, d.details::text"
+)
 _COLUMNS = """
     d.decision_id, d.session_id, d.seq, d.title, d.goal, d.options, d.chosen, d.reason, d.result,
     d.tests_summary, d.decided_by, d.model, d.status, d.lifecycle, d.code_sha, d.removed_in_sha,

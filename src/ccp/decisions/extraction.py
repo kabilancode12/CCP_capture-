@@ -21,8 +21,17 @@ MAX_EVIDENCE = 20
 MAX_REVIEW_NOTE = 300
 MAX_FILES = 60
 MAX_THINKING = 5
+MAX_QUOTES = 6
+MAX_QUOTE = 400
+MIN_QUOTE = 12
 
 DECIDED_BY = ("developer", "claude")
+KINDS = ("code change", "advice", "bug cause", "plan")
+RAISED_BY = ("developer asked", "claude suggested", "claude disagreed")
+# What a decision without code can be: still waiting for the developer, postponed, or settled.
+OWN_OUTCOMES = ("waiting", "postponed", "done")
+# What a later decision says about earlier advice.
+FOLLOW_HOW = ("followed", "not followed", "changed later")
 
 _SHA = re.compile(r"[0-9a-f]{7,40}")
 
@@ -50,6 +59,17 @@ class ExtractedDecision:
     decided_by: str | None = None  # developer | claude
     files: list[FileRef] = field(default_factory=list)  # read from the recorded data
     thinking: list[LineRef] = field(default_factory=list)  # Claude's thinking notes, as recorded
+    kind: str = "code change"
+    raised_by: str | None = None
+    outcome: str = "done"  # waiting | postponed | done (code adds followed / not followed ...)
+    short_answer: str = ""
+    use_when: list[str] = field(default_factory=list)
+    not_chosen: list[dict[str, str]] = field(default_factory=list)  # [{"option", "why"}]
+    waiting_for: str = ""
+    quotes: list[dict[str, Any]] = field(default_factory=list)  # exact words, checked
+    follows_decision: int | None = None  # 1-based number of an earlier decision of this answer
+    follows_open: int | None = None  # number in the OPEN ADVICE list
+    follows_how: str | None = None  # followed | not followed | changed later
 
     def as_prompt_dict(self) -> dict[str, Any]:
         """The decision as the reviewer sees it."""
@@ -68,6 +88,17 @@ class ExtractedDecision:
             "thinking_notes": [ref.note for ref in self.thinking],
             "commit_shas": self.commit_shas,
             "evidence_lines": self.evidence,
+            "kind": self.kind,
+            "raised_by": self.raised_by,
+            "outcome": self.outcome,
+            "short_answer": self.short_answer,
+            "use_when": self.use_when,
+            "not_chosen": self.not_chosen,
+            "waiting_for": self.waiting_for,
+            "quotes": [{"line": q["digest_line"], "text": q["text"]} for q in self.quotes],
+            "follows_decision": self.follows_decision,
+            "follows_open_advice": self.follows_open,
+            "follows_how": self.follows_how,
         }
 
 
@@ -181,11 +212,14 @@ def _decision(
     if not isinstance(item, dict):
         return None
     title = _text(item.get("title"), MAX_TITLE)
-    chosen = _text(item.get("chosen"), MAX_TEXT)
+    chosen = _text(item.get("chosen"), MAX_TEXT) or _text(item.get("short_answer"), MAX_TEXT)
     if not title or not chosen:
         return None
     evidence = [n for n in _ints(item.get("evidence_lines")) if n in refs]
     evidence = list(dict.fromkeys(evidence))[:MAX_EVIDENCE]
+    follows_how = _choice(item.get("follows_how"), FOLLOW_HOW)
+    follows_decision = item.get("follows_decision")
+    follows_open = item.get("follows_open_advice")
     return ExtractedDecision(
         title=title,
         goal=_text(item.get("goal"), MAX_TEXT) or "",
@@ -199,7 +233,70 @@ def _decision(
         decided_by=_decided_by(item.get("decided_by")),
         files=_files(item.get("file_lines"), refs),
         thinking=_thinking(item.get("thinking_lines"), refs),
+        kind=_choice(item.get("kind"), KINDS) or "code change",
+        raised_by=_choice(item.get("raised_by"), RAISED_BY),
+        outcome=_choice(item.get("outcome"), OWN_OUTCOMES) or "done",
+        short_answer=_text(item.get("short_answer"), MAX_TEXT) or "",
+        use_when=_strings(item.get("use_when"), MAX_OPTIONS),
+        not_chosen=_not_chosen(item.get("not_chosen")),
+        waiting_for=_text(item.get("waiting_for"), MAX_TEXT) or "",
+        quotes=_quotes(item.get("quotes"), refs),
+        follows_decision=follows_decision if _is_int(follows_decision) else None,
+        follows_open=follows_open if _is_int(follows_open) else None,
+        follows_how=follows_how,
     )
+
+
+def _choice(value: Any, allowed: tuple[str, ...]) -> str | None:
+    """The value when it is one of the allowed words (case and spaces are not important)."""
+    text = " ".join(value.lower().split()) if isinstance(value, str) else ""
+    return text if text in allowed else None
+
+
+def _not_chosen(value: Any) -> list[dict[str, str]]:
+    """The options that were not chosen, each with the reason: ``[{"option", "why"}]``."""
+    found: list[dict[str, str]] = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict):
+            continue
+        option, why = _text(item.get("option"), MAX_NOTE), _text(item.get("why"), MAX_NOTE)
+        if option:
+            found.append({"option": option, "why": why or "not stated"})
+    return found[:MAX_OPTIONS]
+
+
+def _squash(text: str) -> str:
+    """White space made single, to compare a quote with the recorded text."""
+    return " ".join(text.split())
+
+
+def _quotes(value: Any, refs: dict[int, LineRef]) -> list[dict[str, Any]]:
+    """Exact words: kept only when they really stand in the cited prompt or reply.
+
+    The model cites a digest line and the words; the words are checked against the recorded text of
+    that line, and what is kept is the recorded text, so a paraphrase or an invention is dropped.
+    """
+    found: list[dict[str, Any]] = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict):
+            continue
+        number, words = item.get("line"), _text(item.get("text"), MAX_QUOTE)
+        ref = refs.get(number) if _is_int(number) else None
+        if ref is None or words is None or ref.kind not in ("prompt", "reply"):
+            continue
+        words = _squash(words)
+        if len(words) < MIN_QUOTE or words not in _squash(ref.text):
+            continue  # what is kept is a piece of the recorded text, letter for letter
+        entry = {
+            "digest_line": number,
+            "key": ref.raw_object_key,
+            "line": ref.raw_line_number,
+            "who": "developer" if ref.kind == "prompt" else "claude",
+            "text": words,
+        }
+        if all(entry["text"] != known["text"] for known in found):
+            found.append(entry)
+    return found[:MAX_QUOTES]
 
 
 def _decided_by(value: Any) -> str | None:

@@ -149,6 +149,13 @@ def build_sessions(data: ChatData) -> list[Row]:
     return data.sessions
 
 
+def _detail(decision: Row, key: str, default: Any = None) -> Any:
+    """One value of a decision's ``details`` (short answer, use when, quotes ...)."""
+    details = decision.get("details")
+    value = details.get(key) if isinstance(details, dict) else None
+    return default if value in (None, "") else value
+
+
 def build_decisions(data: ChatData) -> list[dict[str, Any]]:
     """``03_decisions.json``: one clear record per decision, in the order they were made.
 
@@ -167,7 +174,28 @@ def build_decisions(data: ChatData) -> list[dict[str, Any]]:
                 "at": d.get("prompt_at"),
                 "entry": d.get("prompt_uuid"),
             },
+            "kind": d.get("kind") or "code change",
+            "raised_by": d.get("raised_by"),
+            "outcome": d.get("outcome") or "done",
+            "short_answer": _detail(d, "short_answer"),
             "options": d["options"] or [],
+            "not_chosen": _detail(d, "not_chosen", []),
+            "use_when": _detail(d, "use_when", []),
+            "waiting_for": _detail(d, "waiting_for"),
+            "follows": d.get("follows"),
+            "follows_how": _detail(d, "follows_how"),
+            "followed_by": d.get("followed_by"),
+            "exact_words": [
+                {
+                    "who": q.get("who"),
+                    "text": q.get("text"),
+                    "transcript_file": q.get("key"),
+                    "line": q.get("line"),
+                }
+                for q in _detail(d, "quotes", [])
+                if isinstance(q, dict)
+            ],
+            "models_used": _detail(d, "models_used", []),
             "chosen": d["chosen"],
             "reason": d["reason"],
             "result": d["result"],

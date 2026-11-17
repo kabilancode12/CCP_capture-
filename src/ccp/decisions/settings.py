@@ -3,7 +3,7 @@
 * ``CCP_DECISION_MODEL`` (claude-opus-5-5): the model that writes the decisions.
 * ``CCP_REVIEW_MODEL`` (claude-sonnet-5-5): a different model that reviews them.
 * ``CCP_DECISION_TIMEOUT_SECONDS`` (600): the longest wait for one model call.
-* ``CCP_DECISION_MAX_CHARS`` (80000): the largest digest of a chat sent to the model.
+* ``CCP_DECISION_MAX_CHARS`` (200000): the largest digest of a chat (sent in parts of 30000).
 """
 
 from __future__ import annotations
@@ -19,7 +19,9 @@ DEFAULT_MODEL = "claude-opus-5-5"
 # The reviewer is another model than the writer: it checks the work with different blind spots.
 DEFAULT_REVIEW_MODEL = "claude-sonnet-5-5"
 DEFAULT_TIMEOUT_SECONDS = 600
-DEFAULT_MAX_CHARS = 80_000
+DEFAULT_MAX_CHARS = 200_000
+# A digest longer than this is sent in parts, so that every part of a long chat is read in full.
+WINDOW_CHARS = 30_000
 
 # (variable, default, smallest, largest) of the whole-number settings.
 _TIMEOUT = ("CCP_DECISION_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS, 10, 86_400)

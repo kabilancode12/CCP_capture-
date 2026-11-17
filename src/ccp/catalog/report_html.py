@@ -375,12 +375,75 @@ def decider(decision: dict[str, Any], turn_models: list[str]) -> str:
     who = decision.get("decided_by")
     if who == "developer":
         return chip("the developer decided", "human")
-    model = ", ".join(turn_models) or "model not recorded"
+    used = [
+        f"{m.get('model')} · {m.get('effort')}" if m.get("effort") else str(m.get("model"))
+        for m in decision.get("models_used") or []
+        if isinstance(m, dict)
+    ]
+    model = ", ".join(used or turn_models) or "model not recorded"
     return (
         chip(f"Claude decided · {model}", "ai")
         if who == "claude"
         else chip(f"decided by {who or 'not stated'}", "other")
     )
+
+
+def _link_text(label: str, link: object, how: object = None) -> str:
+    """``label``: the decision of another (or the same) chat that this one is linked to."""
+    if not isinstance(link, dict):
+        return ""
+    by = f" ({esc(how)})" if how else ""
+    return (
+        f'<p class="link"><span class="lab">{esc(label)}</span> decision {esc(link.get("decision"))}'
+        f" “{esc(link.get('title'))}” · chat {esc(str(link.get('chat'))[:8])}{by}</p>"
+    )
+
+
+def advice_html(decision: dict[str, Any]) -> str:
+    """The facts of advice: the short answer, when each option fits, what was not chosen and why.
+
+    Also what Claude waits for, the exact words and the links to other decisions.
+    """
+    parts: list[str] = []
+    if decision.get("short_answer"):
+        parts.append(
+            f'<div class="short"><span class="lab">Short answer</span>{inline(str(decision["short_answer"]))}</div>'
+        )
+    if decision.get("use_when"):
+        items = "".join(f"<li>{inline(str(u))}</li>" for u in decision["use_when"])
+        parts.append(
+            f'<div class="usewhen"><span class="lab">When to use which</span><ul>{items}</ul></div>'
+        )
+    if decision.get("not_chosen"):
+        items = "".join(
+            f"<li><strong>{inline(str(n.get('option')))}</strong> — {inline(str(n.get('why')))}</li>"
+            for n in decision["not_chosen"]
+        )
+        parts.append(
+            f'<div class="notchosen"><span class="lab">Not chosen, and why</span><ul>{items}</ul></div>'
+        )
+    if decision.get("waiting_for"):
+        parts.append(
+            f'<div class="waiting"><span class="lab">Claude is waiting for</span>{inline(str(decision["waiting_for"]))}</div>'
+        )
+    parts.append(
+        _link_text("Follows earlier advice:", decision.get("follows"), decision.get("follows_how"))
+    )
+    followed = decision.get("followed_by")
+    if isinstance(followed, dict):
+        parts.append(_link_text("Then:", followed, followed.get("how")))
+    for words in decision.get("exact_words") or []:
+        parts.append(
+            f'<blockquote class="exact"><span class="lab">Exact words · {esc(words.get("who"))}</span>{esc(words.get("text"))}'
+            f"<small>{esc(words.get('transcript_file'))} line {esc(words.get('line'))}</small></blockquote>"
+        )
+    return "".join(parts)
+
+
+def outcome_chip(outcome: object) -> str:
+    """The outcome of a decision as a coloured label (waiting, done, followed ...)."""
+    text = str(outcome or "done")
+    return chip(text, "out-" + text.replace(" ", "-"))
 
 
 def decision_card(decision: dict[str, Any], turn_models: list[str], full: bool = False) -> str:
@@ -395,6 +458,7 @@ def decision_card(decision: dict[str, Any], turn_models: list[str], full: bool =
     parts = [
         f'<div class="decision" id="decision-{esc(decision.get("number"))}">',
         f'<div class="dhead"><span class="dtag">Decision {esc(decision.get("number"))}</span><strong>{esc(decision.get("title"))}</strong>'
+        f"{chip(decision.get('kind') or 'code change', 'kind')}{outcome_chip(decision.get('outcome'))}"
         f"{decider(decision, turn_models)}{chip(review.get('status'), str(review.get('status')))}</div>",
         (
             f'<div class="dprompt"><span class="lab">The developer asked · {esc(fmt_time((decision.get("prompt") or {}).get("at")))}</span>'
@@ -403,6 +467,7 @@ def decision_card(decision: dict[str, Any], turn_models: list[str], full: bool =
             else ""
         ),
         f'<p class="goal"><span>Goal</span>{inline(str(decision.get("goal") or "not stated"))}</p>',
+        advice_html(decision),
     ]
     if options:
         parts.append(
@@ -697,6 +762,9 @@ details{border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:
 .decision{margin-top:14px;border:2px solid var(--brand);border-radius:14px;padding:12px 18px 14px;background:var(--card)}.dhead{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px}.dtag{background:var(--brand);color:#fff;border-radius:6px;padding:1px 8px;font-size:12px;font-weight:700}
 .options ul,.optlist{list-style:none;padding:0;margin:4px 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px}.opt{border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:rgba(127,127,127,.04)}.opt span{display:block;color:var(--muted);font-size:13px}
 .opt.chosen{border:2px solid var(--ok);background:rgba(22,163,74,.08)}.opt.chosen::before{content:"chosen  ";color:var(--ok);font-weight:700;font-size:11px;text-transform:uppercase}
+.chip.kind{background:#6d28d9}.chip.out-waiting,.chip.out-postponed{background:var(--warn)}.chip.out-done,.chip.out-followed{background:var(--ok)}.chip.out-not-followed{background:var(--bad)}.chip.out-changed-later{background:#0891b2}
+.short{margin:8px 0;padding:8px 14px;border-left:5px solid var(--ai);background:var(--soft);border-radius:0 10px 10px 0;font-weight:600}.waiting{margin:8px 0;padding:8px 14px;border-left:5px solid var(--warn);background:rgba(217,119,6,.08);border-radius:0 10px 10px 0}
+.usewhen ul,.notchosen ul{margin:4px 0 8px 18px;padding:0}.link{margin:6px 0;color:var(--muted)}.exact{border-left:3px solid var(--human);margin:6px 0;padding:4px 12px;font-style:italic}.exact small{display:block;color:var(--muted);font-style:normal}
 .dprompt{margin:8px 0;padding:8px 14px;border-left:5px solid var(--human);background:var(--soft);border-radius:0 10px 10px 0}.dprompt p{margin:.3em 0}
 .chosen{margin:8px 0;padding:8px 14px;border-left:5px solid var(--ok);background:rgba(22,163,74,.07);border-radius:0 10px 10px 0}.goal span,.why span{font-weight:700;color:var(--muted);margin-right:8px;text-transform:uppercase;font-size:11px;letter-spacing:.06em}
 .ask-card{border:2px solid var(--warn);border-radius:12px;padding:10px 16px}.alabel{font-weight:700;color:var(--warn);margin-bottom:6px}.ask p{margin:2px 0 6px;font-weight:600}

@@ -279,6 +279,32 @@ EOF
   ok ".env written with new random passwords"
 else
   ok ".env exists: kept as it is"
+  # Ensure newer server plug-in settings exist in .env
+  "$PY" - <<'EOF'
+import secrets
+from pathlib import Path
+p = Path(".env")
+if p.exists():
+    text = p.read_text(encoding="utf-8")
+    changed = False
+    if "CCP_DECISIONS_ENABLED=" not in text:
+        text += "\nCCP_DECISIONS_ENABLED=true\n"
+        changed = True
+    elif "CCP_DECISIONS_ENABLED=false" in text:
+        text = text.replace("CCP_DECISIONS_ENABLED=false", "CCP_DECISIONS_ENABLED=true")
+        changed = True
+    if "CCP_CATALOG_ENABLED=" not in text:
+        text += "\nCCP_CATALOG_ENABLED=true\n"
+        changed = True
+    if "CCP_EXPLORER_ENABLED=" not in text:
+        text += "\nCCP_EXPLORER_ENABLED=true\n"
+        changed = True
+    if "CCP_EXPLORER_SECRET=" not in text:
+        text += f"\nCCP_EXPLORER_SECRET={secrets.token_urlsafe(32)}\n"
+        changed = True
+    if changed:
+        p.write_text(text, encoding="utf-8")
+EOF
 fi
 load_env
 
@@ -320,7 +346,7 @@ After=network-online.target
 Type=simple
 WorkingDirectory=$ROOT
 ExecStart=$PY -m ccp.server --migrate
-Environment=PATH=$CLAUDE_DIR:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=$CLAUDE_DIR:$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.claude/local:/usr/local/bin:/usr/bin:/bin
 Restart=on-failure
 RestartSec=5
 

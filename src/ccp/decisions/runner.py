@@ -9,15 +9,16 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import pg8000.dbapi
 
 from ccp.decisions import prompts
-from ccp.decisions.digest import Digest, build_digest
+from ccp.decisions.digest import Digest, LineRef, build_digest
 from ccp.decisions.extraction import (
     AnswerError,
+    DeveloperCorrection,
     ExtractedDecision,
     Extraction,
     Review,
@@ -33,7 +34,7 @@ from ccp.decisions.repository import (
     mark_checked,
     save_decisions,
 )
-from ccp.decisions.settings import DecisionSettings
+from ccp.decisions.settings import WINDOW_CHARS, DecisionSettings
 
 logger = logging.getLogger("ccp.decisions")
 
@@ -98,17 +99,14 @@ def process_chat(
 
     commits = linked_commits(connection, session_id)
     usage: dict[str, Any] = {}
-    extraction = _extract(provider, settings, digest, commits)
-    _note_usage(usage, "write", provider)
+    extraction, reviews = _read_in_parts(provider, settings, digest, commits, usage)
     if not extraction.decisions:
         # Nothing valid came back: keep what is stored rather than wipe it, and remember that the
         # chat was looked at, so it is not sent to the model again until it has new activity.
         mark_checked(connection, session_id)
         return ChatResult(session_id, NO_DECISIONS, digest.chars, dropped=extraction.dropped)
-    reviews = _review(provider, settings, digest, extraction)
-    _note_usage(usage, "review", provider)
     decisions = [
-        _new_decision(item, digest, reviews.get(index))
+        _new_decision(item, digest, reviews.get(index), index)
         for index, item in enumerate(extraction.decisions)
     ]
     corrections = [(digest.refs[item.line].event_id, item.note) for item in extraction.corrections]
@@ -137,32 +135,82 @@ def process_chat(
 
 
 def _note_usage(usage: dict[str, Any], step: str, provider: Provider) -> None:
-    """Remember what the latest call used (providers that cannot tell leave it out)."""
+    """Add what the latest call used (providers that cannot tell leave it out)."""
     used = getattr(provider, "last_usage", None)
-    if used is not None:
-        usage[step] = used.as_dict()
+    if used is None:
+        return
+    now = used.as_dict()
+    before = usage.get(step)
+    if before is None:
+        usage[step] = {**now, "calls": 1}
+        return
+    for key, value in now.items():
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            before[key] = (before.get(key) or 0) + value
+    before["calls"] = before.get("calls", 1) + 1
+
+
+def _read_in_parts(
+    provider: Provider,
+    settings: DecisionSettings,
+    digest: Digest,
+    commits: list[str],
+    usage: dict[str, Any],
+) -> tuple[Extraction, dict[int, Review]]:
+    """Write and review the decisions of every part of the digest, in the order of the chat.
+
+    A short chat is one part. In a longer one each part is read in full, so nothing is squeezed
+    out; a decision that follows an earlier one counts from the first decision of the whole chat.
+    """
+    decisions: list[ExtractedDecision] = []
+    corrections: list[DeveloperCorrection] = []
+    reviews: dict[int, Review] = {}
+    dropped = 0
+    for text in digest.windows(WINDOW_CHARS):
+        part = _extract(provider, settings, text, digest.refs, commits)
+        _note_usage(usage, "write", provider)
+        dropped += part.dropped
+        known = {item.line for item in corrections}
+        corrections += [item for item in part.corrections if item.line not in known]
+        if not part.decisions:
+            continue
+        offset = len(decisions)
+        for index, verdict in _review(provider, settings, text, part).items():
+            reviews[offset + index] = verdict
+        _note_usage(usage, "review", provider)
+        decisions += [
+            replace(item, follows_decision=item.follows_decision + offset)
+            if item.follows_decision
+            else item
+            for item in part.decisions
+        ]
+    return Extraction(decisions, corrections, dropped), reviews
 
 
 def _extract(
-    provider: Provider, settings: DecisionSettings, digest: Digest, commits: list[str]
+    provider: Provider,
+    settings: DecisionSettings,
+    text: str,
+    refs: dict[int, LineRef],
+    commits: list[str],
 ) -> Extraction:
     try:
         answer = provider.complete(
-            prompts.EXTRACT_SYSTEM, prompts.extract_prompt(digest.text), settings.model
+            prompts.EXTRACT_SYSTEM, prompts.extract_prompt(text), settings.model
         )
-        return parse_extraction(answer, digest.refs, commits)
+        return parse_extraction(answer, refs, commits)
     except (ProviderError, AnswerError) as error:
         raise DecisionError(f"extraction failed: {error}") from error
 
 
 def _review(
-    provider: Provider, settings: DecisionSettings, digest: Digest, extraction: Extraction
+    provider: Provider, settings: DecisionSettings, text: str, extraction: Extraction
 ) -> dict[int, Review]:
     asked = [item.as_prompt_dict() for item in extraction.decisions]
     try:
         answer = provider.complete(
             prompts.REVIEW_SYSTEM,
-            prompts.review_prompt(digest.text, asked),
+            prompts.review_prompt(text, asked),
             settings.review_model,
         )
         return parse_reviews(answer, len(asked))
@@ -170,12 +218,42 @@ def _review(
         raise DecisionError(f"review failed: {error}") from error
 
 
-def _new_decision(item: ExtractedDecision, digest: Digest, review: Review | None) -> NewDecision:
-    """Combine a checked decision with its review (no review means a person must look)."""
+def _new_decision(
+    item: ExtractedDecision, digest: Digest, review: Review | None, index: int
+) -> NewDecision:
+    """Combine a checked decision with its review (no review means a person must look).
+
+    Code, not the model, settles what the data shows: a decision that changed files or has commits
+    is ``done``; a plan the developer rejected was ``not followed``; a question to the developer
+    that is still unanswered is ``waiting``. The link to earlier advice must point at advice that
+    exists (an earlier decision of this answer, or a line of the OPEN ADVICE list).
+    """
     if review is None:
         status, note = "needs_review", "the reviewer gave no verdict for this decision"
     else:
         status, note = ("approved" if review.approved else "needs_review"), review.note
+    evidence = [digest.refs[number] for number in item.evidence]
+    outcome = _outcome(item, evidence)
+    local = (
+        item.follows_decision
+        if item.follows_decision and 1 <= item.follows_decision <= index
+        else None
+    )
+    advice = digest.advice.get(item.follows_open) if item.follows_open else None
+    follows = item.follows_how if (local or advice) else None
+    details: dict[str, Any] = {
+        "short_answer": item.short_answer,
+        "use_when": item.use_when,
+        "not_chosen": item.not_chosen,
+        "waiting_for": item.waiting_for,
+        "quotes": [
+            {"key": q["key"], "line": q["line"], "who": q["who"], "text": q["text"]}
+            for q in item.quotes
+        ],
+        "own_outcome": outcome,
+    }
+    if follows:
+        details["follows_how"] = follows
     return NewDecision(
         title=item.title,
         goal=item.goal,
@@ -185,10 +263,28 @@ def _new_decision(item: ExtractedDecision, digest: Digest, review: Review | None
         result=item.result,
         tests_summary=item.tests_summary,
         commit_shas=item.commit_shas,
-        evidence=[digest.refs[number] for number in item.evidence],
+        evidence=evidence,
         status=status,
         review_note=note,
         decided_by=item.decided_by,
         files=item.files,
         thinking=item.thinking,
+        kind=item.kind,
+        raised_by=item.raised_by,
+        outcome=outcome,
+        follows_session_id=advice.session_id if advice and follows else None,
+        follows_prompt_uuid=advice.prompt_uuid if advice and follows else None,
+        follows_local=local if follows else None,
+        details=details,
     )
+
+
+def _outcome(item: ExtractedDecision, evidence: list[LineRef]) -> str:
+    """What became of the decision, from the recorded data first and the model's word second."""
+    if item.files or item.commit_shas:
+        return "done"
+    if any(ref.kind == "plan" and ref.note == "rejected" for ref in evidence):
+        return "not followed"
+    if item.waiting_for and item.outcome == "done":
+        return "waiting"
+    return item.outcome

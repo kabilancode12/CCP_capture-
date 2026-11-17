@@ -16,7 +16,8 @@ the middle of the chat is left out (the start and the end are kept).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -24,12 +25,22 @@ import pg8000.dbapi
 
 from ccp.index.shellfiles import files_changed_by
 
-# How long a prompt or reply excerpt may be, tried in this order until the digest fits.
-EXCERPT_WIDTHS = (800, 400, 200, 100)
+# How long a prompt or reply excerpt may be, tried in this order until the digest fits. An answer
+# that weighs options is long, so the widest excerpt is wide; a big chat uses narrower ones.
+EXCERPT_WIDTHS = (1500, 800, 400, 200, 100)
 
 # How much text of an event is read from the database before the excerpt is cut again.
-_READ_CHARS = 1200
+_READ_CHARS = 1500
 
+# Tool calls where Claude puts a question or a plan to the developer, and the longest text kept.
+_ASK_TOOL = "AskUserQuestion"
+_PLAN_TOOL = "ExitPlanMode"
+_ASK_CHARS = 900
+_PLAN_CHARS = 700
+_ANSWER_CHARS = 300
+_OPEN_ADVICE_LIMIT = 10
+
+_PROMPT_LINE = re.compile(r"\[L\d+\] PROMPT")
 _MAIN_STREAM = "main"
 _EARLIEST = datetime.min.replace(tzinfo=UTC)
 
@@ -99,6 +110,38 @@ _SHELL = """
        AND jsonb_typeof(e.payload #> '{message,content}') = 'array'
 """
 
+# Claude's questions to the developer and its plans for approval, with what the developer answered.
+_QUESTIONS = f"""
+    SELECT e.event_id, e.occurred_at, e.raw_object_key, e.raw_line_number,
+           b ->> 'id', b ->> 'name', b -> 'input'
+      FROM event e,
+           jsonb_array_elements(CASE WHEN jsonb_typeof(e.payload #> '{{message,content}}') = 'array'
+                                     THEN e.payload #> '{{message,content}}' ELSE '[]'::jsonb END) b
+     WHERE e.session_id = %s AND e.event_type = 'tool_call' AND NOT e.is_abandoned
+       AND split_part(e.raw_object_key, '/', 3) = '{_MAIN_STREAM}'
+       AND b ->> 'type' = 'tool_use' AND b ->> 'name' IN ('{_ASK_TOOL}', '{_PLAN_TOOL}')
+"""  # noqa: S608  (only constants are inserted)
+
+_ANSWERS = """
+    SELECT b ->> 'tool_use_id', b -> 'content', COALESCE((b ->> 'is_error')::boolean, false)
+      FROM event e,
+           jsonb_array_elements(CASE WHEN jsonb_typeof(e.payload #> '{message,content}') = 'array'
+                                     THEN e.payload #> '{message,content}' ELSE '[]'::jsonb END) b
+     WHERE e.session_id = %s AND e.event_type = 'tool_result' AND NOT e.is_abandoned
+       AND b ->> 'type' = 'tool_result' AND b ->> 'tool_use_id' = ANY(%s::text[])
+"""
+
+# Advice of other chats of the same project that is still open: a decision here may follow it.
+_OPEN_ADVICE = """
+    SELECT d.session_id, d.prompt_uuid, d.title, d.kind, left(d.details ->> 'short_answer', 200),
+           left(d.details ->> 'waiting_for', 200)
+      FROM decision d JOIN session s ON s.session_id = d.session_id
+     WHERE d.outcome IN ('waiting', 'postponed') AND d.prompt_uuid IS NOT NULL
+       AND d.session_id <> %s AND s.project_id IS NOT NULL
+       AND s.project_id = (SELECT project_id FROM session WHERE session_id = %s)
+     ORDER BY d.created_at DESC, d.decision_id DESC LIMIT %s
+"""
+
 _TESTS = """
     SELECT e.event_id, e.occurred_at, e.raw_object_key, e.raw_line_number, t.framework, t.passed,
            t.tests_passed, t.tests_failed, t.tests_skipped, left(t.command, 80)
@@ -137,7 +180,17 @@ class LineRef:
     raw_line_number: int
     kind: str  # prompt | reply | command | edit | shell | think | test | correction
     files: tuple[FileRef, ...] = ()  # for edit and shell lines
-    note: str = ""  # for think lines: the thinking note as recorded
+    note: str = ""  # think: the thinking note as recorded; plan: approved | rejected
+    text: str = ""  # prompt and reply: the recorded text (the start of it), for checking quotes
+
+
+@dataclass(frozen=True)
+class AdviceRef:
+    """Earlier advice of the project that is still open: where a decision can say it follows it."""
+
+    session_id: str
+    prompt_uuid: str
+    title: str
 
 
 @dataclass(frozen=True)
@@ -146,6 +199,31 @@ class Digest:
 
     text: str
     refs: dict[int, LineRef]
+    advice: dict[int, AdviceRef] = field(default_factory=dict)  # OPEN ADVICE number -> advice
+
+    def windows(self, limit: int) -> list[str]:
+        """The digest as parts of about ``limit`` characters, so that a long chat is not squeezed.
+
+        Each part has the header and the footer; a part starts at a PROMPT line (a message of the
+        developer and what followed it stay together). A digest that fits is one part.
+        """
+        if len(self.text) <= limit:
+            return [self.text]
+        lines = self.text.split("\n")
+        head, rest = lines[0], lines[1:]
+        body = [line for line in rest if line.startswith(("[L", "..."))]
+        foot = [line for line in rest if not line.startswith(("[L", "..."))]
+        room = max(limit - len(head) - sum(len(line) + 1 for line in foot), limit // 2)
+        parts: list[list[str]] = [[]]
+        size = 0
+        for line in body:
+            starts_turn = _PROMPT_LINE.match(line) is not None
+            if parts[-1] and size + len(line) > room and (starts_turn or size > room * 2):
+                parts.append([])
+                size = 0
+            parts[-1].append(line)
+            size += len(line) + 1
+        return ["\n".join([head, *part, *foot]) for part in parts if part]
 
     @property
     def chars(self) -> int:
@@ -184,8 +262,10 @@ def build_digest(connection: pg8000.dbapi.Connection, session_id: str, max_chars
     cursor = connection.cursor()
     header = _header(cursor, session_id)
     entries = sorted(_entries(cursor, session_id), key=_order)
-    footer = _footer(cursor, session_id)
-    return _fit(header, entries, footer, max_chars)
+    advice, advice_text = _open_advice(cursor, session_id)
+    footer = "\n".join(part for part in (advice_text, _footer(cursor, session_id)) if part)
+    digest = _fit(header, entries, footer, max_chars)
+    return Digest(digest.text, digest.refs, advice)
 
 
 def _order(entry: _Entry) -> tuple[datetime, str, int]:
@@ -289,7 +369,7 @@ def _entries(cursor: pg8000.dbapi.Cursor, session_id: str) -> list[_Entry]:
         if not text:
             continue
         is_prompt = event_type == "prompt"
-        ref = LineRef(event_id, key, line, "prompt" if is_prompt else "reply")
+        ref = LineRef(event_id, key, line, "prompt" if is_prompt else "reply", text=str(text))
         entries.append(_Entry(_when(at), ref, "PROMPT" if is_prompt else "REPLY", str(text)))
     cursor.execute(_COMMANDS, (session_id,))
     for event_id, at, key, line, name, arguments in cursor.fetchall():
@@ -322,6 +402,7 @@ def _entries(cursor: pg8000.dbapi.Cursor, session_id: str) -> list[_Entry]:
         note = " ".join(str(text).split())[:_NOTE_CHARS]
         ref = LineRef(event_id, key, line, "think", note=note)
         entries.append(_Entry(_when(at), ref, "THINK", excerpt=note))
+    entries += _questions_and_plans(cursor, session_id)
     cursor.execute(_TESTS, (session_id,))
     for row in cursor.fetchall():
         event_id, at, key, line, framework, passed, n_passed, n_failed, n_skipped, command = row
@@ -338,6 +419,78 @@ def _entries(cursor: pg8000.dbapi.Cursor, session_id: str) -> list[_Entry]:
         detail = f"{kind} (put right by {corrected_by})"
         entries.append(_Entry(_when(at), ref, "CORRECTION", excerpt=note or "", detail=detail))
     return entries
+
+
+def _flat(content: Any) -> str:
+    """The text of a tool result: a string, or the text blocks of a list, on one line."""
+    if isinstance(content, str):
+        return " ".join(content.split())
+    parts = [
+        str(block.get("text"))
+        for block in content or []
+        if isinstance(block, dict) and isinstance(block.get("text"), str)
+    ]
+    return " ".join(" ".join(parts).split())
+
+
+def _question_text(data: Any) -> str:
+    """Claude's questions with their options, as one text (data of the tool call, not rewritten)."""
+    asked = []
+    for item in (data or {}).get("questions") or []:
+        if not isinstance(item, dict):
+            continue
+        options = " | ".join(
+            f"{o.get('label')} ({o.get('description')})"
+            if o.get("description")
+            else str(o.get("label"))
+            for o in item.get("options") or []
+            if isinstance(o, dict)
+        )
+        asked.append(f'"{item.get("question")}" options: {options}')
+    return _shorten(" ; ".join(asked), _ASK_CHARS)
+
+
+def _questions_and_plans(cursor: pg8000.dbapi.Cursor, session_id: str) -> list[_Entry]:
+    """ASK lines (a question put to the developer, with the answer) and PLAN lines.
+
+    A PLAN line says whether the developer approved the plan. Both come from recorded data.
+    """
+    cursor.execute(_QUESTIONS, (session_id,))
+    calls = cursor.fetchall()
+    if not calls:
+        return []
+    cursor.execute(_ANSWERS, (session_id, [str(call[4]) for call in calls]))
+    answers = {str(use_id): (content, bool(error)) for use_id, content, error in cursor.fetchall()}
+    entries: list[_Entry] = []
+    for event_id, at, key, line, use_id, name, data in calls:
+        content, is_error = answers.get(str(use_id), (None, False))
+        said = _shorten(_flat(content), _ANSWER_CHARS)
+        if name == _ASK_TOOL:
+            ref = LineRef(event_id, key, line, "ask")
+            detail = (
+                f"Claude asked the developer {_question_text(data)} -> answer: {said or 'none'}"
+            )
+            entries.append(_Entry(_when(at), ref, "ASK", detail=detail))
+        else:
+            state = "rejected" if is_error else ("approved" if use_id in answers else "no answer")
+            ref = LineRef(event_id, key, line, "plan", note=state)
+            plan = _shorten(str((data or {}).get("plan") or ""), _PLAN_CHARS)
+            detail = f"Claude put this plan to the developer: {plan} -> {state.upper()}"
+            entries.append(_Entry(_when(at), ref, "PLAN", detail=detail))
+    return entries
+
+
+def _open_advice(cursor: pg8000.dbapi.Cursor, session_id: str) -> tuple[dict[int, AdviceRef], str]:
+    """Open advice of the project's other chats, numbered ``A1``, ``A2`` ... for the model."""
+    cursor.execute(_OPEN_ADVICE, (session_id, session_id, _OPEN_ADVICE_LIMIT))
+    found: dict[int, AdviceRef] = {}
+    lines: list[str] = []
+    for number, (chat, prompt, title, kind, answer, waiting) in enumerate(cursor.fetchall(), 1):
+        found[number] = AdviceRef(str(chat), str(prompt), str(title or ""))
+        said = f" answer: {answer}" if answer else ""
+        wait = f" waiting for: {waiting}" if waiting else ""
+        lines.append(f"[A{number}] OPEN ADVICE ({kind}) {title or '?'}{said}{wait}")
+    return found, "\n".join(lines)
 
 
 def _when(at: Any) -> datetime:
