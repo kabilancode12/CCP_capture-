@@ -36,8 +36,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from ccp.catalog.builder import report_of_chat
-from ccp.catalog.report_page import report_page
+from ccp.catalog.builder import report_html_of_chat, report_of_chat
 from ccp.db.connection import connect
 from ccp.db.labels import LabelError, remove_label, set_account_label, set_project_label
 from ccp.explorer import library_views, pages, queries, users

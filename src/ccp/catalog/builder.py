@@ -322,6 +322,26 @@ def report_html_of_chat(connection: Any, store: CatalogStore | None, chat_id: st
     return render_report_html(data, folder, agents, raw)
 
 
+def _report_inputs(
+    connection: Any, store: CatalogStore | None, chat_id: str
+) -> tuple[ChatData, str, int, list[Any] | None]:
+    """What a report is made from: the chat's data, its folder, its sub-agent count, its raw lines."""
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT session_id FROM session WHERE session_id LIKE %s LIMIT 2", (chat_id + "%",)
+    )
+    found = [row[0] for row in cursor.fetchall()]
+    if len(found) != 1:
+        raise CatalogError(f"{chat_id!r} matches {len(found)} chats; give more of the id.")
+    data = load_chat(connection, found[0])
+    if data is None:
+        raise CatalogError(f"There is no chat {chat_id!r}.")
+    streams = transcript_streams(store, found[0]) if store is not None else {}
+    agents = [s for s in streams if s != MAIN_STREAM]
+    raw = read_lines(store, streams.get(MAIN_STREAM, [])) if store is not None else None
+    return data, _folder_path(data.chat), len(agents), raw
+
+
 def report_of_chat(connection: Any, store: CatalogStore | None, chat_id: str) -> str:
     """The single-file Markdown report of one chat, made now (not read from the bucket).
 
@@ -333,18 +353,5 @@ def report_of_chat(connection: Any, store: CatalogStore | None, chat_id: str) ->
     Raises:
         CatalogError: If there is no such chat, or the start of the id matches several.
     """
-    cursor = connection.cursor()
-    cursor.execute(
-        "SELECT session_id FROM session WHERE session_id LIKE %s LIMIT 2", (chat_id + "%",)
-    )
-    found = [row[0] for row in cursor.fetchall()]
-    if len(found) != 1:
-        raise CatalogError(f"{chat_id!r} matches {len(found)} chats; give more of the id.")
-    data = load_chat(connection, found[0])
-    if data is None:
-        raise CatalogError(f"There is no chat {chat_id!r}.")
-    folder = _folder_path(data.chat)
-    streams = transcript_streams(store, found[0]) if store is not None else {}
-    agents = [s for s in streams if s != MAIN_STREAM]
-    raw = read_lines(store, streams.get(MAIN_STREAM, [])) if store is not None else None
-    return render_report(data, folder, len(agents), raw)
+    data, folder, agents, raw = _report_inputs(connection, store, chat_id)
+    return render_report(data, folder, agents, raw)
