@@ -129,3 +129,10 @@ def test_a_decision_shows_the_prompt_the_developer_gave_at_that_moment() -> None
         "text": "Please add a retry to the upload step", "at": T0, "entry": "u-1",
     }  # fmt: skip
     assert "Please add a retry to the upload step" in render_report(data, "catalog/x", 0, [])
+
+
+def test_a_line_that_looks_like_a_table_row_but_is_not_one_does_not_hang_the_renderer() -> None:
+    text = "intro\n| just a pipe, no separator row\nnext line\n\n|another\n> quote\n- item\n"
+    html = markdown(text)
+    assert "just a pipe, no separator row" in html and "another" in html
+    assert "<blockquote>" in html and "<li>item</li>" in html
