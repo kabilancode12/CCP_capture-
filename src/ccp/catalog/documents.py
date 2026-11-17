@@ -162,6 +162,11 @@ def build_decisions(data: ChatData) -> list[dict[str, Any]]:
             "number": d["seq"],
             "title": d["title"],
             "goal": d["goal"],
+            "prompt": {
+                "text": d.get("prompt_text"),
+                "at": d.get("prompt_at"),
+                "entry": d.get("prompt_uuid"),
+            },
             "options": d["options"] or [],
             "chosen": d["chosen"],
             "reason": d["reason"],

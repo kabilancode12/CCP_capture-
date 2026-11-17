@@ -298,6 +298,23 @@ def test_decisions_are_extracted_reviewed_and_stored(conn: Any) -> None:
     assert [item["line"] for item in first[9]] == [1, 3, 4]  # prompt, edit result, test call
     assert {item["key"] for item in first[9]} == {KEY}
     assert first[11] == ["queue", "thread"]
+    # The prompt the developer gave at that moment is stored with the decision.
+    prompt = rows(
+        conn,
+        "SELECT prompt_text, prompt_at IS NOT NULL, prompt_uuid IS NOT NULL FROM decision"
+        " WHERE session_id = %s AND seq = 1",
+        CHAT,
+    )[0]
+    assert prompt[0] and prompt[1]  # the entry id is set when the transcript has one
+    assert (
+        prompt[0].strip()
+        == rows(
+            conn,
+            "SELECT COALESCE(payload #>> '{message,content}', '') FROM event"
+            " WHERE session_id = %s AND event_type = 'prompt' ORDER BY raw_line_number LIMIT 1",
+            CHAT,
+        )[0][0].strip()
+    )
     assert second[1:4] == ("Indent with tabs", "needs_review", "ai")
     assert second[5] == "result not shown"
     assert [item["line"] for item in second[9]] == [5]  # the invalid number 9999 was dropped

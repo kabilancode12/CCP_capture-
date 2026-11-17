@@ -395,6 +395,12 @@ def decision_card(decision: dict[str, Any], turn_models: list[str], full: bool =
         f'<div class="decision" id="decision-{esc(decision.get("number"))}">',
         f'<div class="dhead"><span class="dtag">Decision {esc(decision.get("number"))}</span><strong>{esc(decision.get("title"))}</strong>'
         f"{decider(decision, turn_models)}{chip(review.get('status'), str(review.get('status')))}</div>",
+        (
+            f'<div class="dprompt"><span class="lab">The developer asked · {esc(fmt_time((decision.get("prompt") or {}).get("at")))}</span>'
+            f"{markdown(cut(str((decision.get('prompt') or {}).get('text') or ''), TEXT_LIMIT))}</div>"
+            if (decision.get("prompt") or {}).get("text")
+            else ""
+        ),
         f'<p class="goal"><span>Goal</span>{inline(str(decision.get("goal") or "not stated"))}</p>',
     ]
     if options:
@@ -690,6 +696,7 @@ details{border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:
 .decision{margin-top:14px;border:2px solid var(--brand);border-radius:14px;padding:12px 18px 14px;background:var(--card)}.dhead{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px}.dtag{background:var(--brand);color:#fff;border-radius:6px;padding:1px 8px;font-size:12px;font-weight:700}
 .options ul,.optlist{list-style:none;padding:0;margin:4px 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px}.opt{border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:rgba(127,127,127,.04)}.opt span{display:block;color:var(--muted);font-size:13px}
 .opt.chosen{border:2px solid var(--ok);background:rgba(22,163,74,.08)}.opt.chosen::before{content:"chosen  ";color:var(--ok);font-weight:700;font-size:11px;text-transform:uppercase}
+.dprompt{margin:8px 0;padding:8px 14px;border-left:5px solid var(--human);background:var(--soft);border-radius:0 10px 10px 0}.dprompt p{margin:.3em 0}
 .chosen{margin:8px 0;padding:8px 14px;border-left:5px solid var(--ok);background:rgba(22,163,74,.07);border-radius:0 10px 10px 0}.goal span,.why span{font-weight:700;color:var(--muted);margin-right:8px;text-transform:uppercase;font-size:11px;letter-spacing:.06em}
 .ask-card{border:2px solid var(--warn);border-radius:12px;padding:10px 16px}.alabel{font-weight:700;color:var(--warn);margin-bottom:6px}.ask p{margin:2px 0 6px;font-weight:600}
 .plan{border:1px dashed var(--brand);border-radius:10px;padding:8px 14px;margin:8px 0}.meta{font-size:12.5px;color:var(--muted)}.note pre{background:var(--soft);padding:8px 12px;border-radius:8px;white-space:pre-wrap}

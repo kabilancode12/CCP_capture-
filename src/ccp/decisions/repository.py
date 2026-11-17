@@ -195,6 +195,46 @@ def linked_commits(connection: pg8000.dbapi.Connection, session_id: str) -> list
     return shas
 
 
+# The developer prompt current at each decision's first evidence line, stored with it.
+_SET_PROMPTS = """
+    UPDATE decision d SET
+        prompt_text = CASE WHEN jsonb_typeof(pe.payload #> '{message,content}') = 'string'
+                           THEN pe.payload #>> '{message,content}'
+                           ELSE (SELECT string_agg(b ->> 'text', E'\n\n')
+                                   FROM jsonb_array_elements(pe.payload #> '{message,content}') b
+                                  WHERE b ->> 'type' = 'text') END,
+        prompt_at = pe.occurred_at, prompt_uuid = pe.entry_uuid
+      FROM (
+        SELECT d2.decision_id,
+               (SELECT e.event_id FROM event e
+                 WHERE e.session_id = d2.session_id AND e.event_type = 'prompt'
+                   AND e.actor = 'human' AND NOT e.is_abandoned
+                   AND (e.raw_object_key, e.raw_line_number) <= (first_ev.key, first_ev.line)
+                 ORDER BY e.raw_object_key DESC, e.raw_line_number DESC LIMIT 1) AS event_id
+          FROM decision d2
+          CROSS JOIN LATERAL (
+            SELECT x ->> 'key' AS key, (x ->> 'line')::int AS line
+              FROM jsonb_array_elements(d2.evidence_lines) x
+             ORDER BY x ->> 'key', (x ->> 'line')::int LIMIT 1) first_ev
+         WHERE d2.session_id = %s AND (%s OR d2.prompt_text IS NULL)) q
+      JOIN event pe ON pe.event_id = q.event_id
+     WHERE d.decision_id = q.decision_id
+"""
+
+
+def fill_missing_prompts(connection: pg8000.dbapi.Connection) -> int:
+    """Store the prompt of every decision that has none yet; returns how many decisions got one."""
+    cursor = connection.cursor()
+    cursor.execute("SELECT DISTINCT session_id FROM decision WHERE prompt_text IS NULL")
+    sessions = [row[0] for row in cursor.fetchall()]
+    done = 0
+    for session_id in sessions:
+        cursor.execute(_SET_PROMPTS, (session_id, False))
+        done += max(cursor.rowcount, 0)
+    connection.commit()
+    return done
+
+
 def save_decisions(
     connection: pg8000.dbapi.Connection,
     session_id: str,
@@ -277,6 +317,7 @@ def save_decisions(
         cursor.execute(_DELETE_AI_CORRECTIONS, (session_id,))
         for event_id, note in developer_corrections:
             cursor.execute(_INSERT_CORRECTION, (session_id, event_id, event_id, note))
+        cursor.execute(_SET_PROMPTS, (session_id, True))  # the prompt each decision answers
         connection.commit()
     except pg8000.dbapi.DatabaseError as error:
         connection.rollback()

@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from ccp.db.connection import connect
 from ccp.decisions.provider import choose_provider
-from ccp.decisions.repository import chat_state, pending_chats
+from ccp.decisions.repository import chat_state, fill_missing_prompts, pending_chats
 from ccp.decisions.runner import process_chat
 from ccp.decisions.settings import load_decision_settings
 
@@ -170,6 +170,14 @@ def register(registry: PluginRegistry, context: PluginContext) -> None:
             connection.close()
 
     def loop() -> None:
+        try:  # decisions from before the prompt was stored get theirs
+            connection = connect(context.settings.database)
+            try:
+                fill_missing_prompts(connection)
+            finally:
+                connection.close()
+        except Exception as error:  # noqa: BLE001  (not needed for the sweep)
+            logger.warning("filling the decision prompts failed (%s)", type(error).__name__)
         while not stop.wait(every):
             try:
                 sweep_once(
