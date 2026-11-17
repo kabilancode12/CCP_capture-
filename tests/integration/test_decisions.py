@@ -903,7 +903,9 @@ class PerPartProvider(FakeProvider):
 def test_a_long_chat_is_read_in_parts_and_every_part_gives_its_decisions(
     conn: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("ccp.decisions.runner.WINDOW_CHARS", 1)  # every developer message a part
+    monkeypatch.setattr(
+        "ccp.decisions.runner.WINDOW_CHARS", 200
+    )  # a part for each developer message
     provider = PerPartProvider(
         review={"reviews": [{"index": 0, "verdict": "approve", "note": "ok"}]}
     )

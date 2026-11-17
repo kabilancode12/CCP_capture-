@@ -208,3 +208,22 @@ def test_a_quote_is_kept_only_when_it_stands_letter_for_letter_in_the_cited_line
         "Where do the files come from?",
     ]
     assert kept[0]["who"] == "claude" and kept[0]["line"] == 9
+
+
+def test_a_digest_that_fits_is_one_part_and_a_long_one_is_split_at_developer_messages() -> None:
+    from ccp.decisions.digest import Digest
+
+    kinds = ["PROMPT", "REPLY", "EDIT", "PROMPT", "REPLY", "REPLY", "PROMPT", "REPLY"]
+    body = [f"[L{n}] {kind} {'x' * 30}" for n, kind in enumerate(kinds, 1)]
+    text = "\n".join(["CHAT c; title: t", *body, "[A1] OPEN ADVICE (advice) a", "COMMIT abc"])
+    assert Digest(text, {}).windows(10_000) == [text]
+    parts = Digest(text, {}).windows(130)
+    assert len(parts) >= 3
+    for part in parts:
+        assert part.startswith("CHAT c; title: t\n") and part.endswith(
+            "[A1] OPEN ADVICE (advice) a\nCOMMIT abc"
+        )
+    first_lines = [part.split("\n")[1] for part in parts]
+    assert [line.split()[1] for line in first_lines].count("PROMPT") >= 2
+    joined = "\n".join(line for part in parts for line in part.split("\n") if line.startswith("[L"))
+    assert joined == "\n".join(body)  # nothing lost, nothing repeated, same order

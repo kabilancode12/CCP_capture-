@@ -218,7 +218,7 @@ class Digest:
         size = 0
         for line in body:
             starts_turn = _PROMPT_LINE.match(line) is not None
-            if parts[-1] and size + len(line) > room and (starts_turn or size > room * 1.3):
+            if parts[-1] and size + len(line) > room and (starts_turn or size > room * 2):
                 parts.append([])
                 size = 0
             parts[-1].append(line)
