@@ -113,3 +113,19 @@ def test_the_chosen_option_is_the_one_the_decision_names_not_one_it_only_rejects
     assert chosen_option(options, "Keep CsvHelper as the parser") == 0
     assert chosen_option(options, "Something unrelated entirely") is None
     assert chosen_option([], "anything") is None
+
+
+def test_a_decision_shows_the_prompt_the_developer_gave_at_that_moment() -> None:
+    data = _turn_data()
+    data.decisions[0]["prompt_text"] = "Please add a retry to the upload step"
+    data.decisions[0]["prompt_at"] = T0
+    data.decisions[0]["prompt_uuid"] = "u-1"
+    page = render_report_html(data, "catalog/x", 0, [])
+    assert "The developer asked" in page and "Please add a retry to the upload step" in page
+    from ccp.catalog import documents
+    from ccp.catalog.report import render_report
+
+    assert documents.build_decisions(data)[0]["prompt"] == {
+        "text": "Please add a retry to the upload step", "at": T0, "entry": "u-1",
+    }  # fmt: skip
+    assert "Please add a retry to the upload step" in render_report(data, "catalog/x", 0, [])
