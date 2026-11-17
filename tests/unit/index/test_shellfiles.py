@@ -1,6 +1,6 @@
-
-
-def test_paths_after_a_relative_cd_are_inside_that_folder_and_a_trailing_slash_is_not_a_second_file() -> None:
+def test_paths_after_a_relative_cd_are_inside_that_folder_and_a_trailing_slash_is_not_a_second_file() -> (
+    None
+):
     from ccp.index.shellfiles import files_changed_by
 
     command = "mkdir -p src/ccp/server && cd src/ccp/server && touch __init__.py && cat > plugins.py <<'EOF'\nx\nEOF\n"

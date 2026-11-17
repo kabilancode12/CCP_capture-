@@ -198,7 +198,7 @@ def build_decisions(data: ChatData) -> list[dict[str, Any]]:
             ],
             "written_by": d["model"],
             "llm_usage": d["llm_usage"] or {},
-            "llm_usage_scope": "the whole run for this chat, shared by all its decisions: do not add up",
+            "llm_usage_scope": "one run for the whole chat, shared by all its decisions",
             "decision_id": d["decision_id"],
             "created_at": d["created_at"],
         }
