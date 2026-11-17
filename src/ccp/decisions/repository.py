@@ -97,26 +97,34 @@ _RELINK = """
     UPDATE decision d SET outcome = w.outcome
       FROM want w WHERE d.decision_id = w.decision_id AND d.outcome IS DISTINCT FROM w.outcome
 """
-# The models that did the work of each decision, with their effort level: every response between the
-# developer's prompt and the last evidence line of the decision (all models, not only the first).
+# The models that did the work of each decision, with their effort level: every response from the
+# developer's prompt to the end of the turn of the decision's last evidence line (all models, not
+# only the first one).
 _SET_MODELS = """
     UPDATE decision d SET details = d.details || jsonb_build_object('models_used', COALESCE((
         SELECT jsonb_agg(jsonb_build_object('model', m.model, 'effort', m.effort,
                                             'responses', m.n) ORDER BY m.model, m.effort)
           FROM (
             SELECT u.model, u.effort, count(*) AS n
-              FROM model_usage u JOIN event e ON e.event_id = u.event_id
+              FROM (SELECT p.raw_object_key AS sk, p.raw_line_number AS sl FROM event p
+                     WHERE p.session_id = d.session_id AND p.entry_uuid = d.prompt_uuid
+                     ORDER BY p.event_id LIMIT 1) st,
+                   (SELECT x ->> 'key' AS ek, (x ->> 'line')::int AS el
+                      FROM jsonb_array_elements(d.evidence_lines) x
+                     ORDER BY 1 DESC, 2 DESC LIMIT 1) en,
+                   model_usage u JOIN event e ON e.event_id = u.event_id
              WHERE e.session_id = d.session_id AND NOT e.is_abandoned
                AND split_part(e.raw_object_key, '/', 3) = 'main'
                AND u.model IS NOT NULL AND u.model <> '<synthetic>'
-               AND (e.raw_object_key, e.raw_line_number) >=
-                   (SELECT p.raw_object_key, p.raw_line_number FROM event p
-                     WHERE p.session_id = d.session_id AND p.entry_uuid = d.prompt_uuid
-                     ORDER BY p.event_id LIMIT 1)
-               AND (e.raw_object_key, e.raw_line_number) <=
-                   (SELECT x ->> 'key', (x ->> 'line')::int
-                      FROM jsonb_array_elements(d.evidence_lines) x
-                     ORDER BY x ->> 'key' DESC, (x ->> 'line')::int DESC LIMIT 1)
+               AND (e.raw_object_key, e.raw_line_number) >= (st.sk, st.sl)
+               AND NOT EXISTS (
+                   SELECT 1 FROM event n
+                    WHERE n.session_id = d.session_id AND n.event_type = 'prompt'
+                      AND n.actor = 'human' AND NOT n.is_abandoned
+                      AND split_part(n.raw_object_key, '/', 3) = 'main'
+                      AND (n.raw_object_key, n.raw_line_number) > (en.ek, en.el)
+                      AND (n.raw_object_key, n.raw_line_number)
+                          <= (e.raw_object_key, e.raw_line_number))
              GROUP BY u.model, u.effort) m), '[]'::jsonb))
      WHERE d.session_id = %s
 """

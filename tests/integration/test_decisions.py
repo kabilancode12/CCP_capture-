@@ -884,3 +884,56 @@ def test_a_new_prompt_version_makes_a_chat_pending_once_without_anyone_asking(co
     assert chat_state(conn, CHAT).outdated and CHAT in pending_chats(conn, False)  # type: ignore[union-attr]
     assert run(conn, FakeProvider()).outcome == "done"  # processed again, without force
     assert CHAT not in pending_chats(conn, False)
+
+
+class PerPartProvider(FakeProvider):
+    """Writes one decision for the first developer message of whatever part it is shown."""
+
+    def complete(self, system: str, prompt: str, model: str) -> str:
+        if system == prompts.EXTRACT_SYSTEM:
+            self.calls.append((system, prompt, model))
+            first = line_of(prompt, "PROMPT")
+            part = len([c for c in self.calls if c[0] == prompts.EXTRACT_SYSTEM])
+            return json.dumps({"decisions": [{
+                "title": f"Part {part}", "chosen": f"choice {part}", "evidence_lines": [first],
+                "follows_decision": 1 if part == 2 else None}]})  # fmt: skip
+        return super().complete(system, prompt, model)
+
+
+def test_a_long_chat_is_read_in_parts_and_every_part_gives_its_decisions(
+    conn: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("ccp.decisions.runner.WINDOW_CHARS", 1)  # every developer message a part
+    provider = PerPartProvider(
+        review={"reviews": [{"index": 0, "verdict": "approve", "note": "ok"}]}
+    )
+    result = run(conn, provider)
+    assert result.outcome == "done" and result.decisions == 2
+    assert len([c for c in provider.calls if c[0] == prompts.EXTRACT_SYSTEM]) == 2
+    assert len([c for c in provider.calls if c[0] == prompts.REVIEW_SYSTEM]) == 2
+    assert [r[0] for r in rows(conn, "SELECT title FROM decision ORDER BY seq")] == [
+        "Part 1",
+        "Part 2",
+    ]
+    assert all(r[0] == "approved" for r in rows(conn, "SELECT status FROM decision"))
+    first, second = (c[1] for c in provider.calls if c[0] == prompts.EXTRACT_SYSTEM)
+    assert "Add a queue" in first and "Use tabs" not in first  # a part is only its own messages
+    assert "Use tabs" in second and "Add a queue" not in second
+
+
+def test_every_model_that_did_the_work_is_recorded_with_its_effort_level(conn: Any) -> None:
+    cursor = conn.cursor()
+    cursor.execute("UPDATE event SET entry_uuid = 'u-first' WHERE raw_line_number = 1")
+    for line, model, effort in ((2, "claude-opus-5-5", "high"), (6, "claude-sonnet-5-5", "medium")):
+        cursor.execute(
+            "INSERT INTO model_usage (session_id, message_id, event_id, model, effort)"
+            " SELECT session_id, 'm' || raw_line_number, event_id, %s, %s FROM event"
+            " WHERE session_id = %s AND raw_line_number = %s",
+            (model, effort, CHAT, line),
+        )
+    conn.commit()
+    assert run(conn, FakeProvider()).outcome == "done"
+    used = rows(conn, "SELECT seq, details -> 'models_used' FROM decision ORDER BY seq")
+    assert used[0][1] == [{"model": "claude-opus-5-5", "effort": "high", "responses": 1}]
+    # the second decision's prompt has no recorded entry uuid here, so nothing is claimed for it
+    assert used[1][1] == []
