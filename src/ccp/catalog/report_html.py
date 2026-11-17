@@ -368,9 +368,11 @@ def decider(decision: dict[str, Any], turn_models: list[str]) -> str:
 def decision_card(decision: dict[str, Any], turn_models: list[str], full: bool = False) -> str:
     """A decision: the options, what was chosen, why, who decided and who reviewed it."""
     review = decision.get("review") or {}
+    listed = decision.get("options") or []
+    picked = chosen_option(listed, decision.get("chosen"))
     options = "".join(
-        f'<li class="opt{" chosen" if _is_chosen(o, decision.get("chosen")) else ""}">{inline(str(o))}</li>'
-        for o in decision.get("options") or []
+        f'<li class="opt{" chosen" if n == picked else ""}">{inline(str(o))}</li>'
+        for n, o in enumerate(listed)
     )
     parts = [
         f'<div class="decision" id="decision-{esc(decision.get("number"))}">',
@@ -449,9 +451,34 @@ def decision_card(decision: dict[str, Any], turn_models: list[str], full: bool =
     return "".join(parts)
 
 
-def _is_chosen(option: object, chosen: object) -> bool:
-    name = str(option).split(":", 1)[0].strip().lower()
-    return bool(name) and name in str(chosen or "").lower()
+_STOP_WORDS = frozenset("the and with for using use via from that this into over then than not but".split())
+_REJECTING = r"(?:replace[sd]?|replacing|instead of|rather than|without|drop(?:ped)?|remov(?:e|es|ed)|not|no)"
+
+
+def _words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 2 and w not in _STOP_WORDS}
+
+
+def chosen_option(options: list[Any], chosen: object) -> int | None:
+    """The index of the option that the ``chosen`` sentence names, or None.
+
+    An option counts when most of its name's words are in the sentence, and not when the sentence
+    only mentions it to reject it (``Replace X with Y`` chooses Y, not X).
+    """
+    text = str(chosen or "").lower()
+    chosen_words = _words(text)
+    best, best_score = None, 0.0
+    for index, option in enumerate(options):
+        name = str(option).split(":", 1)[0].strip().lower()
+        words = _words(name)
+        if not words:
+            continue
+        if re.search(rf"{_REJECTING}\s+(?:the\s+|a\s+|an\s+)?{re.escape(name.split()[0])}", text):
+            continue
+        score = len(words & chosen_words) / len(words)
+        if score > best_score:
+            best, best_score = index, score
+    return best if best_score >= 0.5 else None
 
 
 def _input_html(tool_input: Any) -> str:
