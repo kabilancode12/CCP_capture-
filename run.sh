@@ -380,7 +380,7 @@ cat <<EOF
   Capture repo         ${CURRENT_REMOTE:-local only}
 
   For developers' machines (./run.sh developer):
-    server address     http://${LAN_IP:-<this machine's address>}:${CCP_API_PORT}  (reachable only if you chose to share it)
+    server address     http://${LAN_IP:-this-machine}:${CCP_API_PORT}  (reachable only if you chose to share it)
     ingest token       ${CCP_INGEST_TOKEN}
 
   All of these are in .env too. Keep them private.
