@@ -9,6 +9,7 @@ it cannot read gives no files. Heredoc bodies and anything in ``/tmp`` or ``/dev
 
 from __future__ import annotations
 
+import posixpath
 import re
 import shlex
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ DELETED = "deleted"
 # `cat > f <<'EOF' ... EOF`: the body is text, not commands.
 _HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\s*\2\b", re.DOTALL)
 _SEGMENT_SPLIT = re.compile(r"&&|\|\||;|\n|\|")
+_CD = re.compile(r"^cd\s+(\S+)$")
 _REDIRECT = re.compile(r"(?<![0-9&<>])(>>?)\s*(?!&)(\S+)")
 
 # Commands that create a whole project; their files are not named in the command.
@@ -47,10 +49,23 @@ def files_changed_by(command: str) -> list[ShellFile]:
     """
     text = _HEREDOC.sub(" ", command)
     found: dict[str, str] = {}
+    folder = ""  # set by a relative `cd`: the paths that follow are inside it
     for segment in _SEGMENT_SPLIT.split(text):
+        change_dir = _CD.match(segment.strip())
+        if change_dir:
+            target = _clean(change_dir.group(1))
+            if target.startswith(("/", "~", "-")) or "$" in target:
+                folder = ""  # somewhere we cannot follow: paths stay as written
+            else:
+                folder = posixpath.normpath(posixpath.join(folder, target)).removeprefix("./")
+                folder = "" if folder == "." else folder
+            continue
         for item in _segment(segment.strip()):
             if _wanted(item.path):
-                found[item.path] = item.change
+                path = item.path
+                if folder and not path.startswith(("/", "~", "(")):
+                    path = posixpath.normpath(posixpath.join(folder, path))
+                found[path.rstrip("/") or "/"] = item.change
     return [ShellFile(path, change) for path, change in found.items()]
 
 

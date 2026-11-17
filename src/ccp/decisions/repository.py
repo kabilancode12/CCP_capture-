@@ -209,12 +209,14 @@ _SET_PROMPTS = """
                (SELECT e.event_id FROM event e
                  WHERE e.session_id = d2.session_id AND e.event_type = 'prompt'
                    AND e.actor = 'human' AND NOT e.is_abandoned
+                   AND split_part(e.raw_object_key, '/', 3) = 'main'
                    AND (e.raw_object_key, e.raw_line_number) <= (first_ev.key, first_ev.line)
                  ORDER BY e.raw_object_key DESC, e.raw_line_number DESC LIMIT 1) AS event_id
           FROM decision d2
           CROSS JOIN LATERAL (
             SELECT x ->> 'key' AS key, (x ->> 'line')::int AS line
               FROM jsonb_array_elements(d2.evidence_lines) x
+             WHERE split_part(x ->> 'key', '/', 3) = 'main'
              ORDER BY x ->> 'key', (x ->> 'line')::int LIMIT 1) first_ev
          WHERE d2.session_id = %s AND (%s OR d2.prompt_text IS NULL)) q
       JOIN event pe ON pe.event_id = q.event_id
