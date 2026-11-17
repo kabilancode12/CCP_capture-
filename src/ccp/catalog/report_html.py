@@ -26,7 +26,12 @@ from ccp.catalog.conversation import summarise_tool_call, text_of
 from ccp.catalog.loader import ChatData
 from ccp.catalog.report import fmt_time, fmt_value, render_report, result_text
 
-THEMES = (("studio", "Studio"), ("paper", "Paper"), ("midnight", "Midnight"), ("corporate", "Corporate"))
+THEMES = (
+    ("studio", "Studio"),
+    ("paper", "Paper"),
+    ("midnight", "Midnight"),
+    ("corporate", "Corporate"),
+)
 ACTOR_LABEL = {"human": "a person", "ai_edit": "Claude · edit tool", "ai_command": "Claude · shell command",
                "subagent": "sub-agent", "ai_other": "Claude"}  # fmt: skip
 
@@ -78,7 +83,10 @@ def markdown(text: str) -> str:
         if fence:
             mark, lang, body = fence.group(1), fence.group(2), []
             i += 1
-            while i < len(lines) and not (lines[i].strip().startswith(mark[0] * len(mark)) and set(lines[i].strip()) <= {mark[0]}):
+            while i < len(lines) and not (
+                lines[i].strip().startswith(mark[0] * len(mark))
+                and set(lines[i].strip()) <= {mark[0]}
+            ):
                 body.append(lines[i])
                 i += 1
             i += 1
@@ -107,15 +115,25 @@ def markdown(text: str) -> str:
                 i += 1
             out.append(f"<blockquote>{markdown(chr(10).join(quoted))}</blockquote>")
             continue
-        if line.lstrip().startswith("|") and i + 1 < len(lines) and re.match(r"^\s*\|?\s*:?-{3,}", lines[i + 1]):
+        if (
+            line.lstrip().startswith("|")
+            and i + 1 < len(lines)
+            and re.match(r"^\s*\|?\s*:?-{3,}", lines[i + 1])
+        ):
             head = _cells(line)
             i += 2
             rows = []
             while i < len(lines) and lines[i].lstrip().startswith("|"):
                 rows.append(_cells(lines[i]))
                 i += 1
-            body = "".join("<tr>" + "".join(f"<td>{inline(c)}</td>" for c in r) + "</tr>" for r in rows)
-            out.append('<div class="tablewrap"><table><thead><tr>' + "".join(f"<th>{inline(c)}</th>" for c in head) + f"</tr></thead><tbody>{body}</tbody></table></div>")
+            body = "".join(
+                "<tr>" + "".join(f"<td>{inline(c)}</td>" for c in r) + "</tr>" for r in rows
+            )
+            out.append(
+                '<div class="tablewrap"><table><thead><tr>'
+                + "".join(f"<th>{inline(c)}</th>" for c in head)
+                + f"</tr></thead><tbody>{body}</tbody></table></div>"
+            )
             continue
         if re.match(r"^\s*([-*]|\d+[.)])\s+", line):
             ordered = bool(re.match(r"^\s*\d", line))
@@ -186,29 +204,73 @@ def _clock(value: Any) -> str:
     return value.astimezone(UTC).strftime("%H:%M:%S") if isinstance(value, datetime) else ""
 
 
-def build_turns(events: list[dict[str, Any]], slash: dict[Any, dict[str, Any]] | None = None) -> list[Turn]:
+def build_turns(
+    events: list[dict[str, Any]], slash: dict[Any, dict[str, Any]] | None = None
+) -> list[Turn]:
     """Group the main conversation's events into turns (one per developer prompt)."""
     slash = slash or {}
     turns: list[Turn] = []
     calls: dict[str, Step] = {}
     for event in events:
-        kind, content, clock = event["event_type"], event.get("content"), _clock(event.get("occurred_at"))
+        kind, content, clock = (
+            event["event_type"],
+            event.get("content"),
+            _clock(event.get("occurred_at")),
+        )
         place = (str(event.get("raw_object_key") or ""), int(event.get("raw_line_number") or 0))
         flag = bool(event.get("is_abandoned"))
         if kind == "prompt" and event.get("actor") in ("human", "subagent"):
-            who = "Developer prompt" if event.get("actor") == "human" else "Instructions to the sub-agent"
-            turns.append(Turn(len(turns) + 1, f"Conversation {len(turns) + 1}", event.get("occurred_at"), place, flag, text_of(content), who))
+            who = (
+                "Developer prompt"
+                if event.get("actor") == "human"
+                else "Instructions to the sub-agent"
+            )
+            turns.append(
+                Turn(
+                    len(turns) + 1,
+                    f"Conversation {len(turns) + 1}",
+                    event.get("occurred_at"),
+                    place,
+                    flag,
+                    text_of(content),
+                    who,
+                )
+            )
             continue
         if kind == "slash_command":
             row = slash.get(event.get("event_id"), {})
             command = f"{row.get('name') or '?'} {row.get('arguments') or ''}".strip()
-            turns.append(Turn(len(turns) + 1, f"Command {len(turns) + 1}", event.get("occurred_at"), place, flag, command, "Slash command"))
+            turns.append(
+                Turn(
+                    len(turns) + 1,
+                    f"Command {len(turns) + 1}",
+                    event.get("occurred_at"),
+                    place,
+                    flag,
+                    command,
+                    "Slash command",
+                )
+            )
             continue
         if not turns:
-            turns.append(Turn(1, "Before the first prompt", event.get("occurred_at"), place, False, "", "Session start"))
+            turns.append(
+                Turn(
+                    1,
+                    "Before the first prompt",
+                    event.get("occurred_at"),
+                    place,
+                    False,
+                    "",
+                    "Session start",
+                )
+            )
         turn = turns[-1]
         turn.end = event.get("occurred_at") or turn.end
-        if event.get("model") and event["model"] != "<synthetic>" and event["model"] not in turn.models:
+        if (
+            event.get("model")
+            and event["model"] != "<synthetic>"
+            and event["model"] not in turn.models
+        ):
             turn.models.append(str(event["model"]))
         if kind in ("response", "tool_call", "thinking"):
             blocks = [{"type": "text", "text": content}] if isinstance(content, str) else content
@@ -221,7 +283,13 @@ def build_turns(events: list[dict[str, Any]], slash: dict[Any, dict[str, Any]] |
                 elif btype == "thinking":
                     turn.steps.append(Step("thinking", clock, str(block.get("thinking") or "")))
                 elif btype == "redacted_thinking":
-                    turn.steps.append(Step("thinking", clock, "(redacted: Claude Code did not record this reasoning)"))
+                    turn.steps.append(
+                        Step(
+                            "thinking",
+                            clock,
+                            "(redacted: Claude Code did not record this reasoning)",
+                        )
+                    )
                 elif btype == "tool_use":
                     step = Step("action", clock, number=sum(1 for s in turn.steps if s.kind == "action") + 1,
                                 tool=str(block.get("name", "?")), tool_input=block.get("input"), call_id=str(block.get("id", "")))  # fmt: skip
@@ -238,18 +306,32 @@ def build_turns(events: list[dict[str, Any]], slash: dict[Any, dict[str, Any]] |
         elif kind == "compact_boundary":
             turn.steps.append(Step("note", clock, "The conversation was compacted here."))
         elif kind in ("agent_message", "command_output"):
-            label = "Message from a sub-agent or background task" if kind == "agent_message" else "Command output"
+            label = (
+                "Message from a sub-agent or background task"
+                if kind == "agent_message"
+                else "Command output"
+            )
             turn.steps.append(Step("note", clock, f"{label}:\n{text_of(content)}"))
     return turns
 
 
-def assign_decisions(turns: list[Turn], decisions: list[dict[str, Any]]) -> tuple[dict[int, list[dict[str, Any]]], list[dict[str, Any]]]:
+def assign_decisions(
+    turns: list[Turn], decisions: list[dict[str, Any]]
+) -> tuple[dict[int, list[dict[str, Any]]], list[dict[str, Any]]]:
     """Put each decision under the turn where its evidence starts; the rest are returned apart."""
     by_turn: dict[int, list[dict[str, Any]]] = {}
     loose: list[dict[str, Any]] = []
     for decision in decisions:
-        places = [(str(e.get("transcript_file") or ""), int(e.get("line") or 0)) for e in decision.get("evidence") or [] if isinstance(e, dict)]
-        places += [(str(n.get("transcript_file") or ""), int(n.get("line") or 0)) for n in decision.get("thinking_notes") or [] if isinstance(n, dict)]
+        places = [
+            (str(e.get("transcript_file") or ""), int(e.get("line") or 0))
+            for e in decision.get("evidence") or []
+            if isinstance(e, dict)
+        ]
+        places += [
+            (str(n.get("transcript_file") or ""), int(n.get("line") or 0))
+            for n in decision.get("thinking_notes") or []
+            if isinstance(n, dict)
+        ]
         target = None
         if places:
             first = min(places)
@@ -275,44 +357,93 @@ def decider(decision: dict[str, Any], turn_models: list[str]) -> str:
     if who == "developer":
         return chip("the developer decided", "human")
     model = ", ".join(turn_models) or "model not recorded"
-    return chip(f"Claude decided · {model}", "ai") if who == "claude" else chip(f"decided by {who or 'not stated'}", "other")
+    return (
+        chip(f"Claude decided · {model}", "ai")
+        if who == "claude"
+        else chip(f"decided by {who or 'not stated'}", "other")
+    )
 
 
 def decision_card(decision: dict[str, Any], turn_models: list[str], full: bool = False) -> str:
     """A decision: the options, what was chosen, why, who decided and who reviewed it."""
     review = decision.get("review") or {}
-    options = "".join(f'<li class="opt{" chosen" if _is_chosen(o, decision.get("chosen")) else ""}">{inline(str(o))}</li>' for o in decision.get("options") or [])
+    options = "".join(
+        f'<li class="opt{" chosen" if _is_chosen(o, decision.get("chosen")) else ""}">{inline(str(o))}</li>'
+        for o in decision.get("options") or []
+    )
     parts = [
         f'<div class="decision" id="decision-{esc(decision.get("number"))}">',
         f'<div class="dhead"><span class="dtag">Decision {esc(decision.get("number"))}</span><strong>{esc(decision.get("title"))}</strong>'
-        f'{decider(decision, turn_models)}{chip(review.get("status"), str(review.get("status")))}</div>',
+        f"{decider(decision, turn_models)}{chip(review.get('status'), str(review.get('status')))}</div>",
         f'<p class="goal"><span>Goal</span>{inline(str(decision.get("goal") or "not stated"))}</p>',
     ]
     if options:
-        parts.append(f'<div class="options"><span class="lab">Options considered</span><ul>{options}</ul></div>')
-    parts.append(f'<div class="chosen"><span class="lab">Chosen</span>{inline(str(decision.get("chosen") or "not stated"))}</div>')
-    parts.append(f'<p class="why"><span>Why</span>{inline(str(decision.get("reason") or "not stated"))}</p>')
+        parts.append(
+            f'<div class="options"><span class="lab">Options considered</span><ul>{options}</ul></div>'
+        )
+    parts.append(
+        f'<div class="chosen"><span class="lab">Chosen</span>{inline(str(decision.get("chosen") or "not stated"))}</div>'
+    )
+    parts.append(
+        f'<p class="why"><span>Why</span>{inline(str(decision.get("reason") or "not stated"))}</p>'
+    )
     if full:
-        parts.append(f'<p><span class="lab">Result</span> {inline(str(decision.get("result") or "not stated"))}</p>')
-        parts.append(f'<p><span class="lab">Tests</span> {inline(str(decision.get("tests") or "not stated"))}</p>')
+        parts.append(
+            f'<p><span class="lab">Result</span> {inline(str(decision.get("result") or "not stated"))}</p>'
+        )
+        parts.append(
+            f'<p><span class="lab">Tests</span> {inline(str(decision.get("tests") or "not stated"))}</p>'
+        )
         files = decision.get("files_changed") or []
         if files:
-            parts.append('<div class="tablewrap"><table><thead><tr><th>File</th><th>Change</th><th>How</th></tr></thead><tbody>' + "".join(f"<tr><td><code>{esc(f.get('file'))}</code></td><td>{esc(f.get('change'))}</td><td>{esc(f.get('how'))}</td></tr>" for f in files) + "</tbody></table></div>")
+            parts.append(
+                '<div class="tablewrap"><table><thead><tr><th>File</th><th>Change</th><th>How</th></tr></thead><tbody>'
+                + "".join(
+                    f"<tr><td><code>{esc(f.get('file'))}</code></td><td>{esc(f.get('change'))}</td><td>{esc(f.get('how'))}</td></tr>"
+                    for f in files
+                )
+                + "</tbody></table></div>"
+            )
         for note in decision.get("thinking_notes") or []:
-            parts.append(f'<blockquote class="think"><span class="lab">Claude\'s thinking at the time</span>{esc(note.get("note"))}<small>{esc(note.get("transcript_file"))} line {esc(note.get("line"))}</small></blockquote>')
+            parts.append(
+                f'<blockquote class="think"><span class="lab">Claude\'s thinking at the time</span>{esc(note.get("note"))}<small>{esc(note.get("transcript_file"))} line {esc(note.get("line"))}</small></blockquote>'
+            )
         parts.append(
-            "<p class=\"meta\">" + " · ".join([
-                f"written by {esc(decision.get('written_by'))}", f"checked by {esc(review.get('checked_by'))} ({esc(review.get('reviewer'))})",
-                f"review note: {esc(review.get('note'))}", f"commits: {esc(fmt_value(decision.get('commits')))}",
-                f"id {esc(decision.get('decision_id'))}", f"created {esc(fmt_time(decision.get('created_at')))}", f"model usage: {esc(fmt_value(decision.get('llm_usage')))}",
-            ]) + "</p>"  # fmt: skip
+            '<p class="meta">'
+            + " · ".join(
+                [
+                    f"written by {esc(decision.get('written_by'))}",
+                    f"checked by {esc(review.get('checked_by'))} ({esc(review.get('reviewer'))})",
+                    f"review note: {esc(review.get('note'))}",
+                    f"commits: {esc(fmt_value(decision.get('commits')))}",
+                    f"id {esc(decision.get('decision_id'))}",
+                    f"created {esc(fmt_time(decision.get('created_at')))}",
+                    f"model usage: {esc(fmt_value(decision.get('llm_usage')))}",
+                ]
+            )
+            + "</p>"  # fmt: skip
         )
         history = review.get("history") or []
         if history:
-            parts.append('<details><summary>Review history</summary><div class="tablewrap"><table><thead><tr><th>When</th><th>By</th><th>Reviewer</th><th>Status</th><th>Note</th></tr></thead><tbody>' + "".join(f"<tr><td>{esc(h.get('at'))}</td><td>{esc(h.get('by_kind'))}</td><td>{esc(h.get('reviewer'))}</td><td>{esc(h.get('status'))}</td><td>{esc(h.get('note'))}</td></tr>" for h in history if isinstance(h, dict)) + "</tbody></table></div></details>")
+            parts.append(
+                '<details><summary>Review history</summary><div class="tablewrap"><table><thead><tr><th>When</th><th>By</th><th>Reviewer</th><th>Status</th><th>Note</th></tr></thead><tbody>'
+                + "".join(
+                    f"<tr><td>{esc(h.get('at'))}</td><td>{esc(h.get('by_kind'))}</td><td>{esc(h.get('reviewer'))}</td><td>{esc(h.get('status'))}</td><td>{esc(h.get('note'))}</td></tr>"
+                    for h in history
+                    if isinstance(h, dict)
+                )
+                + "</tbody></table></div></details>"
+            )
         evidence = decision.get("evidence") or []
         if evidence:
-            parts.append("<details><summary>Evidence in the raw transcript</summary><ul>" + "".join(f"<li><code>{esc(e.get('transcript_file'))}</code> line {esc(e.get('line'))}</li>" for e in evidence) + "</ul></details>")
+            parts.append(
+                "<details><summary>Evidence in the raw transcript</summary><ul>"
+                + "".join(
+                    f"<li><code>{esc(e.get('transcript_file'))}</code> line {esc(e.get('line'))}</li>"
+                    for e in evidence
+                )
+                + "</ul></details>"
+            )
     parts.append("</div>")
     return "".join(parts)
 
@@ -327,8 +458,14 @@ def _input_html(tool_input: Any) -> str:
         return f'<pre class="code"><code>{esc(json.dumps(tool_input, indent=2, ensure_ascii=False, default=str))}</code></pre>'
     rows = []
     for key, value in tool_input.items():
-        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
-        body = f'<pre class="code"><code>{esc(text)}</code></pre>' if "\n" in text or len(text) > 100 else f"<code>{esc(text)}</code>"
+        text = (
+            value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+        )
+        body = (
+            f'<pre class="code"><code>{esc(text)}</code></pre>'
+            if "\n" in text or len(text) > 100
+            else f"<code>{esc(text)}</code>"
+        )
         rows.append(f'<div class="kv"><span class="lab">{esc(key)}</span>{body}</div>')
     return "".join(rows) or "<em>no input</em>"
 
@@ -340,8 +477,14 @@ def _question_card(step: Step) -> str:
     for q in data.get("questions") or []:
         if not isinstance(q, dict):
             continue
-        opts = "".join(f'<li class="opt"><strong>{esc(o.get("label"))}</strong><span>{esc(o.get("description"))}</span></li>' for o in q.get("options") or [] if isinstance(o, dict))
-        cards.append(f'<div class="ask"><span class="lab">Claude asked{" (several allowed)" if q.get("multiSelect") else ""}</span><p>{esc(q.get("question"))}</p><ul class="optlist">{opts}</ul></div>')
+        opts = "".join(
+            f'<li class="opt"><strong>{esc(o.get("label"))}</strong><span>{esc(o.get("description"))}</span></li>'
+            for o in q.get("options") or []
+            if isinstance(o, dict)
+        )
+        cards.append(
+            f'<div class="ask"><span class="lab">Claude asked{" (several allowed)" if q.get("multiSelect") else ""}</span><p>{esc(q.get("question"))}</p><ul class="optlist">{opts}</ul></div>'
+        )
     answer = f'<div class="chosen"><span class="lab">The developer answered</span>{esc(step.result or "no answer recorded")}</div>'
     return f'<div class="action ask-card"><div class="alabel">Options put to the developer · {esc(step.clock)}</div>{"".join(cards)}{answer}</div>'
 
@@ -349,7 +492,11 @@ def _question_card(step: Step) -> str:
 def step_html(step: Step) -> str:
     """One step of a conversation."""
     if step.kind == "thinking":
-        body = esc(step.text) if step.text.strip() else "<em>Claude Code stored no text for this reasoning step.</em>"
+        body = (
+            esc(step.text)
+            if step.text.strip()
+            else "<em>Claude Code stored no text for this reasoning step.</em>"
+        )
         return f'<div class="think"><span class="lab">Claude\'s thinking · {esc(step.clock)}</span><div class="pre">{body}</div></div>'
     if step.kind == "text":
         return f'<div class="reply"><span class="lab">Claude · {esc(step.clock)}</span>{markdown(step.text)}</div>'
@@ -358,24 +505,51 @@ def step_html(step: Step) -> str:
     if step.tool == "AskUserQuestion":
         return _question_card(step)
     summary = summarise_tool_call(step.tool, step.tool_input).replace("**", "")
-    status = chip(step.status or "no result", "bad" if step.status == "error" else "ok" if step.status == "ok" else "other")
+    status = chip(
+        step.status or "no result",
+        "bad" if step.status == "error" else "ok" if step.status == "ok" else "other",
+    )
     extra = ""
-    if step.tool == "ExitPlanMode" and isinstance(step.tool_input, dict) and step.tool_input.get("plan"):
+    if (
+        step.tool == "ExitPlanMode"
+        and isinstance(step.tool_input, dict)
+        and step.tool_input.get("plan")
+    ):
         extra = f'<div class="plan"><span class="lab">Plan put to the developer for approval</span>{markdown(str(step.tool_input["plan"]))}</div>'
-    output = f'<div class="kv"><span class="lab">Output</span><pre class="code out"><code>{esc(step.result)}</code></pre></div>' if step.result else '<div class="kv"><em>no output recorded</em></div>'
+    output = (
+        f'<div class="kv"><span class="lab">Output</span><pre class="code out"><code>{esc(step.result)}</code></pre></div>'
+        if step.result
+        else '<div class="kv"><em>no output recorded</em></div>'
+    )
     return (
         f'<details class="action"><summary><span class="tool">{esc(step.tool)}</span> <code>{esc(summary.split(" ", 1)[1] if " " in summary else "")}</code> {status}'
         f'<small>#{step.number} · {esc(step.clock)}</small></summary>{extra}<div class="kv"><span class="lab">Input</span></div>{_input_html(step.tool_input)}{output}</details>'
     )
 
 
-def turn_html(turn: Turn, decisions: list[dict[str, Any]], data: ChatData, next_at: datetime | None) -> str:
+def turn_html(
+    turn: Turn, decisions: list[dict[str, Any]], data: ChatData, next_at: datetime | None
+) -> str:
     """One conversation: prompt, thinking, options, decision, actions and answer."""
-    def within(moment: Any) -> bool:
-        return isinstance(moment, datetime) and isinstance(turn.at, datetime) and moment >= turn.at and (next_at is None or moment < next_at)
 
-    head = f'<div class="thead"><span class="num">{turn.number}</span><div><strong>{esc(turn.title)}</strong><small>{esc(fmt_time(turn.at))}{" · rewound" if turn.abandoned else ""}</small></div>' + "".join(chip(m, "ai") for m in turn.models) + "</div>"
-    prompt = f'<div class="prompt"><span class="lab">{esc(turn.who)}</span>{markdown(turn.prompt) if turn.prompt else "<em>empty</em>"}</div>' if turn.prompt or turn.who != "Developer prompt" else ""
+    def within(moment: Any) -> bool:
+        return (
+            isinstance(moment, datetime)
+            and isinstance(turn.at, datetime)
+            and moment >= turn.at
+            and (next_at is None or moment < next_at)
+        )
+
+    head = (
+        f'<div class="thead"><span class="num">{turn.number}</span><div><strong>{esc(turn.title)}</strong><small>{esc(fmt_time(turn.at))}{" · rewound" if turn.abandoned else ""}</small></div>'
+        + "".join(chip(m, "ai") for m in turn.models)
+        + "</div>"
+    )
+    prompt = (
+        f'<div class="prompt"><span class="lab">{esc(turn.who)}</span>{markdown(turn.prompt) if turn.prompt else "<em>empty</em>"}</div>'
+        if turn.prompt or turn.who != "Developer prompt"
+        else ""
+    )
     first_think = [s for s in turn.steps if s.kind == "thinking"]
     flow = "".join(step_html(s) for s in turn.steps)
     decided = "".join(decision_card(d, turn.models) for d in decisions)
@@ -383,12 +557,30 @@ def turn_html(turn: Turn, decisions: list[dict[str, Any]], data: ChatData, next_
     runs = [r for r in data.test_runs if within(r.get("occurred_at"))]
     extras = ""
     if changes:
-        extras += '<div class="extra"><span class="lab">Files changed in this conversation</span><div class="tablewrap"><table><thead><tr><th>File</th><th>Change</th><th>Tool</th><th>Who</th><th>Lines</th></tr></thead><tbody>' + "".join(f"<tr><td><code>{esc(c['path'])}</code></td><td>{esc(c.get('change_type'))}</td><td>{esc(c.get('tool'))}</td><td>{chip(c.get('actor_class'), str(c.get('actor_class')))}</td><td>+{esc(c.get('lines_added') or 0)} / -{esc(c.get('lines_removed') or 0)}</td></tr>" for c in changes) + "</tbody></table></div></div>"
+        extras += (
+            '<div class="extra"><span class="lab">Files changed in this conversation</span><div class="tablewrap"><table><thead><tr><th>File</th><th>Change</th><th>Tool</th><th>Who</th><th>Lines</th></tr></thead><tbody>'
+            + "".join(
+                f"<tr><td><code>{esc(c['path'])}</code></td><td>{esc(c.get('change_type'))}</td><td>{esc(c.get('tool'))}</td><td>{chip(c.get('actor_class'), str(c.get('actor_class')))}</td><td>+{esc(c.get('lines_added') or 0)} / -{esc(c.get('lines_removed') or 0)}</td></tr>"
+                for c in changes
+            )
+            + "</tbody></table></div></div>"
+        )
     if runs:
-        extras += '<div class="extra"><span class="lab">Tests and checks run in this conversation</span><div class="tablewrap"><table><thead><tr><th>Command</th><th>Result</th><th>Passed</th><th>Failed</th></tr></thead><tbody>' + "".join(f"<tr><td><code>{esc(str(r.get('command'))[:140])}</code></td><td>{chip('passed' if r.get('passed') else 'failed', 'passed' if r.get('passed') else 'failed')}</td><td>{esc(r.get('tests_passed'))}</td><td>{esc(r.get('tests_failed'))}</td></tr>" for r in runs) + "</tbody></table></div></div>"
+        extras += (
+            '<div class="extra"><span class="lab">Tests and checks run in this conversation</span><div class="tablewrap"><table><thead><tr><th>Command</th><th>Result</th><th>Passed</th><th>Failed</th></tr></thead><tbody>'
+            + "".join(
+                f"<tr><td><code>{esc(str(r.get('command'))[:140])}</code></td><td>{chip('passed' if r.get('passed') else 'failed', 'passed' if r.get('passed') else 'failed')}</td><td>{esc(r.get('tests_passed'))}</td><td>{esc(r.get('tests_failed'))}</td></tr>"
+                for r in runs
+            )
+            + "</tbody></table></div></div>"
+        )
     summary = ""
     if first_think or decisions:
-        bits = [f"{len(first_think)} thinking step(s)" if first_think else "", f"{len(decisions)} decision(s)" if decisions else "", f"{sum(1 for s in turn.steps if s.kind == 'action')} action(s)"]
+        bits = [
+            f"{len(first_think)} thinking step(s)" if first_think else "",
+            f"{len(decisions)} decision(s)" if decisions else "",
+            f"{sum(1 for s in turn.steps if s.kind == 'action')} action(s)",
+        ]
         summary = f'<div class="tsummary">{" · ".join(b for b in bits if b)}</div>'
     return f'<article class="turn{" rewound" if turn.abandoned else ""}" id="conversation-{turn.number}">{head}{prompt}{summary}{flow}{decided}{extras}</article>'
 
@@ -458,7 +650,11 @@ _SCRIPT = """
 def _sections(md: str) -> list[tuple[str, str]]:
     """The numbered sections of the Markdown report: ``(title, body)``."""
     parts = re.split(r"(?m)^## (.+)$", md)
-    return [(parts[i].strip(), parts[i + 1].strip("\n")) for i in range(1, len(parts) - 1, 2) if parts[i].strip() != "Contents"]
+    return [
+        (parts[i].strip(), parts[i + 1].strip("\n"))
+        for i in range(1, len(parts) - 1, 2)
+        if parts[i].strip() != "Contents"
+    ]
 
 
 def _stats(data: ChatData) -> str:
@@ -471,10 +667,14 @@ def _stats(data: ChatData) -> str:
         ("Tokens", f"{tokens['total']:,}"), ("Cost", f"${float(cost):.2f}" if cost is not None else "n/a"),
         ("Models", len(summary["models"])), ("Openings", counts["sessions"]),
     ]  # fmt: skip
-    return "".join(f'<div class="stat"><b>{esc(v)}</b><small>{esc(k)}</small></div>' for k, v in items)
+    return "".join(
+        f'<div class="stat"><b>{esc(v)}</b><small>{esc(k)}</small></div>' for k, v in items
+    )
 
 
-def render_report_html(data: ChatData, folder: str, agent_files: int = 0, raw_lines: list[Any] | None = None) -> str:
+def render_report_html(
+    data: ChatData, folder: str, agent_files: int = 0, raw_lines: list[Any] | None = None
+) -> str:
     """The complete page for a session (same content as :func:`~ccp.catalog.report.render_report`)."""
     chat = data.chat
     title = chat.get("title") or "Claude Code session"
@@ -486,15 +686,30 @@ def render_report_html(data: ChatData, folder: str, agent_files: int = 0, raw_li
     turns = build_turns(data.events, slash)
     by_turn, loose = assign_decisions(turns, decisions)
 
-    conversation = "".join(
-        turn_html(t, by_turn.get(t.number, []), data, turns[i + 1].at if i + 1 < len(turns) else None) for i, t in enumerate(turns)
-    ) or "<p><em>None recorded.</em></p>"
-    all_decisions = "".join(decision_card(d, _models_of(d, turns, by_turn), full=True) for d in decisions) or "<p><em>None recorded.</em></p>"
-    overview = '<div class="tablewrap"><table><thead><tr><th>#</th><th>Decision</th><th>Decided by</th><th>Reviewed</th><th>Conversation</th></tr></thead><tbody>' + "".join(
-        f'<tr><td>{esc(d["number"])}</td><td><a href="#decision-{esc(d["number"])}">{esc(d["title"])}</a></td><td>{decider(d, _models_of(d, turns, by_turn))}</td>'
-        f'<td>{chip(d["review"]["status"], str(d["review"]["status"]))} {esc(d["review"]["reviewer"])}</td><td>{_turn_link(d, by_turn)}</td></tr>'
-        for d in decisions
-    ) + "</tbody></table></div>" if decisions else ""
+    conversation = (
+        "".join(
+            turn_html(
+                t, by_turn.get(t.number, []), data, turns[i + 1].at if i + 1 < len(turns) else None
+            )
+            for i, t in enumerate(turns)
+        )
+        or "<p><em>None recorded.</em></p>"
+    )
+    all_decisions = (
+        "".join(decision_card(d, _models_of(d, turns, by_turn), full=True) for d in decisions)
+        or "<p><em>None recorded.</em></p>"
+    )
+    overview = (
+        '<div class="tablewrap"><table><thead><tr><th>#</th><th>Decision</th><th>Decided by</th><th>Reviewed</th><th>Conversation</th></tr></thead><tbody>'
+        + "".join(
+            f'<tr><td>{esc(d["number"])}</td><td><a href="#decision-{esc(d["number"])}">{esc(d["title"])}</a></td><td>{decider(d, _models_of(d, turns, by_turn))}</td>'
+            f"<td>{chip(d['review']['status'], str(d['review']['status']))} {esc(d['review']['reviewer'])}</td><td>{_turn_link(d, by_turn)}</td></tr>"
+            for d in decisions
+        )
+        + "</tbody></table></div>"
+        if decisions
+        else ""
+    )
 
     nav, body, number = [], [], 0
     for name, section in _sections(md):
@@ -507,7 +722,9 @@ def render_report_html(data: ChatData, folder: str, agent_files: int = 0, raw_li
         elif name.startswith("4."):
             inner = overview + all_decisions
         elif name.startswith("1."):
-            inner = markdown(section) + ("<h3>Decisions at a glance</h3>" + overview if overview else "")
+            inner = markdown(section) + (
+                "<h3>Decisions at a glance</h3>" + overview if overview else ""
+            )
         else:
             inner = markdown(section)
         body.append(f'<section class="sec" id="{sid}"><h2>{esc(name)}</h2>{inner}</section>')
@@ -521,7 +738,7 @@ def render_report_html(data: ChatData, folder: str, agent_files: int = 0, raw_li
         f'<h1>{esc(title)}</h1><div class="stats">{_stats(data)}</div></header>'
         f'<div class="bar"><nav>{"".join(nav)}</nav><div class="tools"><span>Template</span>{theme_buttons}'
         '<button id="expand">Expand all</button><button id="collapse">Collapse all</button></div></div>'
-        f'<main>{"".join(body)}</main>'
+        f"<main>{''.join(body)}</main>"
         "<footer>Generated by the Claude Capture Platform from the recorded session. The same content is in report.md.</footer>"
         f"<script>{_SCRIPT}</script></body></html>"
     )
@@ -534,7 +751,9 @@ def _turn_of(decision: dict[str, Any], by_turn: dict[int, list[dict[str, Any]]])
     return None
 
 
-def _models_of(decision: dict[str, Any], turns: list[Turn], by_turn: dict[int, list[dict[str, Any]]]) -> list[str]:
+def _models_of(
+    decision: dict[str, Any], turns: list[Turn], by_turn: dict[int, list[dict[str, Any]]]
+) -> list[str]:
     number = _turn_of(decision, by_turn)
     return next((t.models for t in turns if t.number == number), [])
 

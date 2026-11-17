@@ -340,16 +340,3 @@ def test_every_other_transcript_entry_is_in_the_last_section() -> None:
     assert "## 11. Everything else Claude Code recorded" in text
     assert "cd /work && make build" in text and "Parser work" in text
     assert "| api-request-blob | 1 |" in text
-
-
-def test_the_client_page_holds_the_report_exactly_and_cannot_be_broken_by_its_text() -> None:
-    import json
-    import re
-
-    from ccp.catalog.report_page import report_page
-
-    markdown = "# T\n\n> Account **a** → Project\n\nsee </script><script>alert(1)</script> here ✓"
-    page = report_page("T <b>", markdown)
-    assert "<title>T &lt;b&gt;</title>" in page and "</script><script>alert" not in page
-    source = re.search(r'id="report-source">(.*?)</script>', page, re.S)
-    assert source is not None and json.loads(source.group(1).replace("<\\/", "</")) == markdown

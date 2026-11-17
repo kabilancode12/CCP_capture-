@@ -379,15 +379,17 @@ class ExplorerApp:
         if chat is None or not ctx.user.may_open_chat(chat["account_id"]):
             return self._not_found(ctx)
         users.record_access(ctx.connection, ctx.user.user_id, "view_report", chat_id)
-        page = report_page(chat.get("title"), report_of_chat(ctx.connection, self.store, chat_id))
-        # The page loads its Markdown renderer from cdn.jsdelivr.net, so it gets its own policy.
+        page = report_html_of_chat(ctx.connection, self.store, chat_id)
+        # The page is self-contained (inline style and script, nothing from the network).
         return HTMLResponse(
             page,
             headers={
                 "Content-Security-Policy": (
-                    "default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; "
-                    "style-src 'unsafe-inline'; img-src data: https:; frame-ancestors 'none'"
+                    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+                    "img-src data:; frame-ancestors 'none'"
                 )
+            },
+        )
             },
         )
 
