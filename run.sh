@@ -77,6 +77,13 @@ pick_docker() { # docker as this user, or with sudo when the user is not allowed
   fi
   return 1
 }
+pip_install() { # pip_install <args>: works in a venv without pip too (made by uv, or by an old python)
+  if "$PY" -m pip --version >/dev/null 2>&1; then "$PY" -m pip install -q "$@"
+  elif "$PY" -m ensurepip --upgrade >/dev/null 2>&1; then "$PY" -m pip install -q "$@"
+  elif command -v uv >/dev/null; then uv pip install -q --python "$PY" "$@"
+  else fail "pip is missing in .venv and neither ensurepip nor uv can add it: delete .venv and run again"
+  fi
+}
 compose() { "${DOCKER[@]}" compose --env-file .env -f infra/docker-compose.yml "$@"; }
 health() { curl -s -m 3 "http://127.0.0.1:${CCP_API_PORT:-8000}/health" 2>/dev/null | grep -q '"status":"ok"'; }
 
@@ -179,7 +186,7 @@ if [[ "${1:-}" == "developer" ]]; then
   PYTHON="$(command -v python3.13 || command -v python3.12 || command -v python3 || true)"
   "$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' || fail "python 3.12+ is needed"
   [[ -x "$PY" ]] || "$PYTHON" -m venv "$VENV"
-  "$PY" -m pip install -q --upgrade pip && "$PY" -m pip install -q -e .
+  pip_install -e .
   ok "capture client installed"
   echo "  Ask the person who runs the CCP server for its address and the ingest token."
   SERVER="$(ask "CCP server address" "http://127.0.0.1:8000")"
@@ -222,8 +229,7 @@ fi
 # ---------------------------------------------------------------------------------- 2. python
 bold "2/9 Python environment"
 [[ -x "$PY" ]] || "$PYTHON" -m venv "$VENV"
-"$PY" -m pip install -q --upgrade pip
-"$PY" -m pip install -q -e ".[server]"
+pip_install -e ".[server]"
 ok "CCP installed in .venv"
 
 # ---------------------------------------------------------------------------------- 3. .env
