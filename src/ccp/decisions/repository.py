@@ -204,18 +204,18 @@ def find_chats(connection: pg8000.dbapi.Connection, text: str) -> list[str]:
 def chat_state(connection: pg8000.dbapi.Connection, session_id: str) -> ChatState | None:
     """The facts that decide whether to process a chat; None if there is no such chat."""
     cursor = connection.cursor()
-    cursor.execute(_STATE, (session_id,))
+    cursor.execute(_STATE, (PROMPT_VERSION, session_id))
     row = cursor.fetchone()
     connection.rollback()
     if row is None:
         return None
-    return ChatState(bool(row[0]), bool(row[1]), row[2], row[3])
+    return ChatState(bool(row[0]), bool(row[1]), row[2], row[3], bool(row[4]))
 
 
 def pending_chats(connection: pg8000.dbapi.Connection, force: bool) -> list[str]:
     """Chats to process, most recently active first (every non-empty chat with ``force``)."""
     cursor = connection.cursor()
-    cursor.execute(_PENDING, (force,))
+    cursor.execute(_PENDING, (force, PROMPT_VERSION))
     chats = [row[0] for row in cursor.fetchall()]
     connection.rollback()
     return chats

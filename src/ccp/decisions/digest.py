@@ -414,7 +414,9 @@ def _question_text(data: Any) -> str:
         if not isinstance(item, dict):
             continue
         options = " | ".join(
-            f"{o.get('label')} ({o.get('description')})" if o.get("description") else str(o.get("label"))
+            f"{o.get('label')} ({o.get('description')})"
+            if o.get("description")
+            else str(o.get("label"))
             for o in item.get("options") or []
             if isinstance(o, dict)
         )
@@ -437,7 +439,9 @@ def _questions_and_plans(cursor: pg8000.dbapi.Cursor, session_id: str) -> list[_
         said = _shorten(_flat(content), _ANSWER_CHARS)
         if name == _ASK_TOOL:
             ref = LineRef(event_id, key, line, "ask")
-            detail = f"Claude asked the developer {_question_text(data)} -> answer: {said or 'none'}"
+            detail = (
+                f"Claude asked the developer {_question_text(data)} -> answer: {said or 'none'}"
+            )
             entries.append(_Entry(_when(at), ref, "ASK", detail=detail))
         else:
             state = "rejected" if is_error else ("approved" if use_id in answers else "no answer")
