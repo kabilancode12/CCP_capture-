@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from ccp.capture.hooks import HookHandler, HookPayload, parse_payload
+from ccp.capture.snapshots.context import SnapshotContext
 from ccp.capture.state import StateStore
 from ccp.environment import EnvironmentRecord
 
@@ -17,14 +18,21 @@ class RecordingSnapshots:
 
     def __init__(self, note: str | None = "snapshot 0001, pushed") -> None:
         self.calls: list[tuple[str, str, Path, str | None]] = []
+        self.contexts: list[SnapshotContext | None] = []
         self.note = note
 
-    def start(self, session_id: str, cwd: Path) -> str | None:
+    def start(
+        self, session_id: str, cwd: Path, context: SnapshotContext | None = None
+    ) -> str | None:
         self.calls.append(("start", session_id, cwd, None))
+        self.contexts.append(context)
         return self.note
 
-    def snapshot(self, session_id: str, cwd: Path, event: str) -> str | None:
+    def snapshot(
+        self, session_id: str, cwd: Path, event: str, context: SnapshotContext | None = None
+    ) -> str | None:
         self.calls.append(("snapshot", session_id, cwd, event))
+        self.contexts.append(context)
         return self.note
 
 
@@ -132,7 +140,7 @@ def test_session_start_takes_the_baseline_and_backs_up_branches(
     assert "code: snapshot 0001, pushed" in outcome
 
 
-@pytest.mark.parametrize("event", ["UserPromptSubmit", "PreCompact"])
+@pytest.mark.parametrize("event", ["PreCompact"])
 def test_events_that_hold_claude_up_or_repeat_do_not_snapshot(
     client: RecordingClient,
     snapshots: RecordingSnapshots,
@@ -196,3 +204,53 @@ def test_session_end_passes_the_working_directory_to_the_background_flush(
     assert flushed == [(SESSION, transcript, work_dir)]  # the flush takes the final snapshot
     assert snapshots.calls == []  # nothing is done inline: SessionEnd has almost no time
     assert outcome == "end queued; flush started in the background"
+
+
+def test_a_prompt_snapshots_what_a_person_changed_since_the_last_one(
+    client: RecordingClient,
+    snapshots: RecordingSnapshots,
+    transcript: Path,
+    work_dir: Path,
+    tmp_path: Path,
+) -> None:
+    _handler(client, snapshots, tmp_path).handle(_payload("UserPromptSubmit", transcript, work_dir))
+    assert snapshots.calls == [("snapshot", SESSION, work_dir, "UserPromptSubmit")]
+    assert snapshots.contexts[0] is not None and snapshots.contexts[0].actor == "human"
+
+
+@pytest.mark.parametrize(
+    ("tool", "actor"),
+    [("Edit", "ai_edit"), ("Write", "ai_edit"), ("Bash", "ai_command"), ("Other", "ai_other")],
+)
+def test_after_a_tool_call_the_snapshot_says_who_made_the_change(
+    client: RecordingClient,
+    snapshots: RecordingSnapshots,
+    transcript: Path,
+    work_dir: Path,
+    tmp_path: Path,
+    tool: str,
+    actor: str,
+) -> None:
+    transcript.write_text(
+        json.dumps({"type": "user", "uuid": "p1", "message": {"content": "add a parser please"}})
+        + "\n"
+        + json.dumps({"type": "assistant", "message": {"model": "claude-opus-5-5", "content": []}})
+        + "\n",
+        encoding="utf-8",
+    )
+    text = json.dumps(
+        {"hook_event_name": "PostToolUse", "session_id": SESSION, "cwd": str(work_dir),
+         "transcript_path": str(transcript), "tool_name": tool, "tool_use_id": "toolu_1",
+         "tool_input": {"file_path": "src/a.py"}}
+    )  # fmt: skip
+    payload = parse_payload(text)
+    assert payload is not None
+    outcome = _handler(client, snapshots, tmp_path).handle(payload)
+
+    context = snapshots.contexts[0]
+    assert snapshots.calls == [("snapshot", SESSION, work_dir, "PostToolUse")]
+    assert context is not None and context.actor == actor and context.tool == tool
+    assert context.tool_use_id == "toolu_1" and context.model == "claude-opus-5-5"
+    assert context.prompt_id == "p1" and context.prompt_excerpt == "add a parser please"
+    assert context.target == "src/a.py" and "code: snapshot" in outcome
+    assert client.synced == []  # no upload here: a tool call must stay fast

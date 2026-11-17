@@ -36,10 +36,10 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from ccp.catalog.builder import report_of_chat
+from ccp.catalog.builder import report_html_of_chat, report_of_chat
 from ccp.db.connection import connect
 from ccp.db.labels import LabelError, remove_label, set_account_label, set_project_label
-from ccp.explorer import pages, queries, users
+from ccp.explorer import library_views, pages, queries, users
 from ccp.explorer.security import PasswordError, SessionData, SessionSigner, verify_password
 from ccp.explorer.users import UiUser, UserError
 from ccp.settings import DatabaseSettings
@@ -150,9 +150,18 @@ class ExplorerApp:
             self._route("/project/{project_id:int}", self.project, ["GET"]),
             self._route("/chat/{chat_id}", self.chat, ["GET"]),
             self._route("/chat/{chat_id}/report.md", self.report, ["GET"]),
+            self._route("/chat/{chat_id}/report.html", self.report_html, ["GET"]),
             self._route(
                 "/chat/{chat_id}/decisions/{decision_id:int}/review", self.review, ["POST"]
             ),
+            self._route("/approaches", library_views.approaches, ["GET"]),
+            self._route("/approaches/compare", library_views.compare, ["GET"]),
+            self._route("/approach/{decision_id:int}", library_views.approach, ["GET"]),
+            self._route("/timeline", library_views.timeline, ["GET"]),
+            self._route("/review", library_views.review_queue, ["GET"]),
+            self._route("/activity", library_views.activity, ["GET"]),
+            self._route("/insights", library_views.insights, ["GET"]),
+            self._route("/alerts", library_views.alerts, ["GET"]),
             self._route("/access-log", self.access_log, ["GET"]),
             self._route("/admin/users", self.admin_users, ["GET"]),
             self._route("/admin/users", self.create_user, ["POST"]),
@@ -361,6 +370,27 @@ class ExplorerApp:
             )
         )
 
+    def report_html(self, ctx: Context) -> Response:
+        """The whole chat as a styled page (for showing to a client). Same access rule."""
+        if ctx.user is None:
+            return ctx.redirect("/login")
+        chat_id = str(ctx.request.path_params["chat_id"])
+        chat = queries.chat_summary(ctx.connection, chat_id)
+        if chat is None or not ctx.user.may_open_chat(chat["account_id"]):
+            return self._not_found(ctx)
+        users.record_access(ctx.connection, ctx.user.user_id, "view_report", chat_id)
+        page = report_html_of_chat(ctx.connection, self.store, chat_id)
+        # The page is self-contained (inline style and script, nothing from the network).
+        return HTMLResponse(
+            page,
+            headers={
+                "Content-Security-Policy": (
+                    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+                    "img-src data:; frame-ancestors 'none'"
+                )
+            },
+        )
+
     def _tab_body(self, ctx: Context, chat_id: str, tab: str) -> str:
         """The HTML of one tab of a chat."""
         connection = ctx.connection
@@ -382,6 +412,8 @@ class ExplorerApp:
             return pages.tests_tab(*queries.test_runs(connection, chat_id))
         if tab == "code":
             return pages.code_tab(*queries.file_changes(connection, chat_id))
+        if tab == "changes":
+            return library_views.changes_tab(ctx, chat_id)
         if tab == "corrections":
             return pages.corrections_tab(queries.corrections(connection, chat_id))
         if tab == "agents":

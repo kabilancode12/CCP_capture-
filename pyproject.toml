@@ -61,6 +61,10 @@ ccp-server = "ccp.server.main:main"
 ccp-catalog = "ccp.catalog.cli:main"
 ccp-decisions = "ccp.decisions.cli:main"
 ccp-explorer = "ccp.explorer.cli:main"
+# The approach library: search, compare and restore decisions with their code.
+ccp-approaches = "ccp.approaches.cli:main"
+# MCP server: Claude asks "was this tried before?" (claude mcp add ccp-approaches -- ccp-mcp).
+ccp-mcp = "ccp.mcp.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ccp"]

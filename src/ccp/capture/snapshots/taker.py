@@ -28,20 +28,28 @@ very large repository makes it slower); text files over 20 MB are excluded as un
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
+import socket
 import tempfile
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ccp.capture.snapshots.git import Git
+from ccp.capture.snapshots.context import HUMAN, SnapshotContext
+from ccp.capture.snapshots.git import Git, GitError
 from ccp.capture.state import StateStore
 from ccp.redaction.redactor import redact_string
-from ccp.redaction.rules import SECRET_RULES
+from ccp.redaction.rules import SNAPSHOT_SECRET_RULES
 from ccp.storage.keys import check_id
 
 REF_NAMESPACE = "refs/claude-capture"
+CHAIN_NAMESPACE = f"{REF_NAMESPACE}/chain"  # one growing history per developer, machine and branch
+PUSHED_BRANCH_PREFIX = "refs/heads/ccp"  # where the chain is published in the capture project
+LOCK_STALE_SECONDS = 60.0
+LOCK_WAIT_SECONDS = 8.0
 
 # Text files larger than this are not scanned, so they are excluded (fail closed).
 SECRET_SCAN_LIMIT_BYTES = 20 * 1024 * 1024
@@ -74,6 +82,10 @@ class SnapshotResult:
     commit: str | None = None
     excluded: tuple[str, ...] = ()
     local_only: bool = False
+    chain_ref: str | None = None
+    published_ref: str | None = None
+    parent: str | None = None
+    tree: str | None = None
 
 
 def user_slug(git: Git) -> str:
@@ -85,6 +97,44 @@ def user_slug(git: Git) -> str:
 def _safe_name(name: str) -> str:
     """Make a file name safe to put in a commit message line (no control characters)."""
     return _CONTROL_CHARACTERS.sub("?", name)
+
+
+def host_slug() -> str:
+    """The machine's name made safe for a ref."""
+    return _UNSAFE_SLUG_CHARACTERS.sub("_", socket.gethostname() or "host")
+
+
+def _ref_part(text: str) -> str:
+    """A branch name as one safe ref component (slashes are kept as ``__``)."""
+    return _UNSAFE_SLUG_CHARACTERS.sub("_", text.replace("/", "__")).strip(".") or "detached"
+
+
+class _RepoLock:
+    """A lock file so two hooks (parallel tool calls, sub-agents) never use the index together."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def __enter__(self) -> _RepoLock:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + LOCK_WAIT_SECONDS
+        while True:
+            try:
+                os.close(os.open(self._path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                return self
+            except FileExistsError:
+                try:
+                    if time.time() - self._path.stat().st_mtime > LOCK_STALE_SECONDS:
+                        self._path.unlink(missing_ok=True)  # left by a killed hook
+                        continue
+                except OSError:
+                    continue
+                if time.monotonic() > deadline:
+                    raise TimeoutError("the snapshot lock is held by another hook") from None
+                time.sleep(0.05)
+
+    def __exit__(self, *_: object) -> None:
+        self._path.unlink(missing_ok=True)
 
 
 def file_has_secret(path: Path) -> bool:
@@ -102,7 +152,7 @@ def file_has_secret(path: Path) -> bool:
         return False
     if len(data) > SECRET_SCAN_LIMIT_BYTES:
         return True
-    _, fired = redact_string(data.decode("utf-8", errors="replace"), SECRET_RULES)
+    _, fired = redact_string(data.decode("utf-8", errors="replace"), SNAPSHOT_SECRET_RULES)
     return bool(fired)
 
 
@@ -121,18 +171,28 @@ class SnapshotTaker:
         self._state = state
         self._work_dir = work_dir
 
-    def take(self, session_id: str, event: str) -> SnapshotResult:
+    def take(
+        self, session_id: str, event: str, context: SnapshotContext | None = None
+    ) -> SnapshotResult:
         """Snapshot the working tree if it changed.
+
+        Without a ``context`` the snapshot is a hidden per-session ref on top of HEAD (the first
+        form of this module). With one it is added to the **capture chain** of this developer,
+        machine and branch: a linear history in which every commit is one change, labelled with who
+        made it (see :class:`~ccp.capture.snapshots.context.SnapshotContext`).
 
         Args:
             session_id: Claude Code's session id.
             event: The hook event that triggered it (recorded in the commit message).
+            context: Who or what made the change; ``None`` for the per-session form.
 
         Raises:
             GitError: If a Git command fails.
             ValueError: If ``session_id`` is not a safe identifier.
         """
         check_id("session id", session_id)
+        if context is not None:
+            return self._take_chained(session_id, event, context)
         head = self._git.head()
         tree, excluded = self._build_tree(head)
 
@@ -150,6 +210,54 @@ class SnapshotTaker:
         self._state.set_marker(session_id, SEQ_MARKER, str(sequence))
         self._state.set_marker(session_id, LAST_TREE_MARKER, tree)
         return SnapshotResult("created", ref, commit, excluded, local_only)
+
+    def chain_ref(self) -> str:
+        """The local ref of this developer's capture chain for the current branch."""
+        parts = (user_slug(self._git), host_slug(), _ref_part(self._git.branch()))
+        return f"{CHAIN_NAMESPACE}/{'/'.join(parts)}"
+
+    def published_ref(self) -> str:
+        """The chain's branch name in the capture project: ``ccp/<user>/<host>/<branch>``."""
+        return self.chain_ref().replace(CHAIN_NAMESPACE, PUSHED_BRANCH_PREFIX, 1)
+
+    def _take_chained(
+        self, session_id: str, event: str, context: SnapshotContext
+    ) -> SnapshotResult:
+        """Add one commit to the capture chain if the working tree differs from its tip."""
+        key = hashlib.sha1(str(self._git.root).encode()).hexdigest()[:12]  # noqa: S324
+        with _RepoLock(self._work_dir / f"lock-{key}"):
+            head = self._git.head()
+            tree, excluded = self._build_tree(head, persistent=True)
+            ref = self.chain_ref()
+            try:
+                tip: str | None = self._git.run("rev-parse", "-q", "--verify", ref)
+            except GitError:
+                tip = None
+            if tip is not None:
+                if self._git.run("rev-parse", f"{tip}^{{tree}}") == tree:
+                    return SnapshotResult("unchanged", excluded=excluded, chain_ref=ref)
+            elif head and self._git.run("rev-parse", f"{head}^{{tree}}") == tree:
+                return SnapshotResult("no-changes", excluded=excluded, chain_ref=ref)
+            local_only = self._unpushed_commits_have_secret(session_id, head)
+            sequence = int(self._state.get_marker(session_id, SEQ_MARKER) or 0) + 1
+            parent = tip or head
+            commit = self._commit(
+                tree, parent, session_id, sequence, event, excluded, context, head
+            )
+            self._git.run("update-ref", ref, commit)
+            self._state.set_marker(session_id, SEQ_MARKER, str(sequence))
+            self._state.set_marker(session_id, LAST_TREE_MARKER, tree)
+            return SnapshotResult(
+                "created",
+                ref,
+                commit,
+                excluded,
+                local_only,
+                ref,
+                self.published_ref(),
+                parent,
+                tree,
+            )
 
     def backup_branches(self) -> list[str]:
         """Point a hidden ref at the tip of every local branch; return the refspecs to push.
@@ -171,24 +279,40 @@ class SnapshotTaker:
 
     # ------------------------------------------------------------ steps
 
-    def _build_tree(self, head: str | None) -> tuple[str, tuple[str, ...]]:
-        """Build the snapshot tree in a temporary index; return it and the excluded files."""
+    def _build_tree(
+        self, head: str | None, persistent: bool = False
+    ) -> tuple[str, tuple[str, ...]]:
+        """Build the snapshot tree in an index file; return it and the excluded files.
+
+        A temporary index is used once and removed. A *persistent* one (kept in the work folder,
+        per repository) remembers file times, so only changed files are read again: this is what
+        keeps a snapshot after every tool call fast. It is only a cache; the developer's own
+        index is never used or changed.
+        """
         self._work_dir.mkdir(parents=True, exist_ok=True)
-        handle, index_name = tempfile.mkstemp(prefix="index-", dir=self._work_dir)
-        os.close(handle)
-        index = Path(index_name)
+        if persistent:
+            name = hashlib.sha1(str(self._git.root).encode()).hexdigest()[:12]  # noqa: S324
+            index = self._work_dir / f"index-{name}"
+            seed = not index.exists()
+        else:
+            handle, index_name = tempfile.mkstemp(prefix="index-", dir=self._work_dir)
+            os.close(handle)
+            index = Path(index_name)
+            index.unlink()  # git wants to create the index file itself
+            seed = True
         env = {"GIT_INDEX_FILE": str(index)}  # the developer's own index is never used or changed
         try:
-            index.unlink()  # git wants to create the index file itself
-            if head:
-                self._git.run("read-tree", head, env=env)
-            else:
-                self._git.run("read-tree", "--empty", env=env)
+            if seed:
+                if head:
+                    self._git.run("read-tree", head, env=env)
+                else:
+                    self._git.run("read-tree", "--empty", env=env)
             self._git.run("add", "-A", ".", env=env)  # respects .gitignore
             excluded = self._exclude_secrets(env, head)
             return self._git.run("write-tree", env=env), excluded
         finally:
-            index.unlink(missing_ok=True)
+            if not persistent:
+                index.unlink(missing_ok=True)
 
     def _exclude_secrets(self, env: dict[str, str], head: str | None) -> tuple[str, ...]:
         """Take files with secrets out of the temporary index; return their names."""
@@ -223,7 +347,7 @@ class SnapshotTaker:
         if head is None or self._state.get_marker(session_id, SCANNED_HEAD_MARKER) == head:
             return False
         patch = self._git.run("log", "-p", "--format=", head, "--not", "--remotes", timeout=30)
-        _, fired = redact_string(patch[:PATCH_SCAN_LIMIT_BYTES], SECRET_RULES)
+        _, fired = redact_string(patch[:PATCH_SCAN_LIMIT_BYTES], SNAPSHOT_SECRET_RULES)
         if fired:
             return True
         self._state.set_marker(session_id, SCANNED_HEAD_MARKER, head)
@@ -232,37 +356,69 @@ class SnapshotTaker:
     def _commit(
         self,
         tree: str,
-        head: str | None,
+        parent: str | None,
         session_id: str,
         sequence: int,
         event: str,
         excluded: tuple[str, ...],
+        context: SnapshotContext | None = None,
+        head: str | None = None,
     ) -> str:
-        """Create the snapshot commit on top of HEAD (a root commit in an empty repository)."""
+        """Create the snapshot commit on top of ``parent`` (a root commit if there is none)."""
+        started_from = head if context is not None else parent
         captured_at = datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-        message = "\n".join(
-            [
-                "claude-capture snapshot",
-                "",
-                f"session: {session_id}",
-                f"seq: {sequence}",
-                f"event: {_safe_name(event)}",
-                f"branch: {_safe_name(self._git.branch())}",
-                f"started-from: {head or 'none'}",
-                f"captured-at: {captured_at}",
-                f"excluded: {', '.join(excluded) if excluded else 'none'}",
-                "",
-            ]
-        )
+        lines = [
+            "claude-capture snapshot" if context is None else _subject(context),
+            "",
+        ]
+        if context is not None and context.prompt_excerpt:
+            lines += [f"Why: {_safe_name(context.prompt_excerpt)}", ""]
+        lines += [
+            f"session: {session_id}",
+            f"seq: {sequence}",
+            f"event: {_safe_name(event)}",
+            f"branch: {_safe_name(self._git.branch())}",
+            f"started-from: {started_from or 'none'}",
+            f"captured-at: {captured_at}",
+            f"excluded: {', '.join(excluded) if excluded else 'none'}",
+            "",
+        ]
         # The developer's own identity if they have one; otherwise a fixed one, so it never fails.
         configured_name, configured_email = self._git.identity()
         name = configured_name or "claude-capture"
         email = configured_email or "capture@localhost"
+        author = name
+        if context is not None:
+            lines += _trailers(context, name, session_id, event)
+            if (
+                context.actor != HUMAN
+            ):  # the author says "AI", on the developer's own e-mail address
+                author = f"Claude ({context.model or 'AI'}) for {name}"
         env = {
-            "GIT_AUTHOR_NAME": name,
+            "GIT_AUTHOR_NAME": author,
             "GIT_AUTHOR_EMAIL": email,
             "GIT_COMMITTER_NAME": name,
             "GIT_COMMITTER_EMAIL": email,
         }
-        parents = ["-p", head] if head else []
-        return self._git.run("commit-tree", tree, *parents, input_text=message, env=env)
+        parents = ["-p", parent] if parent else []
+        return self._git.run("commit-tree", tree, *parents, input_text="\n".join(lines), env=env)
+
+
+def _subject(context: SnapshotContext) -> str:
+    """The first line of a capture commit: who, and what."""
+    who = "Human" if context.actor == HUMAN else f"AI · {context.model or 'unknown model'}"
+    if context.actor == HUMAN:
+        what = "Changes made outside Claude"
+    else:
+        what = " ".join(p for p in (context.tool or "Changes", context.target) if p)
+    return _safe_name(f"[{who}] {what}")[:200]
+
+
+def _trailers(context: SnapshotContext, developer: str, session_id: str, event: str) -> list[str]:
+    """The machine-readable ``CCP-*`` lines at the end of a capture commit."""
+    fields = [
+        ("CCP-Actor", context.actor), ("CCP-Developer", developer), ("CCP-Model", context.model),
+        ("CCP-Session", session_id), ("CCP-Prompt", context.prompt_id), ("CCP-Tool", context.tool),
+        ("CCP-Tool-Use", context.tool_use_id), ("CCP-Agent", context.agent), ("CCP-Event", event),
+    ]  # fmt: skip
+    return [f"{key}: {_safe_name(str(value))}" for key, value in fields if value]

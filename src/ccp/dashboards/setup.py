@@ -153,7 +153,7 @@ def ensure_cards(client: MetabaseClient, database_id: int, collection_id: int) -
             client.request("PUT", f"/api/card/{known[card.name]['id']}", body)
             ids[card.name] = int(known[card.name]["id"])
         else:
-            ids[card.name] = int(client.request("POST", "/api/card", body)["id"])
+            ids[card.name] = int(client.create("/api/card", body)["id"])
     return ids
 
 

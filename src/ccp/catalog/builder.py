@@ -29,6 +29,7 @@ from ccp.catalog.names import (
     slugify,
 )
 from ccp.catalog.report import render_report
+from ccp.catalog.report_html import render_report_html
 from ccp.catalog.transcripts import RawStore, read_lines, transcript_streams
 from ccp.index.agents import agent_id_of
 from ccp.storage import ObjectNotFoundError, StorageError
@@ -38,10 +39,12 @@ logger = logging.getLogger("ccp.catalog")
 
 SUMMARY_FILE = "00_summary.json"
 REPORT_FILE = "report.md"
+REPORT_HTML = "report.html"
 INDEX_KEY = f"{CATALOG_ROOT}/index.json"
 README_KEY = f"{CATALOG_ROOT}/README.md"
 _JSON = "application/json"
 _MARKDOWN = "text/markdown; charset=utf-8"
+_HTML = "text/html; charset=utf-8"
 
 
 class CatalogError(RuntimeError):
@@ -91,7 +94,7 @@ def _folder_path(row: Row) -> str:
     )
     project = project_folder(row["project_label"], row["project_name"])
     chat = chat_folder(row["started_at"] or row["last_activity_at"], row["title"], row["chat_id"])
-    return f"{ACCOUNTS_FOLDER}/{account}/projects/{project}/chats/{chat}"
+    return f"{ACCOUNTS_FOLDER}/{account}/projects/{project}/sessions/{chat}"
 
 
 def _remove_folder(store: CatalogStore, listing: _Listing, folder: str) -> None:
@@ -155,13 +158,20 @@ def _build_chat(
     streams = transcript_streams(store, session_id)
     agent_streams = sorted(s for s in streams if s != MAIN_STREAM)
     agent_files = _agent_file_names(data, agent_streams)
+    raw_main = read_lines(store, streams.get(MAIN_STREAM, []))  # the report holds every line
+    report_text = render_report(data, folder, len(agent_files), raw_main)
+    report_html = render_report_html(data, folder, len(agent_files), raw_main)
 
     files: dict[str, tuple[bytes, str]] = {
         "README.md": (
             documents.build_readme(data, folder.rsplit("/", 1)[-1], len(agent_files)).encode(),
             _MARKDOWN,
         ),
-        REPORT_FILE: (render_report(data, folder, len(agent_files)).encode(), _MARKDOWN),
+        REPORT_FILE: (report_text.encode(), _MARKDOWN),
+        REPORT_HTML: (
+            report_html.encode(),
+            _HTML,
+        ),
         SUMMARY_FILE: (
             documents.to_json(documents.build_summary(data, folder), sort_keys=True),
             _JSON,
@@ -180,7 +190,7 @@ def _build_chat(
     }
     if not keep_transcripts:
         files["transcript/main.json"] = (
-            documents.to_json(read_lines(store, streams.get(MAIN_STREAM, []))),
+            documents.to_json(raw_main),
             _JSON,
         )
         for stream in agent_streams:
@@ -214,7 +224,7 @@ def _write_index(connection: Any, store: CatalogStore, listing: _Listing) -> Non
         if f"{folder}/{SUMMARY_FILE}" not in listing.folders.get(folder, set()):
             continue  # not built (yet)
         account_path, _, rest = folder.removeprefix(f"{ACCOUNTS_FOLDER}/").partition("/projects/")
-        project_name, _, chat_name = rest.partition("/chats/")
+        project_name, _, chat_name = rest.partition("/sessions/")
         account = accounts.setdefault(
             account_path,
             {
@@ -230,10 +240,10 @@ def _write_index(connection: Any, store: CatalogStore, listing: _Listing) -> Non
                 "project_id": row["project_id"],
                 "name": row["project_label"] or row["project_name"],
                 "path": f"{ACCOUNTS_FOLDER}/{account_path}/projects/{project_name}",
-                "chats": {},
+                "sessions": {},
             },
         )
-        project["chats"][chat_name] = {
+        project["sessions"][chat_name] = {
             "chat_id": row["chat_id"],
             "title": row["title"],
             "started_at": row["started_at"],
@@ -242,7 +252,7 @@ def _write_index(connection: Any, store: CatalogStore, listing: _Listing) -> Non
         }
     tree = [
         {**account, "projects": [
-            {**project, "chats": [project["chats"][name] for name in sorted(project["chats"])]}
+            {**project, "sessions": [project["sessions"][n] for n in sorted(project["sessions"])]}
             for _, project in sorted(account["projects"].items())
         ]}
         for _, account in sorted(accounts.items())
@@ -265,8 +275,8 @@ def catalog_chat(
             after every turn so that ``report.md`` follows the conversation cheaply).
 
     Returns:
-        The folder of the chat in the bucket (``catalog/accounts/.../chats/<chat>``, no trailing
-        slash), or None if the chat is empty (it has no folder; an old one is removed).
+        The folder of the session in the bucket (``catalog/accounts/.../sessions/<session>``, no
+        trailing slash), or None if the chat is empty (it has no folder; an old one is removed).
 
     Raises:
         CatalogError: If there is no such chat.
@@ -309,6 +319,32 @@ def catalog_all(connection: Any, store: CatalogStore) -> CatalogResult:
     return result
 
 
+def report_html_of_chat(connection: Any, store: CatalogStore | None, chat_id: str) -> str:
+    """The designed web page (``report.html``) of one chat, made now."""
+    data, folder, agents, raw = _report_inputs(connection, store, chat_id)
+    return render_report_html(data, folder, agents, raw)
+
+
+def _report_inputs(
+    connection: Any, store: CatalogStore | None, chat_id: str
+) -> tuple[ChatData, str, int, list[Any] | None]:
+    """What a report is made from: the chat's data, folder, sub-agent count and raw lines."""
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT session_id FROM session WHERE session_id LIKE %s LIMIT 2", (chat_id + "%",)
+    )
+    found = [row[0] for row in cursor.fetchall()]
+    if len(found) != 1:
+        raise CatalogError(f"{chat_id!r} matches {len(found)} chats; give more of the id.")
+    data = load_chat(connection, found[0])
+    if data is None:
+        raise CatalogError(f"There is no chat {chat_id!r}.")
+    streams = transcript_streams(store, found[0]) if store is not None else {}
+    agents = [s for s in streams if s != MAIN_STREAM]
+    raw = read_lines(store, streams.get(MAIN_STREAM, [])) if store is not None else None
+    return data, _folder_path(data.chat), len(agents), raw
+
+
 def report_of_chat(connection: Any, store: CatalogStore | None, chat_id: str) -> str:
     """The single-file Markdown report of one chat, made now (not read from the bucket).
 
@@ -320,17 +356,5 @@ def report_of_chat(connection: Any, store: CatalogStore | None, chat_id: str) ->
     Raises:
         CatalogError: If there is no such chat, or the start of the id matches several.
     """
-    cursor = connection.cursor()
-    cursor.execute(
-        "SELECT session_id FROM session WHERE session_id LIKE %s LIMIT 2", (chat_id + "%",)
-    )
-    found = [row[0] for row in cursor.fetchall()]
-    if len(found) != 1:
-        raise CatalogError(f"{chat_id!r} matches {len(found)} chats; give more of the id.")
-    data = load_chat(connection, found[0])
-    if data is None:
-        raise CatalogError(f"There is no chat {chat_id!r}.")
-    folder = _folder_path(data.chat)
-    streams = transcript_streams(store, found[0]) if store is not None else {}
-    agents = [s for s in streams if s != MAIN_STREAM]
-    return render_report(data, folder, len(agents))
+    data, folder, agents, raw = _report_inputs(connection, store, chat_id)
+    return render_report(data, folder, agents, raw)

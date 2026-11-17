@@ -14,7 +14,7 @@ WORKDIR /app
 # Install the package with the server extra (PostgreSQL driver, MinIO client, web server).
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install ".[server]"
+RUN pip install ".[server]" anthropic  # anthropic: decisions through ANTHROPIC_API_KEY (no claude command here)
 
 # The migration files: `ccp-server --migrate` (CCP_SERVER_MIGRATE=true) applies them at start-up.
 COPY db/migrations ./db/migrations

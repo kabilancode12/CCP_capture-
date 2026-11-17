@@ -275,3 +275,54 @@ class _DictStore:
 
     def get(self, key: str) -> bytes:
         return self.objects[key]
+
+
+# ---------------------------------------------------------------- snapshot commits (shadow commits)
+
+SHA = "a" * 40
+
+
+def _snapshot(**changes: Any) -> dict[str, Any]:
+    record = {
+        "sha": SHA, "parent_sha": "b" * 40, "actor": "ai_edit", "captured_at": "2026-11-16T10:00:00+00:00",
+        "files": [{"path": "src/a.py", "state": "M"}], "files_total": 1, "seq": 3, "event": "PostToolUse",
+        "chain": "ccp/dev/host/main", "model": "claude-opus-5-5", "tool": "Edit",
+        "tool_use_id": "toolu_1", "prompt_uuid": "p1", "prompt_excerpt": "fix the bug", "agent": "main",
+    }  # fmt: skip
+    return {**record, **changes}
+
+
+def test_a_snapshot_is_stored_once_and_creates_its_session(
+    client: TestClient, database: DatabaseSettings
+) -> None:
+    first = client.post("/v1/sessions/sess-snap/snapshots", json=_snapshot(), headers=AUTH)
+    again = client.post("/v1/sessions/sess-snap/snapshots", json=_snapshot(), headers=AUTH)
+    assert first.status_code == again.status_code == 200
+    assert first.json()["new"] is True and again.json()["new"] is False
+
+    rows = _rows(
+        database,
+        "SELECT sha, session_id, actor, model, tool_use_id, prompt_uuid, chain, files::text, "
+        "files_total FROM shadow_commit",
+    )
+    assert len(rows) == 1 and rows[0][:7] == (
+        SHA, "sess-snap", "ai_edit", "claude-opus-5-5", "toolu_1", "p1", "ccp/dev/host/main",
+    )  # fmt: skip
+    assert json.loads(rows[0][7]) == [{"path": "src/a.py", "state": "M"}] and rows[0][8] == 1
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [{"sha": "nothex"}, {"actor": "robot"}, {"captured_at": "yesterday"}, {"files": "x"},
+     {"files": [{"path": "a", "state": "Z"}]}, {"model": "bad\nmodel"}, {"files_total": 0}],
+)  # fmt: skip
+def test_a_malformed_snapshot_is_refused_without_repeating_it(
+    client: TestClient, database: DatabaseSettings, bad: dict[str, Any]
+) -> None:
+    response = client.post("/v1/sessions/sess-snap/snapshots", json=_snapshot(**bad), headers=AUTH)
+    assert response.status_code == 422 and "bad" not in response.text
+    assert _rows(database, "SELECT 1 FROM shadow_commit") == []
+
+
+def test_a_snapshot_needs_the_token(client: TestClient) -> None:
+    assert client.post("/v1/sessions/sess-snap/snapshots", json=_snapshot()).status_code == 401

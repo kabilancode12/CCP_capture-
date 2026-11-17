@@ -26,7 +26,7 @@ FILES = {
     "02_sessions.json": "each time the chat was opened (start, resume, clear, compact)",
     "03_decisions.json": "the decisions found in the chat and who reviewed them",
     "04_tests.json": "test runs and the single test cases in them",
-    "05_code_changes.json": "every file change, with its role, and the commits linked to the chat",
+    "05_code_changes.json": "file changes, linked commits, capture commits (who made each)",
     "06_corrections.json": "things that had to be put right (failed tests fixed, retries, rework)",
     "07_subagents_and_workflows.json": "sub-agents, workflow runs and slash commands",
     "08_usage.json": "tokens, effort and cost per model",
@@ -247,9 +247,11 @@ def build_code_changes(data: ChatData) -> dict[str, Any]:
             "lines_removed": sum(_int(c["lines_removed"]) for c in data.file_changes),
             "tests_added": sum(_int(c["tests_added"]) for c in data.file_changes),
             "changes_by_role": dict(sorted(by_role.items())),
+            "capture_commits": len(data.shadow_commits),
         },
         "changes": changes,
         "commits": data.commits,
+        "capture_commits": data.shadow_commits,
     }
 
 
@@ -346,7 +348,8 @@ def build_readme(data: ChatData, folder_name: str, agent_files: int) -> str:
 
 TOP_README = """# CCP catalog
 
-A readable view of the captured Claude Code chats. It is **derived** from the raw data under
+A readable view of the captured Claude Code sessions (account -> project -> session -> chat ->
+conversations). It is **derived** from the raw data under
 `sessions/` (which is never changed) and can be deleted and rebuilt at any time with
 `ccp-catalog build --all`.
 
@@ -358,7 +361,7 @@ catalog/
   index.json                     every account, project and chat, with its path
   accounts/<account>__<id8>/     one Claude account (its label or name, and 8 characters of its id)
     projects/<project>/          one project (its label or name)
-      chats/<date>__<title>__<id8>/    one chat: start date, title, 8 characters of its id
+      sessions/<date>__<title>__<id8>/ one Claude Code session: start date, title, id
         README.md                what the chat is and what each file means
         00_summary.json          ids, account, project, models, tokens, cost, counts
         01_conversation.md       the conversation, readable

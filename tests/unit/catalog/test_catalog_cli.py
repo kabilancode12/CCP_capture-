@@ -5,9 +5,9 @@ from ccp.catalog.cli import build_parser, tree_lines
 KEYS = [
     "catalog/README.md",
     "catalog/index.json",
-    "catalog/accounts/claude1__abcd1234/projects/billing/chats/2026-07-01__fix__c1c1c1c1/README.md",
-    "catalog/accounts/claude1__abcd1234/projects/billing/chats/2026-07-01__fix__c1c1c1c1/transcript/main.json",
-    "catalog/accounts/claude1__abcd1234/projects/billing/chats/2026-07-02__more__d2d2d2d2/README.md",
+    "catalog/accounts/claude1__abcd1234/projects/billing/sessions/2026-07-01__fix__c1c1c1c1/README.md",
+    "catalog/accounts/claude1__abcd1234/projects/billing/sessions/2026-07-01__fix__c1c1c1c1/transcript/main.json",
+    "catalog/accounts/claude1__abcd1234/projects/billing/sessions/2026-07-02__more__d2d2d2d2/README.md",
 ]
 
 

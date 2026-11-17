@@ -15,6 +15,8 @@ EXPECTED_EVENTS = {
     "SubagentStop",
     "PreCompact",
     "SessionEnd",
+    "PreToolUse",
+    "PostToolUse",
 }
 
 
@@ -29,6 +31,7 @@ def test_every_event_is_registered_with_its_time_limit() -> None:
     assert set(settings["hooks"]) == EXPECTED_EVENTS
     for event, entries in settings["hooks"].items():
         (hook,) = entries[0]["hooks"]
+        assert ("matcher" in entries[0]) == (event in ("PreToolUse", "PostToolUse"))
         assert hook == {"type": "command", "command": "run-me", "timeout": HOOK_TIMEOUTS[event]}
 
 

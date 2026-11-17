@@ -95,6 +95,7 @@ from ccp.ingest.redactions import RedactionReportError, parse_report
 from ccp.ingest.repository import RepositoryError, RunKeyConflictError, SessionRepository
 from ccp.lifecycle import LifecycleEventError, parse_lifecycle
 from ccp.settings import Secret
+from ccp.shadow import ShadowCommitError, parse_shadow_commit
 from ccp.storage import StorageError
 from ccp.storage.keys import (
     attachment_key,
@@ -112,6 +113,8 @@ TOOL_RESULT_CONTENT_TYPE = "text/plain; charset=utf-8"
 
 # Largest lifecycle event accepted (a few hundred bytes in practice).
 MAX_LIFECYCLE_BYTES = 4096
+# Largest snapshot record accepted (up to 500 file entries).
+MAX_SNAPSHOT_BYTES = 262_144
 
 
 class ChunkStore(Protocol):
@@ -186,6 +189,11 @@ class IngestService:
                 Route(
                     "/v1/sessions/{session_id}/lifecycle",
                     self.post_lifecycle,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/sessions/{session_id}/snapshots",
+                    self.post_snapshot,
                     methods=["POST"],
                 ),
                 Route(
@@ -358,6 +366,33 @@ class IngestService:
             logger.warning("lifecycle event for %s not saved: %s", session_id, error)
             return _error(503, "database temporarily unavailable")
         return JSONResponse({"recorded": True, "seq": seq})
+
+    async def post_snapshot(self, request: Request) -> JSONResponse:
+        """Record one snapshot commit of the capture repository (see :mod:`ccp.shadow`)."""
+        if not self._is_authorised(request):
+            return await self._refuse(
+                request, 401, "missing or invalid token", {"WWW-Authenticate": "Bearer"}
+            )
+        session_id = request.path_params["session_id"]
+        try:
+            session_prefix(session_id)  # validates the id
+        except ValueError as error:
+            return await self._refuse(request, 400, str(error))
+        body = await self._read_body(request, MAX_SNAPSHOT_BYTES)
+        if isinstance(body, JSONResponse):
+            return body
+        try:
+            commit = parse_shadow_commit(json.loads(body))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return _error(422, "snapshot record is not valid JSON")
+        except ShadowCommitError as error:
+            return _error(422, str(error))
+        try:
+            new = await run_in_threadpool(self._repository.record_shadow_commit, session_id, commit)
+        except RepositoryError as error:
+            logger.warning("snapshot for %s not saved: %s", session_id, error)
+            return _error(503, "database temporarily unavailable")
+        return JSONResponse({"recorded": True, "new": new})
 
     async def put_tool_result(self, request: Request) -> JSONResponse:
         """Store one redacted tool-result file (see the module description)."""

@@ -257,3 +257,51 @@ def test_sessions_indexed_before_this_feature_are_caught_up(
     process_next_job(object_store, IndexRepository(database))
 
     assert _rows(database, "SELECT count(*) FROM file_change") == [(3,)]
+
+
+def test_files_changed_by_shell_commands_become_ai_command_changes(
+    database: DatabaseSettings, object_store: ObjectStore
+) -> None:
+    command = (
+        "cat > Program.cs <<'EOF'\nx\nEOF\nsed -i 's/a/b/' src/a.py && rm -f /work/app/old.txt"
+    )
+    call = _call("c1", "p1", "Bash", "toolu_s")
+    call["cwd"] = CWD
+    call["message"]["content"][0]["input"] = {"command": command}
+    denied_call = _call("c2", "r1", "Bash", "toolu_d")
+    denied_call["message"]["content"][0]["input"] = {"command": "rm -f never.txt"}
+    transcript = _chunk(
+        _prompt("p1", None, "00:00"),
+        call,
+        {
+            "type": "user",
+            "uuid": "r1",
+            "parentUuid": "c1",
+            "cwd": CWD,
+            "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_s"}]},
+        },  # fmt: skip
+        denied_call,
+        {
+            "type": "user",
+            "uuid": "r2",
+            "parentUuid": "c2",
+            "cwd": CWD,
+            "toolDenialKind": "user",
+            "message": {
+                "content": [{"type": "tool_result", "tool_use_id": "toolu_d", "is_error": True}]
+            },
+        },  # fmt: skip
+    )
+    _index(database, object_store, transcript)
+
+    rows = _rows(
+        database,
+        "SELECT f.path, f.change_type, f.tool, f.actor_class, f.file_role, p.entry_uuid "
+        "FROM file_change f LEFT JOIN event p ON p.event_id = f.prompt_event_id "
+        'ORDER BY f.path COLLATE "C"',
+    )
+    assert rows == [
+        ("Program.cs", "added", "Bash", "ai_command", "code", "p1"),
+        ("old.txt", "deleted", "Bash", "ai_command", "other", "p1"),
+        ("src/a.py", "modified", "Bash", "ai_command", "code", "p1"),
+    ]
