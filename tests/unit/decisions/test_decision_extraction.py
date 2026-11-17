@@ -151,3 +151,60 @@ def test_reviews_are_matched_by_index() -> None:
 def test_a_review_answer_without_a_reviews_list_is_an_error() -> None:
     with pytest.raises(AnswerError):
         parse_reviews('{"reviews": 1}', 1)
+
+
+ADVICE_REFS = {
+    **REFS,
+    4: LineRef(13, "sessions/c/main/000000000000.jsonl", 9, "reply", text=(
+        "Usually it isn't a good design for a plain  synchronous upload.\nWhere do the files come from?"
+    )),
+}  # fmt: skip
+
+
+def _advice(**changes: Any) -> dict[str, Any]:
+    return _decision(
+        kind="Advice", raised_by="developer asked", outcome="waiting", chosen="",
+        short_answer="Works, but not recommended for production at that size",
+        use_when=["under 50 MB -> current endpoint", "over 1 GB -> pre-signed URL", 5],
+        not_chosen=[{"option": "single request", "why": "proxy limits"}, {"why": "no option"}, 7],
+        waiting_for="Where do the files come from?", evidence_lines=[4],
+        follows_decision=1, follows_how="Not Followed", **changes,
+    )  # fmt: skip
+
+
+def test_advice_keeps_its_plain_words_and_does_not_need_a_single_choice() -> None:
+    answer = parse_extraction(json.dumps({"decisions": [_advice()]}), ADVICE_REFS, [])
+    item = answer.decisions[0]
+    assert (item.kind, item.raised_by, item.outcome) == ("advice", "developer asked", "waiting")
+    assert item.chosen == item.short_answer  # no choice yet: the short answer stands in
+    assert item.use_when == ["under 50 MB -> current endpoint", "over 1 GB -> pre-signed URL"]
+    assert item.not_chosen == [{"option": "single request", "why": "proxy limits"}]
+    assert (item.follows_decision, item.follows_how) == (1, "not followed")
+
+
+def test_values_outside_the_allowed_words_become_defaults() -> None:
+    answer = _parse(_decision(kind="essay", raised_by="nobody", outcome="maybe", follows_how="x"))
+    item = answer.decisions[0]
+    assert (item.kind, item.raised_by, item.outcome, item.follows_how) == (
+        "code change", None, "done", None,
+    )  # fmt: skip
+
+
+def test_a_quote_is_kept_only_when_it_stands_letter_for_letter_in_the_cited_line() -> None:
+    quotes = [
+        {"line": 4, "text": "Usually it isn't a good design for a plain synchronous upload."},
+        {"line": 4, "text": "Where do the files come from?"},
+        {"line": 4, "text": "usually it isn't a good design"},  # wrong case: not exact
+        {"line": 4, "text": "Never said at all, invented words"},  # not in the line
+        {"line": 4, "text": "good"},  # too short to mean anything
+        {"line": 3, "text": "Usually it isn't a good design"},  # a line that has no such text
+        {"line": 99, "text": "Usually it isn't a good design for a plain"},  # no such line
+    ]
+    kept = parse_extraction(
+        json.dumps({"decisions": [_advice(quotes=quotes)]}), ADVICE_REFS, []
+    ).decisions[0].quotes  # fmt: skip
+    assert [q["text"] for q in kept] == [
+        "Usually it isn't a good design for a plain synchronous upload.",
+        "Where do the files come from?",
+    ]
+    assert kept[0]["who"] == "claude" and kept[0]["line"] == 9
