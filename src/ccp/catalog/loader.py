@@ -70,7 +70,19 @@ _DECISIONS = """
            decided_by, files, thinking, llm_usage,
            commit_shas, evidence_lines, status, reviewed_by_kind, reviewer, review_note,
            review_history, model, prompt_version, created_at, updated_at,
-           prompt_text, prompt_at, prompt_uuid
+           prompt_text, prompt_at, prompt_uuid, kind, raised_by, outcome, details,
+           (SELECT jsonb_build_object('chat', a.session_id, 'decision', a.seq, 'title', a.title)
+              FROM decision a
+             WHERE a.session_id = decision.follows_session_id
+               AND a.prompt_uuid = decision.follows_prompt_uuid
+               AND a.decision_id <> decision.decision_id ORDER BY a.seq LIMIT 1) AS follows,
+           (SELECT jsonb_build_object('chat', f.session_id, 'decision', f.seq, 'title', f.title,
+                                      'how', f.details ->> 'follows_how')
+              FROM decision f
+             WHERE f.follows_session_id = decision.session_id
+               AND f.follows_prompt_uuid = decision.prompt_uuid
+               AND f.decision_id <> decision.decision_id
+             ORDER BY f.created_at DESC, f.decision_id DESC LIMIT 1) AS followed_by
       FROM decision WHERE session_id = %s ORDER BY seq
 """
 
