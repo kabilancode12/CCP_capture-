@@ -197,7 +197,7 @@ def linked_commits(connection: pg8000.dbapi.Connection, session_id: str) -> list
 
 # The developer prompt that was current at each decision's first evidence line, stored with it.
 _SET_PROMPTS = """
-    UPDATE decision d SET prompt_text = p.text, prompt_at = p.occurred_at, prompt_uuid = p.entry_uuid
+# The developer prompt current at each decision's first evidence line, stored with it.
       FROM (
         SELECT d2.decision_id,
                (SELECT row(e.entry_uuid, e.occurred_at,
