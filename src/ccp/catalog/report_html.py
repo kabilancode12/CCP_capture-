@@ -395,8 +395,10 @@ def _link_text(label: str, link: object, how: object = None) -> str:
 
 
 def advice_html(decision: dict[str, Any]) -> str:
-    """What a decision without code needs: the short answer, when each option fits, what was not
-    chosen and why, what Claude waits for, the exact words and the links to other decisions."""
+    """The facts of advice: the short answer, when each option fits, what was not chosen and why.
+
+    Also what Claude waits for, the exact words and the links to other decisions.
+    """
     parts: list[str] = []
     if decision.get("short_answer"):
         parts.append(
