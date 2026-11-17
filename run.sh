@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # CCP: set up and start everything on this machine, in one go.
 #
-#   ./run.sh            first time: asks a few questions, then installs and starts everything
-#   ./run.sh            later: checks everything and starts what is not running (safe to repeat)
+#   ./run.sh            first time (no .env yet): asks a few questions, installs and starts everything
+#   ./run.sh            already set up (a .env exists, for example after a git pull): updates and starts
+#                       everything WITHOUT asking anything (same as ./run.sh update)
+#   ./run-laptop.sh     the same update, for the machine that already runs CCP (keeps .env and data)
 #   ./run.sh developer  on a developer's machine: only the capture (asks for the server's address and token)
 #   ./run.sh status     only show what is running
 #   ./run.sh check      the latest captured sessions: which app, report.md, changes, decisions
@@ -27,7 +29,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$(pwd)"
-COMPOSE=(docker compose --env-file .env -f infra/docker-compose.yml)
+DOCKER=(docker)
+COMPOSE=()
+UPDATE=0
+[[ "${1:-}" == "update" || ( -f .env && -z "${1:-}" ) ]] && UPDATE=1
 VENV="$ROOT/.venv"
 PY="$VENV/bin/python"
 LOG_DIR="$HOME/.ccp"
@@ -37,8 +42,9 @@ bold() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 ok() { printf '  \033[32m✔\033[0m %s\n' "$*"; }
 warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
 fail() { printf '  \033[31m✘ %s\033[0m\n' "$*"; exit 1; }
-ask() { # ask "question" "default" -> answer
+ask() { # ask "question" "default" -> answer (an update never asks: it uses the default)
   local answer
+  if [[ "$UPDATE" == "1" || ! -r /dev/tty ]]; then printf '%s' "$2"; return; fi
   read -r -p "  $1 [${2}]: " answer </dev/tty || true
   printf '%s' "${answer:-$2}"
 }
@@ -61,6 +67,17 @@ envget() { # value of a key in .env (Windows line endings tolerated)
 }
 load_env() { set -a; # shellcheck disable=SC1090
   . <(tr -d '\r' < .env); set +a; }
+port_open() { "$PY" -c "import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(0 if s.connect_ex(('127.0.0.1',int(sys.argv[1]))) == 0 else 1)" "$1" 2>/dev/null; }
+pick_docker() { # docker as this user, or with sudo when the user is not allowed to use it (no docker group)
+  if docker info >/dev/null 2>&1; then DOCKER=(docker); return 0; fi
+  if command -v sudo >/dev/null && sudo -n docker info >/dev/null 2>&1; then DOCKER=(sudo -n docker); return 0; fi
+  if command -v sudo >/dev/null && [[ -t 0 && "$UPDATE" != "1" ]]; then
+    echo "  Docker needs administrator rights on this machine; sudo may ask for your password."
+    if sudo docker info >/dev/null 2>&1; then DOCKER=(sudo docker); return 0; fi
+  fi
+  return 1
+}
+compose() { "${DOCKER[@]}" compose --env-file .env -f infra/docker-compose.yml "$@"; }
 health() { curl -s -m 3 "http://127.0.0.1:${CCP_API_PORT:-8000}/health" 2>/dev/null | grep -q '"status":"ok"'; }
 
 # ---------------------------------------------------------------------------------- small commands
@@ -96,11 +113,11 @@ if [[ "${1:-}" == "status" || "${1:-}" == "stop" ]]; then
   load_env
   if [[ "$1" == "stop" ]]; then
     systemctl --user stop ccp-server 2>/dev/null || pkill -f "ccp.server" 2>/dev/null || true
-    "${COMPOSE[@]}" --profile dashboards stop >/dev/null 2>&1 || true
+    pick_docker && compose --profile dashboards stop >/dev/null 2>&1 || true
     ok "stopped (the data is kept in the Docker volumes)"; exit 0
   fi
   health && ok "CCP server: http://127.0.0.1:${CCP_API_PORT:-8000}/health" || warn "CCP server is not answering"
-  "${COMPOSE[@]}" --profile dashboards ps 2>/dev/null || true
+  pick_docker && compose --profile dashboards ps 2>/dev/null || true
   exit 0
 fi
 
@@ -136,7 +153,7 @@ EOF
       echo
       echo "    $(cat "$HOME/.ssh/id_ed25519.pub")"
       echo
-      read -r -p "  Press Enter when it is added... " _ </dev/tty || true
+      [[ "$UPDATE" == "1" ]] || read -r -p "  Press Enter when it is added... " _ </dev/tty || true
       GIT_TERMINAL_PROMPT=0 timeout 20 git ls-remote "$CURRENT_REMOTE" >/dev/null 2>&1 \
         && ok "GitHub accepts the key" \
         || warn "GitHub still refuses the key: captures wait locally and are pushed once it works"
@@ -148,7 +165,7 @@ EOF
   fi
   "$PY" -m ccp.capture watch-service install >/dev/null && ok "background watcher starts at login" \
     || warn "watcher service not installed: run 'python -m ccp.capture watch' yourself"
-  if yes_no "Install the global Git hooks (a note on each commit, a backup before each push)?" "y"; then
+  if [[ "$UPDATE" != "1" ]] && yes_no "Install the global Git hooks (a note on each commit, a backup before each push)?" "y"; then
     "$PY" -m ccp.capture git-hooks install | sed 's/^/  /'
   fi
 
@@ -184,9 +201,18 @@ PYTHON="$(command -v python3.13 || command -v python3.12 || command -v python3 |
   || fail "python 3.12 or newer is needed (found $("$PYTHON" --version))"
 ok "$("$PYTHON" --version), $(git --version)"
 command -v docker >/dev/null || fail "docker is missing: install Docker (with the compose plugin) first"
-docker compose version >/dev/null 2>&1 || fail "the docker compose plugin is missing"
-docker info >/dev/null 2>&1 || fail "docker is installed but not usable by $USER (start Docker, or add $USER to the docker group and log in again)"
-ok "$(docker compose version | head -1)"
+docker compose version >/dev/null 2>&1 || sudo -n docker compose version >/dev/null 2>&1 || fail "the docker compose plugin is missing"
+DOCKER_OK=1
+if pick_docker; then
+  ok "docker usable ($([[ "${DOCKER[0]}" == sudo ]] && echo "with sudo" || echo "as $USER"))"
+else
+  DOCKER_OK=0
+  if [[ "$UPDATE" == "1" ]]; then
+    warn "docker is not usable without a password here: the containers are left as they are (checked below)"
+  else
+    fail "docker is installed but $USER may not use it (add $USER to the docker group and log in again, or allow sudo)"
+  fi
+fi
 if command -v claude >/dev/null; then
   ok "claude $(claude --version 2>/dev/null | head -1)"
 else
@@ -252,13 +278,16 @@ load_env
 
 # ---------------------------------------------------------------------------------- 4. containers
 bold "4/9 Database, object store and dashboards (Docker)"
-# The CCP server runs on this machine (step 6), not in Docker: stop a container version if one runs.
-"${COMPOSE[@]}" stop ccp-server >/dev/null 2>&1 || true
-"${COMPOSE[@]}" --profile dashboards up -d postgres minio metabase >/dev/null
-for _ in $(seq 1 60); do
-  "${COMPOSE[@]}" exec -T postgres pg_isready -U "$POSTGRES_USER" >/dev/null 2>&1 && break; sleep 2
-done
-"${COMPOSE[@]}" exec -T postgres pg_isready -U "$POSTGRES_USER" >/dev/null 2>&1 || fail "PostgreSQL did not start"
+if [[ "$DOCKER_OK" == "1" ]]; then
+  # The CCP server runs on this machine (step 6), not in Docker: stop a container version if one runs.
+  compose stop ccp-server >/dev/null 2>&1 || true
+  compose --profile dashboards up -d postgres minio metabase >/dev/null
+  for _ in $(seq 1 60); do port_open "${POSTGRES_PORT:-5432}" && break; sleep 2; done
+else
+  port_open "${POSTGRES_PORT:-5432}" || fail "PostgreSQL is not running on port ${POSTGRES_PORT:-5432} and docker is not usable: start the containers (sudo docker compose --env-file .env -f infra/docker-compose.yml --profile dashboards up -d postgres minio metabase)"
+  port_open "${MINIO_API_PORT:-9000}" || fail "MinIO is not running on port ${MINIO_API_PORT:-9000}"
+fi
+port_open "${POSTGRES_PORT:-5432}" || fail "PostgreSQL did not start"
 ok "PostgreSQL ready"
 for _ in $(seq 1 30); do curl -s -m 2 "http://127.0.0.1:${MINIO_API_PORT}/minio/health/live" >/dev/null && break; sleep 2; done
 ok "MinIO ready (console http://127.0.0.1:${MINIO_CONSOLE_PORT}, user ${MINIO_ROOT_USER})"
@@ -355,4 +384,9 @@ cat <<EOF
   within a few seconds; decisions follow about a minute after the session goes quiet or ends.
 
   ./run.sh status    what is running        ./run.sh stop    stop it all (data is kept)
+  ./run.sh check     the latest captured sessions and whether each has its report
 EOF
+if [[ "$UPDATE" == "1" ]]; then
+  bold "Check"
+  "$0" check || true
+fi
