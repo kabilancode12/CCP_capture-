@@ -709,6 +709,20 @@ _SCRIPT = """
 """
 
 
+SECTION_LIMIT = 400_000  # characters of one Markdown-made section shown in the page
+
+
+def _budget(section: str, limit: int = SECTION_LIMIT) -> str:
+    """A section's Markdown for the page: all of it up to ``limit`` characters, then a note."""
+    if len(section) <= limit:
+        return section
+    head = section[:limit].rsplit("\n", 1)[0]
+    lines = head.split("\n")
+    open_blocks = sum(1 for x in lines if x.startswith("<details>")) - sum(1 for x in lines if x.strip() == "</details>")
+    closers = "\n".join(["</details>"] * max(open_blocks, 0))
+    return f"{head}\n{closers}\n\n*{len(section) - len(head):,} more characters of this section are in report.md.*\n"
+
+
 def _other_entries_html(raw_lines: list[Any] | None) -> str:
     """Section 11 for the page: a count per entry type and the first entries (report.md lists them all)."""
     if raw_lines is None:
@@ -824,7 +838,7 @@ def render_report_html(
                 "<h3>Decisions at a glance</h3>" + overview if overview else ""
             )
         else:
-            inner = markdown(section)
+            inner = markdown(_budget(section))
         body.append(f'<section class="sec" id="{sid}"><h2>{esc(name)}</h2>{inner}</section>')
     if loose:
         body.append("")  # decisions without evidence lines are listed in section 4 only
