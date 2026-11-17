@@ -35,6 +35,7 @@ UPDATE=0
 [[ "${1:-}" == "update" || ( -f .env && -z "${1:-}" ) ]] && UPDATE=1
 VENV="$ROOT/.venv"
 PY="$VENV/bin/python"
+[[ -f "$VENV/Scripts/python.exe" ]] && PY="$VENV/Scripts/python.exe"
 LOG_DIR="$HOME/.ccp"
 SERVER_LOG="$LOG_DIR/server.log"
 
