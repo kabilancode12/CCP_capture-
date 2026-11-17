@@ -110,20 +110,22 @@ _SET_MODELS = """
                      ORDER BY p.event_id LIMIT 1) st,
                    (SELECT x ->> 'key' AS ek, (x ->> 'line')::int AS el
                       FROM jsonb_array_elements(d.evidence_lines) x
-                     ORDER BY 1 DESC, 2 DESC LIMIT 1) en,
+                     ORDER BY 1 DESC, 2 DESC LIMIT 1) en
+                   LEFT JOIN LATERAL (
+                     SELECT n.raw_object_key AS nk, n.raw_line_number AS nl
+                       FROM event n
+                      WHERE n.session_id = d.session_id AND n.event_type = 'prompt'
+                        AND n.actor = 'human' AND NOT n.is_abandoned
+                        AND split_part(n.raw_object_key, '/', 3) = 'main'
+                        AND (n.raw_object_key, n.raw_line_number) > (en.ek, en.el)
+                      ORDER BY n.raw_object_key ASC, n.raw_line_number ASC LIMIT 1
+                   ) nxt ON true,
                    model_usage u JOIN event e ON e.event_id = u.event_id
              WHERE e.session_id = d.session_id AND NOT e.is_abandoned
                AND split_part(e.raw_object_key, '/', 3) = 'main'
                AND u.model IS NOT NULL AND u.model <> '<synthetic>'
                AND (e.raw_object_key, e.raw_line_number) >= (st.sk, st.sl)
-               AND NOT EXISTS (
-                   SELECT 1 FROM event n
-                    WHERE n.session_id = d.session_id AND n.event_type = 'prompt'
-                      AND n.actor = 'human' AND NOT n.is_abandoned
-                      AND split_part(n.raw_object_key, '/', 3) = 'main'
-                      AND (n.raw_object_key, n.raw_line_number) > (en.ek, en.el)
-                      AND (n.raw_object_key, n.raw_line_number)
-                          <= (e.raw_object_key, e.raw_line_number))
+               AND (nxt.nk IS NULL OR (e.raw_object_key, e.raw_line_number) < (nxt.nk, nxt.nl))
              GROUP BY u.model, u.effort) m), '[]'::jsonb))
      WHERE d.session_id = %s
 """
