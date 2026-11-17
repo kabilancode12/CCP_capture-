@@ -361,7 +361,7 @@ def _decisions(data: ChatData) -> list[str]:
             ("Checked by", r["checked_by"]), ("Reviewer", r["reviewer"]),
             ("Review note", r["note"]), ("Commits", d["commits"]),
             ("Decision id", d["decision_id"]), ("Created", d["created_at"]),
-            ("Model usage", d["llm_usage"]),
+            ("Model usage (whole run, shared by every decision of this chat)", d["llm_usage"]),
         ])  # fmt: skip
         out += ["**Options considered**", ""]
         out += [f"- {o}" for o in d["options"]] + [""] if d["options"] else [NONE, ""]

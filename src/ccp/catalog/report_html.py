@@ -343,12 +343,12 @@ def assign_decisions(
         places = [
             (str(e.get("transcript_file") or ""), int(e.get("line") or 0))
             for e in decision.get("evidence") or []
-            if isinstance(e, dict)
+            if isinstance(e, dict) and "/main/" in str(e.get("transcript_file"))
         ]
         places += [
             (str(n.get("transcript_file") or ""), int(n.get("line") or 0))
             for n in decision.get("thinking_notes") or []
-            if isinstance(n, dict)
+            if isinstance(n, dict) and "/main/" in str(n.get("transcript_file"))
         ]
         target = None
         if places:
@@ -445,7 +445,7 @@ def decision_card(decision: dict[str, Any], turn_models: list[str], full: bool =
                     f"commits: {esc(fmt_value(decision.get('commits')))}",
                     f"id {esc(decision.get('decision_id'))}",
                     f"created {esc(fmt_time(decision.get('created_at')))}",
-                    f"model usage: {esc(fmt_value(decision.get('llm_usage')))}",
+                    f"model usage of the whole run (shared by every decision of this chat): {esc(fmt_value(decision.get('llm_usage')))}",
                 ]
             )
             + "</p>"  # fmt: skip
