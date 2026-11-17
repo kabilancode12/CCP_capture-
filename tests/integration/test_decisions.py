@@ -740,3 +740,142 @@ def test_a_chat_without_decisions_is_not_asked_again_until_it_has_new_activity(c
     )
     conn.commit()
     assert CHAT in pending_chats(conn, False)  # new activity: it is pending again
+
+
+ADVICE = "Usually it isn't a good design for a plain synchronous upload."
+
+
+def seed_advice(connection: Any, chat: str = CHAT) -> None:
+    """A question, advice with a question back, then a question and a rejected plan."""
+    cursor = connection.cursor()
+    add = partial(add_event, cursor, chat=chat)
+    add(20, "prompt", "human", 20, {"message": {"content": "is a 200 MB upload a good design?"}})
+    cursor.execute(
+        "UPDATE event SET entry_uuid = 'u-ask' WHERE session_id = %s AND raw_line_number = 20",
+        (chat,),
+    )
+    add(21, "response", "ai", 21, text_message(f"{ADVICE} Where do the files come from?"))
+    ask = {"questions": [{"question": "Where from?", "options": [
+        {"label": "Browser (Recommended)", "description": "direct upload"}, {"label": "Partner"}]}]}  # fmt: skip
+    add(22, "tool_call", "ai", 22, {"message": {"content": [
+        {"type": "tool_use", "id": "q1", "name": "AskUserQuestion", "input": ask}]}})  # fmt: skip
+    add(23, "tool_result", "system", 23, {"message": {"content": [
+        {"type": "tool_result", "tool_use_id": "q1", "content": "Answer: Partner"}]}})  # fmt: skip
+    add(24, "tool_call", "ai", 24, {"message": {"content": [
+        {"type": "tool_use", "id": "p1", "name": "ExitPlanMode", "input": {"plan": "Use a SAS URL"}}]}})  # fmt: skip
+    add(25, "tool_result", "system", 25, {"message": {"content": [
+        {"type": "tool_result", "tool_use_id": "p1", "is_error": True, "content": "no"}]}})  # fmt: skip
+    connection.commit()
+
+
+def advice_answer(prompt: str) -> dict[str, Any]:
+    ask = line_of(prompt, "PROMPT", "200 MB")
+    reply = line_of(prompt, "REPLY", "plain synchronous")
+    plan = line_of(prompt, "PLAN")
+    edit = line_of(prompt, "EDIT")
+    return {"decisions": [
+        {"title": "Large upload design", "kind": "advice", "raised_by": "developer asked",
+         "goal": "judge a 200 MB upload", "short_answer": "Not recommended at that size",
+         "chosen": "No single choice yet", "options": ["background job: removes long requests"],
+         "not_chosen": [{"option": "single request", "why": "proxy limits"}],
+         "use_when": ["under 50 MB -> current endpoint"], "waiting_for": "where the files come from",
+         "outcome": "waiting", "decided_by": "claude", "evidence_lines": [ask, reply],
+         "quotes": [{"line": reply, "text": ADVICE}, {"line": reply, "text": "words nobody said here"}]},
+        {"title": "Azure upload plan", "kind": "plan", "chosen": "SAS URL plan", "outcome": "done",
+         "decided_by": "claude", "evidence_lines": [plan]},
+        {"title": "Queue in the sender", "kind": "code change", "chosen": "queue",
+         "decided_by": "developer", "file_lines": [edit], "evidence_lines": [edit],
+         "follows_decision": 1, "follows_how": "followed"},
+    ]}  # fmt: skip
+
+
+def stored(connection: Any, chat: str = CHAT) -> dict[str, tuple[Any, ...]]:
+    found = rows(
+        connection,
+        "SELECT title, kind, raised_by, outcome, details, prompt_uuid, follows_prompt_uuid,"
+        " follows_session_id FROM decision WHERE session_id = %s ORDER BY seq",
+        chat,
+    )
+    return {row[0]: row[1:] for row in found}
+
+
+def test_ask_and_plan_lines_are_in_the_digest_with_the_developers_answer(conn: Any) -> None:
+    seed_advice(conn)
+    text = build_digest(conn, CHAT, 80_000).text
+    assert 'ASK Claude asked the developer "Where from?" options: Browser (Recommended)' in text
+    assert "-> answer: Answer: Partner" in text
+    assert "PLAN Claude put this plan to the developer: Use a SAS URL -> REJECTED" in text
+    assert "Usually it isn't a good design for a plain synchronous upload. Where do" in text
+
+
+def test_advice_is_stored_with_exact_words_and_takes_the_outcome_of_its_follower(conn: Any) -> None:
+    seed_advice(conn)
+    provider = FakeProvider(extract=advice_answer(build_digest(conn, CHAT, 80_000).text))
+    assert run(conn, provider).outcome == "done"
+    decisions = stored(conn)
+    advice, plan, code = (decisions[t] for t in ("Large upload design", "Azure upload plan",
+                                                 "Queue in the sender"))  # fmt: skip
+    assert advice[:3] == ("advice", "developer asked", "followed")  # the later decision followed it
+    assert advice[3]["short_answer"] == "Not recommended at that size"
+    assert advice[3]["use_when"] == ["under 50 MB -> current endpoint"]
+    assert advice[3]["not_chosen"] == [{"option": "single request", "why": "proxy limits"}]
+    assert [q["text"] for q in advice[3]["quotes"]] == [ADVICE]  # the invented words are dropped
+    assert advice[3]["quotes"][0]["who"] == "claude" and advice[4] == "u-ask"
+    assert plan[:3] == ("plan", None, "not followed")  # the developer rejected the plan
+    assert code[:3] == ("code change", None, "done")
+    assert (code[5], code[4]) == ("u-ask", "u-ask") or code[5] == CHAT  # linked by the prompt
+    assert code[5] == CHAT and code[4] == "u-ask"
+
+
+def test_advice_of_another_chat_is_offered_and_its_outcome_follows_the_link(conn: Any) -> None:
+    other = "chat-other"
+    seed_chat(conn, other)
+    seed_advice(conn, other)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO project (project_key, key_kind, name) VALUES ('p', 'folder', 'p')"
+                   " RETURNING project_id")  # fmt: skip
+    project = cursor.fetchone()[0]
+    cursor.execute("UPDATE session SET project_id = %s", (project,))
+    conn.commit()
+    first = advice_answer(build_digest(conn, other, 80_000).text)
+    first["decisions"] = first["decisions"][:1]
+    assert run_chat(conn, FakeProvider(extract=first), other).outcome == "done"
+    assert stored(conn, other)["Large upload design"][2] == "waiting"
+
+    digest = build_digest(conn, CHAT, 80_000)
+    assert "[A1] OPEN ADVICE (advice) Large upload design" in digest.text
+    assert "waiting for: where the files come from" in digest.text
+    edit = line_of(digest.text, "EDIT")
+    answer = {"decisions": [{"title": "Other approach", "chosen": "thread", "decided_by": "developer",
+                             "file_lines": [edit], "evidence_lines": [edit],
+                             "follows_open_advice": 1, "follows_how": "not followed"}]}  # fmt: skip
+    assert run(conn, FakeProvider(extract=answer)).outcome == "done"
+    assert stored(conn, other)["Large upload design"][2] == "not followed"
+    mine = stored(conn)["Other approach"]
+    assert (mine[5], mine[6]) == ("u-ask", other) or mine[6] == other
+
+    # The chat is written again without that link: the advice is waiting again.
+    plain = {"decisions": [{"title": "Other approach", "chosen": "thread", "evidence_lines": [edit]}]}
+    assert run(conn, FakeProvider(extract=plain), force=True).outcome == "done"
+    assert stored(conn, other)["Large upload design"][2] == "waiting"
+
+
+def test_a_link_to_advice_that_does_not_exist_is_ignored(conn: Any) -> None:
+    edit = line_of(build_digest(conn, CHAT, 80_000).text, "EDIT")
+    answer = {"decisions": [{"title": "Queue", "chosen": "queue", "file_lines": [edit],
+                             "evidence_lines": [edit], "follows_decision": 5,
+                             "follows_open_advice": 3, "follows_how": "followed"}]}  # fmt: skip
+    assert run(conn, FakeProvider(extract=answer)).outcome == "done"
+    row = rows(conn, "SELECT follows_prompt_uuid, details ? 'follows_how' FROM decision")[0]
+    assert row == (None, False)
+
+
+def test_a_new_prompt_version_makes_a_chat_pending_once_without_anyone_asking(conn: Any) -> None:
+    assert run(conn, FakeProvider()).outcome == "done"
+    assert not chat_state(conn, CHAT).outdated and CHAT not in pending_chats(conn, False)  # type: ignore[union-attr]
+    cursor = conn.cursor()
+    cursor.execute("UPDATE session SET decisions_checked_version = '5'")
+    conn.commit()
+    assert chat_state(conn, CHAT).outdated and CHAT in pending_chats(conn, False)  # type: ignore[union-attr]
+    assert run(conn, FakeProvider()).outcome == "done"  # processed again, without force
+    assert CHAT not in pending_chats(conn, False)
