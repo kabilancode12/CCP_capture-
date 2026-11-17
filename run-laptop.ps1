@@ -58,6 +58,11 @@ if p.exists():
 Write-Host "==> 3/6 Starting Docker containers (PostgreSQL, MinIO, Metabase)..." -ForegroundColor Cyan
 docker compose --env-file .env -f infra/docker-compose.yml --profile dashboards up -d postgres minio metabase
 
+# Stop any running ccp.server before migration so it does not hold database locks
+Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*ccp.server*" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
 Write-Host "==> 4/6 Applying database migrations..." -ForegroundColor Cyan
 & $Python -m ccp.db migrate
 
