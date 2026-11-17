@@ -161,7 +161,8 @@ _SHADOW_COMMITS = """
 
 # The event types the readable conversation is made of.
 _EVENTS = """
-    SELECT event_id, event_type, actor, occurred_at, is_abandoned, raw_line_number,
+    SELECT event_id, event_type, actor, occurred_at, is_abandoned, raw_line_number, raw_object_key,
+           payload #>> '{message,model}' AS model,
            payload #> '{message,content}' AS content,
            payload #> '{compactMetadata}' AS compact
       FROM event
@@ -173,7 +174,8 @@ _EVENTS = """
 
 # The same entries in the sub-agent streams (``agent-<id>``), with the stream name.
 _AGENT_EVENTS = """
-    SELECT event_id, event_type, actor, occurred_at, is_abandoned, raw_line_number,
+    SELECT event_id, event_type, actor, occurred_at, is_abandoned, raw_line_number, raw_object_key,
+           payload #>> '{message,model}' AS model,
            payload #> '{message,content}' AS content,
            payload #> '{compactMetadata}' AS compact,
            split_part(raw_object_key, '/', 3) AS stream
