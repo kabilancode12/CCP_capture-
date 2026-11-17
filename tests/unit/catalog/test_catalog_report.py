@@ -83,6 +83,26 @@ def _data() -> ChatData:
                         "note": "ok",
                     }
                 ],
+                "kind": "advice",
+                "raised_by": "developer asked",
+                "outcome": "followed",
+                "details": {
+                    "short_answer": "Works, but not recommended at that size",
+                    "use_when": ["under 50 MB -> current endpoint"],
+                    "not_chosen": [{"option": "single request", "why": "proxy limits"}],
+                    "waiting_for": "where the files come from",
+                    "follows_how": "not followed",
+                    "quotes": [
+                        {"key": KEY, "line": 3, "who": "claude", "text": "not a good design"}
+                    ],
+                },
+                "follows": {"chat": "c0", "decision": 2, "title": "Earlier advice"},
+                "followed_by": {
+                    "chat": "c2",
+                    "decision": 1,
+                    "title": "Azure upload",
+                    "how": "followed",
+                },
                 "model": "writer-model",
                 "prompt_version": 2,
                 "created_at": T1,
