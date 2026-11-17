@@ -757,13 +757,29 @@ def _other_entries_html(raw_lines: list[Any] | None) -> str:
 
 
 def _sections(md: str) -> list[tuple[str, str]]:
-    """The numbered sections of the Markdown report: ``(title, body)``."""
-    parts = re.split(r"(?m)^## (.+)$", md)
-    return [
-        (parts[i].strip(), parts[i + 1].strip("\n"))
-        for i in range(1, len(parts) - 1, 2)
-        if parts[i].strip() != "Contents"
-    ]
+    """The numbered sections of the Markdown report: ``(title, body)``.
+
+    Only a ``## N. Title`` line outside a code block, whose number follows the previous section's,
+    starts a section: headings inside Claude's replies and tool output are content, not sections.
+    """
+    sections: list[tuple[str, list[str]]] = []
+    fence = ""
+    expected = 1
+    for line in md.split("\n"):
+        mark = _FENCE.match(line)
+        if mark:
+            token = mark.group(1)
+            if not fence:
+                fence = token[0] * len(token)
+            elif token.startswith(fence) and set(token) <= {fence[0]}:
+                fence = ""
+        found = None if fence or mark else re.match(r"^## (\d{1,2})\. (.+)$", line)
+        if found and int(found.group(1)) == expected:
+            expected += 1
+            sections.append((f"{found.group(1)}. {found.group(2).strip()}", []))
+        elif sections:
+            sections[-1][1].append(line)
+    return [(title, "\n".join(body).strip("\n")) for title, body in sections]
 
 
 def _stats(data: ChatData) -> str:
@@ -793,7 +809,8 @@ def render_report_html(
     title = chat.get("title") or "Claude Code session"
     account = chat.get("account_label") or chat.get("account_name") or "unknown account"
     project = chat.get("project_label") or chat.get("project_name") or "unknown project"
-    md = report_md if report_md is not None else render_report(data, folder, agent_files, raw_lines)
+    # The page lists the raw entries itself (section 11), so the Markdown is made without them.
+    md = report_md if report_md is not None else render_report(data, folder, agent_files, None)
     decisions = documents.build_decisions(data)
     slash = {row["event_id"]: row for row in data.slash_commands if "event_id" in row}
     turns = build_turns(data.events, slash)
