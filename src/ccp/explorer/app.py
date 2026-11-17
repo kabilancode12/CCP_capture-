@@ -390,8 +390,6 @@ class ExplorerApp:
                 )
             },
         )
-            },
-        )
 
     def _tab_body(self, ctx: Context, chat_id: str, tab: str) -> str:
         """The HTML of one tab of a chat."""
