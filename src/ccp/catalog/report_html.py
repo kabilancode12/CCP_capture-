@@ -168,7 +168,8 @@ def markdown(text: str) -> str:
         if not line.strip():
             i += 1
             continue
-        para = []
+        para = [line]  # the first line always belongs to the paragraph (a stray "|" is only text)
+        i += 1
         while i < len(lines) and lines[i].strip() and not _starts_block(lines[i]):
             para.append(lines[i])
             i += 1
