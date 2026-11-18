@@ -137,7 +137,8 @@ def backfill(args: argparse.Namespace) -> int:
         if not (cwd and sid):
             continue
         pdir, _ = store.session_project(sid, cwd)
-        hook.rebuild(store.session_dir(pdir, sid), path)
+        first = next((e["timestamp"] for e in store.read_jsonl(path) if e.get("timestamp")), "")
+        hook.rebuild(store.session_dir(pdir, sid, first[:10] or None), path)
         count += 1
     print(f"backfilled {count} sessions into {store.home()}")
     return 0
@@ -154,11 +155,20 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("status", help="captured projects, sessions, snapshots, errors")
     p = sub.add_parser("report", help="rebuild capture.json + reports (one session or all)")
     p.add_argument("session", nargs="?")
+    p = sub.add_parser("rebuild", help="(used by the hook) rebuild one session folder")
+    p.add_argument("dir")
+    p.add_argument("transcript")
     p = sub.add_parser("backfill", help="import existing chats from ~/.claude/projects")
     p.add_argument("--source")
     args = parser.parse_args(argv)
     if args.cmd == "hook":
         return hook.run()
+    if args.cmd == "rebuild":
+        try:
+            hook.rebuild(Path(args.dir), Path(args.transcript))
+        except Exception as exc:
+            store.log_error(f"rebuild {args.dir}: {type(exc).__name__}: {exc}")
+        return 0
     handler = {
         "install": install,
         "uninstall": uninstall,

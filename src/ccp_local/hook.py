@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -76,7 +77,22 @@ def handle(payload: dict) -> None:
     )
 
     if event in BUILD_EVENTS and payload.get("transcript_path"):
-        rebuild(sdir, Path(payload["transcript_path"]))
+        rebuild_in_background(sdir, payload["transcript_path"])
+
+
+def rebuild_in_background(sdir: Path, transcript_path: str) -> None:
+    """Rebuild in a detached process so Claude Code never waits (big chats take seconds)."""
+    if os.environ.get("CCP_LOCAL_SYNC") == "1":  # tests: do it now
+        rebuild(sdir, Path(transcript_path))
+        return
+    cmd = [sys.executable, str(Path(__file__).resolve().parent), "rebuild", str(sdir),
+           transcript_path]
+    detach = (
+        {"creationflags": 0x00000008 | 0x00000200}  # Windows: DETACHED + NEW_PROCESS_GROUP
+        if os.name == "nt" else {"start_new_session": True}
+    )
+    subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, **detach)
 
 
 def rebuild(sdir: Path, transcript_path: Path | None = None) -> dict:

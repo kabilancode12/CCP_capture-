@@ -83,13 +83,13 @@ def session_project(session_id: str, cwd: str) -> tuple[Path, dict]:
     return pdir, json.loads(meta.read_text(encoding="utf-8"))
 
 
-def session_dir(pdir: Path, session_id: str) -> Path:
-    """Folder of one session: `<first date>__<first 8 chars of the id>`."""
+def session_dir(pdir: Path, session_id: str, date: str | None = None) -> Path:
+    """Folder of one session: `<start date>__<first 8 chars of the id>`."""
     sessions = pdir / "sessions"
     found = sorted(sessions.glob(f"*__{session_id[:8]}")) if sessions.exists() else []
     if found:
         return found[0]
-    sdir = sessions / f"{now()[:10]}__{session_id[:8]}"
+    sdir = sessions / f"{date or now()[:10]}__{session_id[:8]}"
     sdir.mkdir(parents=True, exist_ok=True)
     return sdir
 
@@ -117,19 +117,34 @@ def read_jsonl(path: Path) -> list[dict]:
 
 def write_json(path: Path, data: object) -> None:
     """Write pretty-printed JSON, creating folders."""
+    write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
+
+
+def write_text(path: Path, text: str) -> None:
+    """Write via a temp file + rename, so a reader never sees a half-written file."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def copy_raw(transcript: Path, sdir: Path) -> None:
     """Copy the transcript and its sibling folder (sub-agents, large tool results) byte-exact."""
     raw = sdir / "raw"
     raw.mkdir(parents=True, exist_ok=True)
-    if transcript.is_file():
-        shutil.copy2(transcript, raw / "transcript.jsonl")
+    target = raw / "transcript.jsonl"
+    if transcript.is_file() and not _same(transcript, target):
+        shutil.copy2(transcript, target)
     extra = transcript.with_suffix("")
     if extra.is_dir():
         shutil.copytree(extra, raw / extra.name, dirs_exist_ok=True)
+
+
+def _same(a: Path, b: Path) -> bool:
+    if not b.exists():
+        return False
+    sa, sb = a.stat(), b.stat()
+    return sa.st_size == sb.st_size and int(sa.st_mtime) == int(sb.st_mtime)
 
 
 def log_error(message: str) -> None:

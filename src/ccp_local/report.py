@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 from pathlib import Path
 
+from . import store
 from .transcript import dumps_input
 
 CLIP = 3000  # characters of a tool result shown in the reports (capture.json/raw keep more)
@@ -138,5 +139,5 @@ summary{{cursor:pointer;margin:6px 0}} .err{{color:#d33}}
 
 def write(sdir: Path, cap: dict) -> None:
     """Write report.md and report.html into the session folder."""
-    (sdir / "report.md").write_text(to_markdown(cap), encoding="utf-8")
-    (sdir / "report.html").write_text(to_html(cap), encoding="utf-8")
+    store.write_text(sdir / "report.md", to_markdown(cap))
+    store.write_text(sdir / "report.html", to_html(cap))
