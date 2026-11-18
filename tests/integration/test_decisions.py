@@ -46,7 +46,7 @@ class FakeProvider:
         self._review = review
         self._fail = fail
 
-    def complete(self, system: str, prompt: str, model: str) -> str:
+    def complete(self, system: str, prompt: str, model: str, effort: str = "") -> str:
         self.calls.append((system, prompt, model))
         if self._fail:
             raise ProviderError("the model is down")
@@ -711,7 +711,7 @@ def test_the_usage_of_both_calls_is_stored_with_the_decisions(conn: Any) -> None
     class Metered(FakeProvider):
         last_usage: CallUsage | None = None
 
-        def complete(self, system: str, prompt: str, model: str) -> str:
+        def complete(self, system: str, prompt: str, model: str, effort: str = "") -> str:
             answer = super().complete(system, prompt, model)
             wrote = system == prompts.EXTRACT_SYSTEM
             self.last_usage = CallUsage(
@@ -893,7 +893,7 @@ def test_a_new_prompt_version_alone_does_not_rewrite_an_old_chat(conn: Any) -> N
 class PerPartProvider(FakeProvider):
     """Writes one decision for the first developer message of whatever part it is shown."""
 
-    def complete(self, system: str, prompt: str, model: str) -> str:
+    def complete(self, system: str, prompt: str, model: str, effort: str = "") -> str:
         if system == prompts.EXTRACT_SYSTEM:
             self.calls.append((system, prompt, model))
             first = line_of(prompt, "PROMPT")

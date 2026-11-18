@@ -48,7 +48,7 @@ class ProviderError(RuntimeError):
 class Provider(Protocol):
     """Something that returns a model's answer to a prompt."""
 
-    def complete(self, system: str, prompt: str, model: str) -> str:
+    def complete(self, system: str, prompt: str, model: str, effort: str = "") -> str:
         """Return the model's text answer.
 
         Raises:
@@ -136,11 +136,12 @@ class ClaudeCliProvider:
         self._timeout = timeout_seconds
         self._command = command
 
-    def arguments(self, system: str, model: str) -> list[str]:
+    def arguments(self, system: str, model: str, effort: str = "") -> list[str]:
         """The command line (the prompt itself goes to standard input)."""
         executable = find_command(self._command)
         if executable is None:
             raise ProviderError(f"the {self._command!r} command was not found on the PATH")
+        level = ["--effort", effort] if effort else []  # how hard the model thinks: low is cheap
         return [
             executable,
             "-p",
@@ -148,6 +149,7 @@ class ClaudeCliProvider:
             "json",
             "--model",
             model,
+            *level,
             "--system-prompt",
             system,
             "--tools",
@@ -161,9 +163,9 @@ class ClaudeCliProvider:
             "--exclude-dynamic-system-prompt-sections",
         ]
 
-    def complete(self, system: str, prompt: str, model: str) -> str:
+    def complete(self, system: str, prompt: str, model: str, effort: str = "") -> str:
         """Run the command and return the ``result`` of its JSON output."""
-        arguments = self.arguments(system, model)
+        arguments = self.arguments(system, model, effort)
         with tempfile.TemporaryDirectory(prefix="ccp-decisions-") as folder:
             try:
                 finished = subprocess.run(  # noqa: S603  (fixed arguments, no shell)
@@ -220,7 +222,7 @@ class AnthropicProvider:
         self._client: Any = anthropic.Anthropic(timeout=float(timeout_seconds))
         self._errors: tuple[type[BaseException], ...] = (anthropic.APIError,)
 
-    def complete(self, system: str, prompt: str, model: str) -> str:
+    def complete(self, system: str, prompt: str, model: str, effort: str = "") -> str:
         """Stream one message (long answers would hit the HTTP timeout otherwise)."""
         try:
             with self._client.messages.stream(

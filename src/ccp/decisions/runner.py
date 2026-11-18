@@ -196,7 +196,10 @@ def _extract(
 ) -> Extraction:
     try:
         answer = provider.complete(
-            prompts.EXTRACT_SYSTEM, prompts.extract_prompt(text), settings.model
+            prompts.EXTRACT_SYSTEM,
+            prompts.extract_prompt(text),
+            settings.model,
+            settings.effort,
         )
         return parse_extraction(answer, refs, commits)
     except (ProviderError, AnswerError) as error:
@@ -212,6 +215,7 @@ def _review(
             prompts.REVIEW_SYSTEM,
             prompts.review_prompt(text, asked),
             settings.review_model,
+            settings.review_effort,
         )
         return parse_reviews(answer, len(asked))
     except (ProviderError, AnswerError) as error:

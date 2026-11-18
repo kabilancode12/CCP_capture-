@@ -2,6 +2,8 @@
 
 * ``CCP_DECISION_MODEL`` (claude-opus-5-5): the model that writes the decisions.
 * ``CCP_REVIEW_MODEL`` (claude-sonnet-5-5): a different model that reviews them.
+* ``CCP_DECISION_EFFORT`` (low): how hard the writer thinks (low, medium, high, xhigh, max).
+* ``CCP_REVIEW_EFFORT`` (medium): the same for the reviewer.
 * ``CCP_DECISION_TIMEOUT_SECONDS`` (600): the longest wait for one model call.
 * ``CCP_DECISION_MAX_CHARS`` (200000): the largest digest of a chat (sent in parts of 30000).
 """
@@ -19,6 +21,9 @@ DEFAULT_MODEL = "claude-opus-5-5"
 # The reviewer is another model than the writer: it checks the work with different blind spots.
 DEFAULT_REVIEW_MODEL = "claude-sonnet-5-5"
 DEFAULT_TIMEOUT_SECONDS = 600
+DEFAULT_EFFORT = "low"
+DEFAULT_REVIEW_EFFORT = "medium"
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
 DEFAULT_MAX_CHARS = 200_000
 # A digest longer than this is sent in parts, so that every part of a long chat is read in full.
 WINDOW_CHARS = 30_000
@@ -34,6 +39,8 @@ class DecisionSettings:
 
     model: str = DEFAULT_MODEL
     review_model: str = DEFAULT_REVIEW_MODEL
+    effort: str = DEFAULT_EFFORT
+    review_effort: str = DEFAULT_REVIEW_EFFORT
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     max_chars: int = DEFAULT_MAX_CHARS
 
@@ -59,9 +66,22 @@ def load_decision_settings(
         raise SettingsError("Invalid settings:\n- " + "\n- ".join(errors))
     model = values.get("CCP_DECISION_MODEL", "").strip() or DEFAULT_MODEL
     review_model = values.get("CCP_REVIEW_MODEL", "").strip() or DEFAULT_REVIEW_MODEL
+    effort = _effort(values, "CCP_DECISION_EFFORT", DEFAULT_EFFORT)
+    review_effort = _effort(values, "CCP_REVIEW_EFFORT", DEFAULT_REVIEW_EFFORT)
     return DecisionSettings(
-        model=model, review_model=review_model, timeout_seconds=timeout, max_chars=max_chars
+        model=model,
+        review_model=review_model,
+        timeout_seconds=timeout,
+        max_chars=max_chars,
+        effort=effort,
+        review_effort=review_effort,
     )
+
+
+def _effort(values: Mapping[str, str], name: str, default: str) -> str:
+    """A known effort level; anything else falls back to the default."""
+    level = values.get(name, "").strip().lower()
+    return level if level in EFFORTS else default
 
 
 def _whole_number(
