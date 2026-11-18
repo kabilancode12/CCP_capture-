@@ -8,6 +8,7 @@ shadow snapshots made during the turn (human edits before it, each tool's file c
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 from . import store
@@ -140,8 +141,6 @@ def _attach_snapshots(turns: list[dict], events: list[dict], tools: dict[str, di
 
 
 def _secs(stamp: str) -> float:
-    from datetime import datetime
-
     return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
 
 
