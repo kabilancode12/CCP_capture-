@@ -130,7 +130,21 @@ def discover_migrations(directory: Path) -> list[Migration]:
 def _locked(connection: pg8000.dbapi.Connection) -> Iterator[None]:
     """Hold the migration lock; a second runner waits until the first has finished."""
     cursor = connection.cursor()
-    cursor.execute("SELECT pg_advisory_lock(%s)", (LOCK_KEY,))
+    cursor.execute("SELECT pg_try_advisory_lock(%s)", (LOCK_KEY,))
+    got = cursor.fetchone()
+    if not (got and got[0]):
+        # Terminate any orphaned/stale connections from this user holding a stuck transaction or lock
+        cursor.execute("""
+            SELECT pg_terminate_backend(pid)
+              FROM pg_stat_activity
+             WHERE pid <> pg_backend_pid()
+               AND datname = current_database()
+               AND usename = current_user
+               AND (state IN ('idle in transaction', 'idle in transaction (aborted)')
+                    OR query ILIKE '%%advisory_lock%%')
+        """)
+        connection.commit()
+        cursor.execute("SELECT pg_advisory_lock(%s)", (LOCK_KEY,))
     try:
         yield
     finally:
