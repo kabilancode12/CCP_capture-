@@ -44,3 +44,10 @@ def test_the_env_file_is_read_and_the_environment_wins(tmp_path: Path) -> None:
 def test_bad_numbers_are_reported(variable: str, value: str) -> None:
     with pytest.raises(SettingsError, match=variable):
         load_decision_settings({variable: value}, env_file=None)
+
+
+def test_the_writer_thinks_at_low_effort_and_the_reviewer_at_medium() -> None:
+    settings = load_decision_settings({}, env_file=None)
+    assert (settings.effort, settings.review_effort) == ("low", "medium")
+    custom = load_decision_settings({"CCP_DECISION_EFFORT": "HIGH", "CCP_REVIEW_EFFORT": "x"}, None)
+    assert (custom.effort, custom.review_effort) == ("high", "medium")

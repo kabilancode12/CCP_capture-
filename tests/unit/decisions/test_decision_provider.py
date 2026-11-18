@@ -212,3 +212,10 @@ def test_the_command_leaves_out_connectors_skills_and_tools() -> None:
         assert flag in arguments
     assert arguments[arguments.index("--model") + 1] == "model-x"
     assert arguments[arguments.index("--system-prompt") + 1] == "system text"
+
+
+def test_the_effort_level_is_passed_to_the_command_only_when_given() -> None:
+    provider = ClaudeCliProvider(60, command=sys.executable)
+    low = provider.arguments("s", "m", "low")
+    assert low[low.index("--effort") + 1] == "low"
+    assert "--effort" not in provider.arguments("s", "m")
