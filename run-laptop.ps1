@@ -67,9 +67,8 @@ Write-Host "==> 4/6 Applying database migrations..." -ForegroundColor Cyan
 & $Python -m ccp.db migrate
 
 Write-Host "==> 5/6 Updating Claude Code capture hooks in ~/.claude/settings.json..." -ForegroundColor Cyan
-$TokenLine = Get-Content .env | Select-String "^CCP_INGEST_TOKEN=(.+)"
-if ($TokenLine) {
-    $Token = $TokenLine.Matches.Groups[1].Value.Trim()
+$Token = (& $Python -c "from pathlib import Path; from ccp.settings import read_env_file; print(read_env_file(Path('.env')).get('CCP_INGEST_TOKEN',''))").Trim()
+if ($Token) {
     & $Python -m ccp.capture install --api-url "http://127.0.0.1:8000" --token $Token
 }
 & $Python -m ccp.capture watch-service install
