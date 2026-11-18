@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,27 +37,45 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+def project_root(cwd: str) -> Path:
+    """Git top-level of `cwd`, else `cwd` itself."""
+    path = Path(cwd).resolve()
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            path = Path(out.stdout.strip()).resolve()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return path
+
+
 def project_dir(root: Path) -> Path:
     """Folder for the project whose root is `root` (readable name + short hash of the path)."""
     digest = hashlib.sha1(str(root).encode()).hexdigest()[:8]
     return home() / f"{root.name or 'root'}__{digest}"
 
 
-def session_project(session_id: str, root: Path | None) -> Path | None:
-    """Project folder of a session; the first event pins it so a later `cd` does not split it."""
+def session_project(session_id: str, cwd: str) -> tuple[Path, dict]:
+    """Project folder + project.json of a session; the first event pins it (a later `cd` or
+    sub-folder does not split the session). Snapshots are off for the home folder or a drive root.
+    """
     pin = home() / ".sessions" / session_id
     if pin.exists():
-        return Path(pin.read_text(encoding="utf-8").strip())
-    if root is None:
-        return None
+        pdir = Path(pin.read_text(encoding="utf-8").strip())
+        return pdir, json.loads((pdir / "project.json").read_text(encoding="utf-8"))
+    root = project_root(cwd)
     pdir = project_dir(root)
     pin.parent.mkdir(parents=True, exist_ok=True)
     pin.write_text(str(pdir), encoding="utf-8")
     meta = pdir / "project.json"
     if not meta.exists():
-        pdir.mkdir(parents=True, exist_ok=True)
-        write_json(meta, {"root": str(root), "name": root.name, "first_seen": now()})
-    return pdir
+        big = root == Path.home().resolve() or root == Path(root.anchor)
+        write_json(meta, {"root": str(root), "name": root.name, "first_seen": now(),
+                          "snapshots": not big})
+    return pdir, json.loads(meta.read_text(encoding="utf-8"))
 
 
 def session_dir(pdir: Path, session_id: str) -> Path:

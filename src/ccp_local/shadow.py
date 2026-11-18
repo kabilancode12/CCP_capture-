@@ -31,23 +31,6 @@ obj/
 MAX_FILES_LISTED = 200
 
 
-def project_root(cwd: str) -> Path | None:
-    """Git top-level of `cwd`, else `cwd` itself; None for home or filesystem root (too big)."""
-    path = Path(cwd).resolve()
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if out.returncode == 0 and out.stdout.strip():
-            path = Path(out.stdout.strip()).resolve()
-    except (OSError, subprocess.SubprocessError):
-        pass
-    if path == Path.home().resolve() or path == Path(path.anchor):
-        return None
-    return path
-
-
 def _git(env: dict, *args: str, check: bool = True) -> str:
     out = subprocess.run(["git", *args], env=env, capture_output=True, text=True, timeout=60)
     if check and out.returncode != 0:
