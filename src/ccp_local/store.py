@@ -18,6 +18,7 @@ Layout (one folder per project, nothing leaves the machine):
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -59,8 +60,9 @@ def project_dir(root: Path) -> Path:
 
 
 def session_project(session_id: str, cwd: str) -> tuple[Path, dict]:
-    """Project folder + project.json of a session; the first event pins it (a later `cd` or
-    sub-folder does not split the session). Snapshots are off for the home folder or a drive root.
+    """Project folder + project.json of a session, pinned at its first event.
+
+    A later `cd` does not split the session. Snapshots are off for the home folder or a drive root.
     """
     pin = home() / ".sessions" / session_id
     if pin.exists():
@@ -111,6 +113,7 @@ def read_jsonl(path: Path) -> list[dict]:
 
 
 def write_json(path: Path, data: object) -> None:
+    """Write pretty-printed JSON, creating folders."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -127,7 +130,6 @@ def copy_raw(transcript: Path, sdir: Path) -> None:
 
 
 def log_error(message: str) -> None:
-    try:
+    """Note a hook error; never raises."""
+    with contextlib.suppress(OSError):
         append_jsonl(home() / "errors.log", {"time": now(), "error": message})
-    except OSError:
-        pass

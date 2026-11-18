@@ -27,6 +27,7 @@ def _fence(text: str) -> str:
 
 
 def to_markdown(cap: dict) -> str:
+    """Session as Markdown: header, then each turn with prompt, steps and file changes."""
     s = cap["session"]
     out = [f"# {s.get('title') or 'Claude Code session'}", "",
            f"- Session: `{s.get('session_id')}`", f"- Folder: `{s.get('cwd')}`",
@@ -61,6 +62,7 @@ def _pre(text: str) -> str:
 
 
 def to_html(cap: dict) -> str:
+    """Same content as the Markdown, as one self-contained page (light and dark)."""
     s = cap["session"]
     e = html.escape
     body = [f"<h1>{e(s.get('title') or 'Claude Code session')}</h1>",
@@ -104,5 +106,6 @@ summary{{cursor:pointer;margin:6px 0}} .err{{color:#d33}}
 
 
 def write(sdir: Path, cap: dict) -> None:
+    """Write report.md and report.html into the session folder."""
     (sdir / "report.md").write_text(to_markdown(cap), encoding="utf-8")
     (sdir / "report.html").write_text(to_html(cap), encoding="utf-8")

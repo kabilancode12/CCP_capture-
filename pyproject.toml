@@ -90,6 +90,10 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D", "S101", "E501"]              # tests need no docstrings and may use assert
+"tests/unit/test_ccp_local.py" = ["D", "S101", "E501", "S603", "S607"]
+# Local capture runs `git` from PATH on every OS, hashes only for folder names, and stays
+# compatible with older Pythons (no datetime.UTC).
+"src/ccp_local/**" = ["S603", "S607", "S324", "UP017"]
 "src/ccp/dashboards/definitions.py" = ["E501"]  # one SQL question per line is easier to read
 
 [tool.mypy]

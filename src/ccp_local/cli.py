@@ -46,6 +46,7 @@ def _save(path: Path, settings: dict) -> None:
 
 
 def install(args: argparse.Namespace) -> int:
+    """Add the CCP local hooks to settings.json (replacing old CCP hooks, keeping others)."""
     path = _settings_path(args.settings)
     settings = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     hooks = settings.setdefault("hooks", {})
@@ -63,6 +64,7 @@ def install(args: argparse.Namespace) -> int:
 
 
 def uninstall(args: argparse.Namespace) -> int:
+    """Remove the CCP hooks from settings.json."""
     path = _settings_path(args.settings)
     if not path.exists():
         return 0
@@ -74,6 +76,7 @@ def uninstall(args: argparse.Namespace) -> int:
 
 
 def status(_: argparse.Namespace) -> int:
+    """Print captured projects with session and snapshot counts."""
     root = store.home()
     for pdir in sorted(p for p in root.glob("*__*") if p.is_dir()):
         sessions = list((pdir / "sessions").glob("*")) if (pdir / "sessions").exists() else []
@@ -101,6 +104,7 @@ def _session_dirs(session_id: str | None) -> list[Path]:
 
 
 def report_cmd(args: argparse.Namespace) -> int:
+    """Rebuild capture.json and reports from what is already captured."""
     dirs = _session_dirs(args.session)
     for sdir in dirs:
         hook.rebuild(sdir)
@@ -130,6 +134,7 @@ def backfill(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse the command line and run one command."""
     parser = argparse.ArgumentParser(prog="ccp-local", description="Local Claude Code capture")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("hook", help="run as a Claude Code hook (reads the event JSON on stdin)")

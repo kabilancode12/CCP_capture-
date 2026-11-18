@@ -71,7 +71,8 @@ def build(sdir: Path) -> dict:
             session["title"] = entry.get("aiTitle") or entry.get("title") or entry.get("summary")
         if entry.get("sessionId") and not session["session_id"]:
             session["session_id"] = entry["sessionId"]
-        for key, src in (("cwd", "cwd"), ("git_branch", "gitBranch"), ("claude_version", "version")):
+        for key, src in (("cwd", "cwd"), ("git_branch", "gitBranch"),
+                         ("claude_version", "version")):
             if entry.get(src):
                 session[key] = entry[src]
         if entry.get("isCompactSummary"):

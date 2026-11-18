@@ -26,6 +26,7 @@ BUILD_EVENTS = {"Stop", "SubagentStop", "PreCompact", "SessionEnd"}
 
 
 def handle(payload: dict) -> None:
+    """Record one hook event (see the module docstring)."""
     sid = payload.get("session_id")
     if not sid or os.environ.get("CCP_CAPTURE_DISABLED") == "1":
         return

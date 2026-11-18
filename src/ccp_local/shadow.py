@@ -9,6 +9,7 @@ index file and use the project folder only as the work tree. Each snapshot is on
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import time
@@ -86,10 +87,8 @@ class _Lock:
                 time.sleep(0.05)
 
     def __exit__(self, *exc: object) -> None:
-        try:
+        with contextlib.suppress(OSError):
             self.path.unlink()
-        except OSError:
-            pass
 
 
 def snapshot(pdir: Path, root: Path, author: str, title: str, trailers: dict) -> dict | None:
