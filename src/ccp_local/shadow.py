@@ -54,8 +54,10 @@ def _init(gitdir: Path) -> None:
     if (gitdir / "HEAD").exists():
         return
     subprocess.run(["git", "init", "--bare", "-q", str(gitdir)], check=True, timeout=30)
+    git = ["git", "--git-dir", str(gitdir)]
+    subprocess.run([*git, "symbolic-ref", "HEAD", "refs/heads/main"], timeout=10)
     for key, value in (("core.autocrlf", "false"), ("core.quotepath", "off"), ("gc.auto", "0")):
-        subprocess.run(["git", "--git-dir", str(gitdir), "config", key, value], timeout=10)
+        subprocess.run([*git, "config", key, value], timeout=10)
     (gitdir / "info").mkdir(exist_ok=True)
     (gitdir / "info" / "exclude").write_text(EXCLUDES, encoding="utf-8")
 
