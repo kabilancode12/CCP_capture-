@@ -44,7 +44,9 @@ def project_root(cwd: str) -> Path:
     try:
         out = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if out.returncode == 0 and out.stdout.strip():
             path = Path(out.stdout.strip()).resolve()
@@ -75,8 +77,9 @@ def session_project(session_id: str, cwd: str) -> tuple[Path, dict]:
     meta = pdir / "project.json"
     if not meta.exists():
         big = root == Path.home().resolve() or root == Path(root.anchor)
-        write_json(meta, {"root": str(root), "name": root.name, "first_seen": now(),
-                          "snapshots": not big})
+        write_json(
+            meta, {"root": str(root), "name": root.name, "first_seen": now(), "snapshots": not big}
+        )
     return pdir, json.loads(meta.read_text(encoding="utf-8"))
 
 

@@ -14,8 +14,12 @@ from pathlib import Path
 from . import store
 
 RESULT_LIMIT = 20000  # characters of a tool result kept in capture.json (raw/ keeps everything)
-TOKEN_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens",
-              "cache_creation_input_tokens")
+TOKEN_KEYS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
 
 
 def _text(content: object) -> str:
@@ -49,9 +53,14 @@ def _is_prompt(entry: dict) -> bool:
 
 def _new_turn(n: int, entry: dict) -> dict:
     return {
-        "turn": n, "started_at": entry.get("timestamp"), "ended_at": entry.get("timestamp"),
-        "prompt": _text(entry["message"]["content"]), "models": [],
-        "tokens": dict.fromkeys(TOKEN_KEYS, 0), "steps": [], "changes": [],
+        "turn": n,
+        "started_at": entry.get("timestamp"),
+        "ended_at": entry.get("timestamp"),
+        "prompt": _text(entry["message"]["content"]),
+        "models": [],
+        "tokens": dict.fromkeys(TOKEN_KEYS, 0),
+        "steps": [],
+        "changes": [],
     }
 
 
@@ -59,8 +68,14 @@ def build(sdir: Path) -> dict:
     """Build and write `capture.json` for one session folder; return it."""
     entries = store.read_jsonl(sdir / "raw" / "transcript.jsonl")
     events = store.read_jsonl(sdir / "events.jsonl")
-    session: dict = {"session_id": None, "title": None, "cwd": None, "git_branch": None,
-                     "claude_version": None, "compactions": 0}
+    session: dict = {
+        "session_id": None,
+        "title": None,
+        "cwd": None,
+        "git_branch": None,
+        "claude_version": None,
+        "compactions": 0,
+    }
     turns: list[dict] = []
     tools: dict[str, dict] = {}  # tool_use_id -> step, to attach results
     seen_messages: set[str] = set()  # usage is repeated on every block of one API message
@@ -71,8 +86,11 @@ def build(sdir: Path) -> dict:
             session["title"] = entry.get("aiTitle") or entry.get("title") or entry.get("summary")
         if entry.get("sessionId") and not session["session_id"]:
             session["session_id"] = entry["sessionId"]
-        for key, src in (("cwd", "cwd"), ("git_branch", "gitBranch"),
-                         ("claude_version", "version")):
+        for key, src in (
+            ("cwd", "cwd"),
+            ("git_branch", "gitBranch"),
+            ("claude_version", "version"),
+        ):
             if entry.get(src):
                 session[key] = entry[src]
         if entry.get("isCompactSummary"):
@@ -109,14 +127,25 @@ def build(sdir: Path) -> dict:
             elif btype == "text" and block.get("text", "").strip():
                 turn["steps"].append({"kind": "text", "text": block["text"]})
             elif btype == "tool_use":
-                step = {"kind": "tool", "id": block.get("id"), "name": block.get("name"),
-                        "input": block.get("input"), "result": None, "is_error": False}
+                step = {
+                    "kind": "tool",
+                    "id": block.get("id"),
+                    "name": block.get("name"),
+                    "input": block.get("input"),
+                    "result": None,
+                    "is_error": False,
+                }
                 tools[block.get("id")] = step
                 turn["steps"].append(step)
 
     _attach_snapshots(turns, events, tools)
-    capture = {"session": session, "turn_count": len(turns), "turns": turns,
-               "events": len(events), "built_at": store.now()}
+    capture = {
+        "session": session,
+        "turn_count": len(turns),
+        "turns": turns,
+        "events": len(events),
+        "built_at": store.now(),
+    }
     store.write_json(sdir / "capture.json", capture)
     return capture
 
@@ -130,8 +159,7 @@ def _attach_snapshots(turns: list[dict], events: list[dict], tools: dict[str, di
         step = tools.get(event.get("tool_use_id") or "")
         if step is not None:
             step["snapshot"] = snap["commit"][:10]
-        change = {"time": event["time"], "by": event.get("by"), "label": event.get("label"),
-                  **snap}
+        change = {"time": event["time"], "by": event.get("by"), "label": event.get("label"), **snap}
         # the prompt snapshot is taken just before the prompt is written: allow 5 s
         target = None
         for turn in turns:

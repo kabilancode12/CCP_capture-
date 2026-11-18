@@ -11,8 +11,15 @@ from pathlib import Path
 
 from . import hook, store
 
-EVENTS = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SubagentStop",
-          "PreCompact", "SessionEnd"]
+EVENTS = [
+    "SessionStart",
+    "UserPromptSubmit",
+    "PostToolUse",
+    "Stop",
+    "SubagentStop",
+    "PreCompact",
+    "SessionEnd",
+]
 FILE_TOOLS = "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell"
 OURS = ("ccp_local", "ccp.capture")  # our hook, and the old server-upload hook it replaces
 
@@ -26,8 +33,11 @@ def _strip_ours(hooks: dict) -> None:
     for event in list(hooks):
         kept = []
         for group in hooks[event]:
-            rest = [h for h in group.get("hooks", [])
-                    if not any(mark in h.get("command", "") for mark in OURS)]
+            rest = [
+                h
+                for h in group.get("hooks", [])
+                if not any(mark in h.get("command", "") for mark in OURS)
+            ]
             if rest:
                 kept.append({**group, "hooks": rest})
         if kept:
@@ -149,6 +159,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.cmd == "hook":
         return hook.run()
-    handler = {"install": install, "uninstall": uninstall, "status": status,
-               "report": report_cmd, "backfill": backfill}[args.cmd]
+    handler = {
+        "install": install,
+        "uninstall": uninstall,
+        "status": status,
+        "report": report_cmd,
+        "backfill": backfill,
+    }[args.cmd]
     return handler(args)

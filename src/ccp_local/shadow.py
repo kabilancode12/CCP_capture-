@@ -44,9 +44,13 @@ def _env(gitdir: Path, root: Path, author: str) -> dict:
     for key in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE"):
         env.pop(key, None)
     env.update(
-        GIT_DIR=str(gitdir), GIT_WORK_TREE=str(root), GIT_INDEX_FILE=str(gitdir / "ccp-index"),
-        GIT_AUTHOR_NAME=author, GIT_AUTHOR_EMAIL=f"{author}@ccp.local",
-        GIT_COMMITTER_NAME="ccp", GIT_COMMITTER_EMAIL="ccp@ccp.local",
+        GIT_DIR=str(gitdir),
+        GIT_WORK_TREE=str(root),
+        GIT_INDEX_FILE=str(gitdir / "ccp-index"),
+        GIT_AUTHOR_NAME=author,
+        GIT_AUTHOR_EMAIL=f"{author}@ccp.local",
+        GIT_COMMITTER_NAME="ccp",
+        GIT_COMMITTER_EMAIL="ccp@ccp.local",
     )
     return env
 

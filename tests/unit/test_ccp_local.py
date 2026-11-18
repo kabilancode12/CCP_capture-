@@ -13,14 +13,26 @@ SID = "11112222-3333-4444-5555-666677778888"
 
 
 def _hook(env: dict, payload: dict) -> None:
-    out = subprocess.run([sys.executable, str(PACKAGE), "hook"], input=json.dumps(payload),
-                         env=env, capture_output=True, text=True, check=True)
+    out = subprocess.run(
+        [sys.executable, str(PACKAGE), "hook"],
+        input=json.dumps(payload),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     assert out.stdout == ""  # stdout of UserPromptSubmit would go into Claude's context
 
 
 def _line(kind: str, ts: str, content: object, **extra: object) -> str:
-    entry = {"type": kind, "timestamp": ts, "sessionId": SID, "cwd": "x", "uuid": ts,
-             "message": {"role": kind, "content": content, **extra}}
+    entry = {
+        "type": kind,
+        "timestamp": ts,
+        "sessionId": SID,
+        "cwd": "x",
+        "uuid": ts,
+        "message": {"role": kind, "content": content, **extra},
+    }
     return json.dumps(entry)
 
 
@@ -37,24 +49,60 @@ def test_session_is_captured_turn_by_turn(tmp_path, monkeypatch):
     (repo / "a.txt").write_text("one\nhuman edit\n")
     _hook(env, {**base, "hook_event_name": "UserPromptSubmit", "prompt": "add b"})
     (repo / "b.txt").write_text("by claude\n")
-    _hook(env, {**base, "hook_event_name": "PostToolUse", "tool_name": "Write",
-                "tool_use_id": "toolu_1"})
-    _hook(env, {**base, "hook_event_name": "PostToolUse", "tool_name": "Bash",
-                "tool_use_id": "toolu_2"})  # nothing changed -> no snapshot
+    _hook(
+        env,
+        {**base, "hook_event_name": "PostToolUse", "tool_name": "Write", "tool_use_id": "toolu_1"},
+    )
+    _hook(
+        env,
+        {**base, "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_use_id": "toolu_2"},
+    )  # nothing changed -> no snapshot
     usage = {"input_tokens": 10, "output_tokens": 5}
-    transcript.write_text("\n".join([
-        _line("user", store.now(), "add b"),
-        _line("assistant", store.now(), [{"type": "thinking", "thinking": "plan"},
-                                         {"type": "tool_use", "id": "toolu_1", "name": "Write",
-                                          "input": {"file_path": "b.txt"}}],
-              id="m1", model="claude-opus-5-5", usage=usage),
-        _line("assistant", store.now(), [{"type": "text", "text": "x"}],  # same API message
-              id="m1", model="claude-opus-5-5", usage=usage),
-        _line("user", store.now(), [{"type": "tool_result", "tool_use_id": "toolu_1",
-                                     "content": "ok"}]),
-        _line("assistant", store.now(), [{"type": "text", "text": "Done."}],
-              id="m2", model="claude-opus-5-5", usage=usage),
-    ]) + "\n")
+    transcript.write_text(
+        "\n".join(
+            [
+                _line("user", store.now(), "add b"),
+                _line(
+                    "assistant",
+                    store.now(),
+                    [
+                        {"type": "thinking", "thinking": "plan"},
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_1",
+                            "name": "Write",
+                            "input": {"file_path": "b.txt"},
+                        },
+                    ],
+                    id="m1",
+                    model="claude-opus-5-5",
+                    usage=usage,
+                ),
+                _line(
+                    "assistant",
+                    store.now(),
+                    [{"type": "text", "text": "x"}],  # same API message
+                    id="m1",
+                    model="claude-opus-5-5",
+                    usage=usage,
+                ),
+                _line(
+                    "user",
+                    store.now(),
+                    [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"}],
+                ),
+                _line(
+                    "assistant",
+                    store.now(),
+                    [{"type": "text", "text": "Done."}],
+                    id="m2",
+                    model="claude-opus-5-5",
+                    usage=usage,
+                ),
+            ]
+        )
+        + "\n"
+    )
     _hook(env, {**base, "hook_event_name": "Stop"})
 
     pdir = next(home.glob("proj__*"))
@@ -72,19 +120,40 @@ def test_session_is_captured_turn_by_turn(tmp_path, monkeypatch):
     assert "Bash" not in changes
     assert "## Turn 1" in (sdir / "report.md").read_text()
     assert "<h2>Turn 1" in (sdir / "report.html").read_text()
-    log = subprocess.run(["git", "--git-dir", str(pdir / "shadow.git"), "log", "--format=%an %s"],
-                         capture_output=True, text=True, check=True).stdout.split("\n")
-    assert log[:3] == ["claude [claude] Write", "human [human] before prompt",
-                       "human [human] before session"]
+    log = subprocess.run(
+        ["git", "--git-dir", str(pdir / "shadow.git"), "log", "--format=%an %s"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split("\n")
+    assert log[:3] == [
+        "claude [claude] Write",
+        "human [human] before prompt",
+        "human [human] before session",
+    ]
     assert not (home / "errors.log").exists()
     assert not (repo / ".git").exists()  # the project itself is never touched
 
 
 def test_install_replaces_old_hooks_and_keeps_others(tmp_path):
     settings = tmp_path / "settings.json"
-    settings.write_text(json.dumps({"model": "opus", "hooks": {
-        "Stop": [{"hooks": [{"type": "command", "command": "python -m ccp.capture hook"},
-                            {"type": "command", "command": "notify-send done"}]}]}}))
+    settings.write_text(
+        json.dumps(
+            {
+                "model": "opus",
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {"type": "command", "command": "python -m ccp.capture hook"},
+                                {"type": "command", "command": "notify-send done"},
+                            ]
+                        }
+                    ]
+                },
+            }
+        )
+    )
     cli.main(["install", "--settings", str(settings)])
     data = json.loads(settings.read_text())
     commands = [h["command"] for g in data["hooks"]["Stop"] for h in g["hooks"]]

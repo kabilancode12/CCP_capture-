@@ -34,16 +34,26 @@ def handle(payload: dict) -> None:
     pdir, project = store.session_project(sid, payload.get("cwd") or os.getcwd())
     sdir = store.session_dir(pdir, sid)
     tool = payload.get("tool_name")
-    record = {"time": store.now(), "event": event, "tool": tool,
-              "tool_use_id": payload.get("tool_use_id"), "by": None, "label": None,
-              "snapshot": None}
+    record = {
+        "time": store.now(),
+        "event": event,
+        "tool": tool,
+        "tool_use_id": payload.get("tool_use_id"),
+        "by": None,
+        "label": None,
+        "snapshot": None,
+    }
 
     if event in SNAPSHOT_EVENTS and project.get("snapshots"):
         by, label = SNAPSHOT_EVENTS[event]
         label = tool if event == "PostToolUse" else label
-        trailers = {"Session": sid, "Event": event, "Tool": tool,
-                    "Tool-Use-Id": payload.get("tool_use_id"),
-                    "Prompt": (payload.get("prompt") or "")[:300].replace("\n", " ")}
+        trailers = {
+            "Session": sid,
+            "Event": event,
+            "Tool": tool,
+            "Tool-Use-Id": payload.get("tool_use_id"),
+            "Prompt": (payload.get("prompt") or "")[:300].replace("\n", " "),
+        }
         try:
             snap = shadow.snapshot(pdir, Path(project["root"]), by, f"[{by}] {label}", trailers)
         except Exception as exc:  # a failed snapshot must not lose the event itself
@@ -53,10 +63,17 @@ def handle(payload: dict) -> None:
             record.update(by=by, label=label, snapshot=snap)
 
     store.append_jsonl(sdir / "events.jsonl", {**record, "payload": payload})
-    store.append_jsonl(pdir / "activity.jsonl", {
-        "time": record["time"], "session": sid, "event": event, "tool": tool,
-        "commit": (record["snapshot"] or {}).get("commit"),
-        "files": (record["snapshot"] or {}).get("file_count", 0)})
+    store.append_jsonl(
+        pdir / "activity.jsonl",
+        {
+            "time": record["time"],
+            "session": sid,
+            "event": event,
+            "tool": tool,
+            "commit": (record["snapshot"] or {}).get("commit"),
+            "files": (record["snapshot"] or {}).get("file_count", 0),
+        },
+    )
 
     if event in BUILD_EVENTS and payload.get("transcript_path"):
         rebuild(sdir, Path(payload["transcript_path"]))
