@@ -65,9 +65,11 @@ ccp-explorer = "ccp.explorer.cli:main"
 ccp-approaches = "ccp.approaches.cli:main"
 # MCP server: Claude asks "was this tried before?" (claude mcp add ccp-approaches -- ccp-mcp).
 ccp-mcp = "ccp.mcp.server:main"
+# Local-only capture (Phase 1): `ccp-local install`, `status`, `report`, `backfill`.
+ccp-local = "ccp_local.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ccp"]
+packages = ["src/ccp", "src/ccp_local"]
 
 # ---------------------------------------------------------------- tooling
 
