@@ -1,0 +1,114 @@
+"""Where captures live on disk, and small file helpers.
+
+Layout (one folder per project, nothing leaves the machine):
+
+    ~/.ccp/captures/
+      <project>__<hash8>/
+        project.json            path of the project and when it was first seen
+        activity.jsonl          one line per hook event, all sessions of the project
+        shadow.git/             separate local Git repo: a snapshot after every change
+        sessions/<date>__<id8>/
+          events.jsonl          every hook payload, verbatim, plus the snapshot it made
+          raw/                  byte-exact copy of Claude Code's transcript + sub-agent files
+          capture.json          structured turn-by-turn record (built from raw/ + events)
+          report.md, report.html
+      .sessions/<session_id>    which project folder a session belongs to
+      errors.log                hook errors (a hook never breaks Claude Code)
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def home() -> Path:
+    """Root folder of all captures (override with CCP_LOCAL_HOME)."""
+    return Path(os.environ.get("CCP_LOCAL_HOME") or Path.home() / ".ccp" / "captures")
+
+
+def now() -> str:
+    """UTC time in the same format Claude Code writes in transcripts."""
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def project_dir(root: Path) -> Path:
+    """Folder for the project whose root is `root` (readable name + short hash of the path)."""
+    digest = hashlib.sha1(str(root).encode()).hexdigest()[:8]
+    return home() / f"{root.name or 'root'}__{digest}"
+
+
+def session_project(session_id: str, root: Path | None) -> Path | None:
+    """Project folder of a session; the first event pins it so a later `cd` does not split it."""
+    pin = home() / ".sessions" / session_id
+    if pin.exists():
+        return Path(pin.read_text(encoding="utf-8").strip())
+    if root is None:
+        return None
+    pdir = project_dir(root)
+    pin.parent.mkdir(parents=True, exist_ok=True)
+    pin.write_text(str(pdir), encoding="utf-8")
+    meta = pdir / "project.json"
+    if not meta.exists():
+        pdir.mkdir(parents=True, exist_ok=True)
+        write_json(meta, {"root": str(root), "name": root.name, "first_seen": now()})
+    return pdir
+
+
+def session_dir(pdir: Path, session_id: str) -> Path:
+    """Folder of one session: `<first date>__<first 8 chars of the id>`."""
+    sessions = pdir / "sessions"
+    found = sorted(sessions.glob(f"*__{session_id[:8]}")) if sessions.exists() else []
+    if found:
+        return found[0]
+    sdir = sessions / f"{now()[:10]}__{session_id[:8]}"
+    sdir.mkdir(parents=True, exist_ok=True)
+    return sdir
+
+
+def append_jsonl(path: Path, record: dict) -> None:
+    """Append one JSON line (one short write, safe enough for concurrent hooks)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def read_jsonl(path: Path) -> list[dict]:
+    """All JSON lines of a file; broken lines are skipped."""
+    if not path.exists():
+        return []
+    out = []
+    with path.open(encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                continue
+    return out
+
+
+def write_json(path: Path, data: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def copy_raw(transcript: Path, sdir: Path) -> None:
+    """Copy the transcript and its sibling folder (sub-agents, large tool results) byte-exact."""
+    raw = sdir / "raw"
+    raw.mkdir(parents=True, exist_ok=True)
+    if transcript.is_file():
+        shutil.copy2(transcript, raw / "transcript.jsonl")
+    extra = transcript.with_suffix("")
+    if extra.is_dir():
+        shutil.copytree(extra, raw / extra.name, dirs_exist_ok=True)
+
+
+def log_error(message: str) -> None:
+    try:
+        append_jsonl(home() / "errors.log", {"time": now(), "error": message})
+    except OSError:
+        pass
