@@ -1,6 +1,7 @@
 """End-to-end test of the local capture: real hook process, real Git, fake transcript."""
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -42,7 +43,7 @@ def test_session_is_captured_turn_by_turn(tmp_path, monkeypatch):
     (repo / "a.txt").write_text("one\n")
     monkeypatch.setenv("CCP_LOCAL_HOME", str(home))
     monkeypatch.setenv("CCP_LOCAL_SYNC", "1")
-    env = {**__import__("os").environ, "CCP_LOCAL_HOME": str(home)}
+    env = {**os.environ, "CCP_LOCAL_HOME": str(home)}
     transcript = tmp_path / f"{SID}.jsonl"
     base = {"session_id": SID, "cwd": str(repo), "transcript_path": str(transcript)}
 
